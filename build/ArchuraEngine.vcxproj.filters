@@ -1,0 +1,279 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Application.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\AudioSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ConsoleCommand.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ConsoleInterface.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\DeveloperConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Engine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ImGuiLayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Logger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ProjectSerializer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ResourceManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\memory\PoolAllocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\memory\StackAllocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\threading\JobSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Component.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Entity.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\Editor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\CommandRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\DevConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSConsoleCommands.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ParticleSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\PauseMenu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\PhysicsSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Projectile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ProjectileSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\RenderSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ScriptSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Weapon.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\input\Input.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\network\NetworkManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Animation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\HUDRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Mesh.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Shader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Skybox.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Texture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Application.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\AudioSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ConsoleCommand.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ConsoleInterface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\DeveloperConsole.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Engine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ImGuiLayer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Logger.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ObjectPool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ProjectSerializer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\ResourceManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\Window.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\memory\Allocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\memory\PoolAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\memory\StackAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\threading\JobSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Component.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Entity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\System.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\Editor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Animator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\AudioSource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\CommandRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\DevConsole.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSConsoleCommands.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSController.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Lifetime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Particle.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ParticleSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\PauseMenu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\PhysicsSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Projectile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ProjectileSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\RenderSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\ScriptSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\SurfaceProperty.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Weapon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\input\Input.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\network\NetworkManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Animation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Camera.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\HUDRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Mesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Renderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Shader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Skybox.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\rendering\Texture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{3FEE756F-662D-3A85-9F50-4C4AFEA0CA41}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{0B51FDF8-F270-3D4D-BE67-89BA08BE3AC5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
