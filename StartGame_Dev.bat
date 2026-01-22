@@ -26,13 +26,16 @@ if %ERRORLEVEL% NEQ 0 (
 REM Launch the game
 echo.
 echo [3/3] Launching Archura Engine...
-if exist "build\bin\Release\ArchuraEngine.exe" (
-    cd build\bin\Release
-    ArchuraEngine.exe --console
-) else if exist "build\bin\Release\Release\ArchuraEngine.exe" (
+if exist "build\bin\Release\Release\ArchuraEngine.exe" (
     cd build\bin\Release\Release
+    mkdir logs 2>nul
     ArchuraEngine.exe --console
+    echo Exit Code: %ERRORLEVEL%
+    pause
 ) else (
     echo [ERROR] Executable not found! Build may have failed.
     pause
 )
+
+echo for bug fixes open a ticket from github repo!
+echo do not close this window 

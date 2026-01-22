@@ -197,7 +197,7 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
     // Eger ziplama basarili olursa, m_IsGrounded false olur ve surtunme uygulanmaz.
     // Boylece hiz korunur.
     
-    if (input->IsKeyDown(m_Bindings.jump) || input->IsMouseButtonDown(SDL_BUTTON_RIGHT)) { // Sag tik da zipla olsun kolaylik icin
+    if (input->IsKeyDown(m_Bindings.jump)) {
         if (m_IsGrounded) {
              m_Velocity.y = sqrt(m_JumpHeight * 2.0f * -m_Gravity); 
              m_IsGrounded = false;

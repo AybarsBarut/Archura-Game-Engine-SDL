@@ -138,9 +138,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # Linking
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    OpenGL::GL
     SDL2
-    SDL2main
     glad
     imgui
     ufbx

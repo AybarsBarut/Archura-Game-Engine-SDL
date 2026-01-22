@@ -148,7 +148,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;lib\Debug\glad.lib;lib\Debug\imgui.lib;lib\Debug\ufbx.lib;ws2_32.lib;winmm.lib;opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;lib\Debug\glad.lib;lib\Debug\imgui.lib;lib\Debug\ufbx.lib;ws2_32.lib;winmm.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;opengl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -233,7 +233,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;lib\Release\glad.lib;lib\Release\imgui.lib;lib\Release\ufbx.lib;ws2_32.lib;winmm.lib;opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;lib\Release\glad.lib;lib\Release\imgui.lib;lib\Release\ufbx.lib;ws2_32.lib;winmm.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;opengl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -316,7 +316,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;lib\MinSizeRel\glad.lib;lib\MinSizeRel\imgui.lib;lib\MinSizeRel\ufbx.lib;ws2_32.lib;winmm.lib;opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;lib\MinSizeRel\glad.lib;lib\MinSizeRel\imgui.lib;lib\MinSizeRel\ufbx.lib;ws2_32.lib;winmm.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;opengl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -397,7 +397,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;lib\RelWithDebInfo\glad.lib;lib\RelWithDebInfo\imgui.lib;lib\RelWithDebInfo\ufbx.lib;ws2_32.lib;winmm.lib;opengl32.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;lib\RelWithDebInfo\glad.lib;lib\RelWithDebInfo\imgui.lib;lib\RelWithDebInfo\ufbx.lib;ws2_32.lib;winmm.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2.lib;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\external\SDL2\lib\x64\SDL2main.lib;opengl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>

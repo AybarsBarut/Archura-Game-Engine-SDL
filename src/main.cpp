@@ -1,7 +1,9 @@
+#define SDL_MAIN_HANDLED
 #include "core/Application.h"
-#include "network/NetworkManager.h"
 #include <iostream>
 #include <cstdio>
+#include <windows.h>
+#include <memory> 
 
 // Harici GPU Seçimi (NVIDIA / AMD)
 extern "C" {
@@ -10,23 +12,25 @@ extern "C" {
 }
 
 int main(int argc, char** argv) {
-    // Check for console argument
-    bool showConsole = false;
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--console") == 0 || strcmp(argv[i], "-console") == 0) {
-            showConsole = true;
-            break;
-        }
-    }
+    // Basic console if needed, handled by Subsystem:Console or parent process
+    
+    // Log relative path helper
+    const char* logPath = "logs/DEBUG_MAIN.txt";
+    FILE* f = fopen(logPath, "w");
+    if (f) { fprintf(f, "Main Alive\n"); fclose(f); }
 
-    if (showConsole) {
-        AllocConsole();
-        freopen("CONOUT$", "w", stdout);
-        freopen("CONOUT$", "w", stderr);
-        std::cout << "Debug Console Allocated\n";
+    try {
+        auto app = std::make_unique<Archura::Application>();
+        app->Run();
+    } catch (const std::exception& e) {
+        if(f = fopen(logPath, "a")) { fprintf(f, "EXCEPTION: %s\n", e.what()); fclose(f); }
+        std::cerr << "EXCEPTION: " << e.what() << std::endl;
+        return -1;
+    } catch (...) {
+        if(f = fopen(logPath, "a")) { fprintf(f, "UNKNOWN EXCEPTION\n"); fclose(f); }
+        std::cerr << "UNKNOWN EXCEPTION" << std::endl;
+        return -1;
     }
     
-    auto app = std::make_unique<Archura::Application>();
-    app->Run();
     return 0;
 }

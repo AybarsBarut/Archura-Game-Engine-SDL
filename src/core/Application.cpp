@@ -71,18 +71,21 @@ bool Application::Init() {
         return false;
     }
 
-    // ❗ Window Engine tarafından sahipleniliyor
+    FILE* f = fopen("logs/startup_log.txt", "a");
+    if(f) { fprintf(f, "Engine Initialized. Initializing Subsystems...\n"); fclose(f); }
+
     m_Window = Engine::Get().GetWindow();
 
-
-
+    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing AudioSystem...\n"); fclose(f); }
     AudioSystem::Get().Init();
+    
+    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing NetworkManager...\n"); fclose(f); }
     NetworkManager::Get().Init();
+    
+    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing DevConsole...\n"); fclose(f); }
     DevConsole::Get().Init();
 
-
-
-    // Register Commands
+    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Registering Commands...\n"); fclose(f); }
     CommandRegistry::Get().RegisterCommand(
         "fps_limit", [](const std::vector<std::string>& args) {
             if (!args.empty()) {
@@ -163,54 +166,54 @@ bool Application::Init() {
 }
 
 void Application::Run() {
-    FILE* f = fopen("startup_log.txt", "w"); if(f) { fprintf(f, "Application::Run Started\n"); fclose(f); }
+    const char* logPath = "C:/Users/4rchura/Documents/code_snippets/Archura-Game-Engine-SDL/logs/startup_log.txt";
+    FILE* f = fopen(logPath, "w"); 
+    if(f) { fprintf(f, "Application::Run Started\n"); fclose(f); }
+    else { fprintf(stderr, "Failed to open %s\n", logPath); }
+    
+    printf("DEBUG: Application::Run invoked\n");
+
     if (!Init()) {
-        f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "Application::Init Failed\n"); fclose(f); }
+        fprintf(stderr, "Application::Init Failed\n");
         return;
     }
-    f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "Application::Init Success\n"); fclose(f); }
+    printf("DEBUG: Application::Init Success\n");
 
     m_Scene = std::make_unique<Scene>("Demo Scene");
     Camera camera(glm::vec3(0.0f, 5.0f, 10.0f));
-
-
+    
+    printf("DEBUG: Scene Created\n");
 
     m_FPSController = std::make_unique<FPSController>(&camera);
-
-
+    
+    printf("DEBUG: FPSController Created\n");
 
     RenderSystem renderSystem(&camera);
     renderSystem.Init(m_Scene.get());
-
-
+    
+    printf("DEBUG: RenderSystem Initialized\n");
 
     Skybox skybox;
     skybox.Init();
 
-
+    printf("DEBUG: Skybox Initialized\n");
 
     HUDRenderer hudRenderer;
     hudRenderer.Init();
-
-
+    
+    printf("DEBUG: HUDRenderer Initialized\n");
 
     Editor editor;
     editor.Init(m_Window); 
     editor.SetEnabled(true);
-
-
+    
+    printf("DEBUG: Editor Initialized\n");
 
     Entity* player = m_Scene->CreateEntity("Player");
-
-
-
     auto* weapon = player->AddComponent<Weapon>();
-
-
-
     weapon->InitInventory();
 
-
+    printf("DEBUG: Player & Weapon Initialized\n");
 
     auto* playerHealth = player->AddComponent<Health>();
     playerHealth->max = 100.0f;
@@ -218,6 +221,8 @@ void Application::Run() {
 
     PhysicsSystem physicsSystem;
     physicsSystem.Init(m_Scene.get());
+    
+    printf("DEBUG: PhysicsSystem Initialized\n");
 
     ScriptSystem scriptSystem;
     scriptSystem.Init(m_Scene.get());
@@ -227,6 +232,8 @@ void Application::Run() {
 
     ProjectileSystem projectileSystem;
     projectileSystem.Init(m_Scene.get());
+
+    printf("DEBUG: All Systems Initialized. Entering Loop.\n");
 
     // --- SETUP ROBUST MAP (V2) ---
     // 1. Sun
@@ -306,94 +313,71 @@ void Application::Run() {
 
 
 
-    while (!window->ShouldClose() && m_Running) {
+    std::cout << "DEBUG: Window ShouldClose: " << window->ShouldClose() << ", Running: " << m_Running << std::endl;
 
-
-        float time = (float)SDL_GetTicks() / 1000.0f;
-        float deltaTime = time - (float)m_LastFrameTime;
-        m_LastFrameTime = time;
-
-        // 1. Poll Events
-        input->Update(); // Prepare for new frame (clear deltas)
-
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-             ImGui_ImplSDL2_ProcessEvent(&event);
-             input->OnEvent(event);
-             
-             if (event.type == SDL_QUIT) {
-                 window->SetShouldClose(true);
-             }
-             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
-                 window->SetShouldClose(true);
-             }
-        }
-
-        // Toggle Dev Mode with TAB (SDL_SCANCODE_TAB = 43)
-        if (input->IsKeyJustPressed(SDL_SCANCODE_TAB)) {
-             SetDevMode(!m_DevModeActive);
-             std::cout << "[INFO] DevMode toggled: " << (m_DevModeActive ? "ON" : "OFF") << std::endl;
-        }
-
-        // Toggle Pause with ESC (SDL_SCANCODE_ESCAPE = 41)
-        if (input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) {
-            m_IsPaused = !m_IsPaused;
-            input->SetCursorMode(m_IsPaused ? 0 : 2); // 0: Normal, 2: Locked
-        }
-
-        // Toggle Console with grave accent (~ / `) (SDL_SCANCODE_GRAVE = 53)
-        if (input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) {
-            DevConsole::Get().Toggle();
-        }
-
-        // 2. Game Logic
-        if (!m_IsPaused) {
-            // FPSController Update
-            m_FPSController->Update(input, m_Scene.get(), deltaTime, &projectileSystem);
+    try {
+        while (!window->ShouldClose() && m_Running) {
+            // std::cout << "Loop Tik" << std::endl; // Too spammy, maybe once
             
-            projectileSystem.Update(deltaTime);
-            physicsSystem.Update(deltaTime);
-            scriptSystem.Update(deltaTime);
-            particleSystem.Update(deltaTime);
-            AudioSystem::Get().Update(m_Scene.get(), &camera);
+            float time = (float)SDL_GetTicks() / 1000.0f;
+            float deltaTime = time - (float)m_LastFrameTime;
+            m_LastFrameTime = time;
+
+            // 1. Poll Events
+            input->Update(); 
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                 ImGui_ImplSDL2_ProcessEvent(&event);
+                 input->OnEvent(event);
+                 if (event.type == SDL_QUIT) window->SetShouldClose(true);
+                 if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) window->SetShouldClose(true);
+            }
+
+            // [Input Handling Code...]
+            if (input->IsKeyJustPressed(SDL_SCANCODE_TAB)) { SetDevMode(!m_DevModeActive); }
+            if (input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) { m_IsPaused = !m_IsPaused; input->SetCursorMode(m_IsPaused ? 0 : 2); }
+            if (input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) { DevConsole::Get().Toggle(); }
+
+            // 2. Game Logic
+            if (!m_IsPaused) {
+                m_FPSController->Update(input, m_Scene.get(), deltaTime, &projectileSystem);
+                projectileSystem.Update(deltaTime);
+                physicsSystem.Update(deltaTime);
+                scriptSystem.Update(deltaTime);
+                particleSystem.Update(deltaTime);
+                AudioSystem::Get().Update(m_Scene.get(), &camera);
+            }
+
+            // 3. Rendering
+            renderer->BeginFrame(); 
+            m_ImGuiLayer->BeginFrame(); 
+
+            skybox.Draw(camera, window->GetAspectRatio()); 
+            renderSystem.Update(deltaTime);
+            
+            if (m_DevModeActive) {
+                editor.BeginDockSpace();
+                editor.DrawMenuBar(m_Scene.get());
+                editor.DrawEditorUI(m_Scene.get());
+                editor.DrawOverlay(m_Scene.get(), &camera);
+            }
+            
+            DevConsole::Get().Render();
+            pauseMenu.Render(m_IsPaused, *m_FPSController, *window);
+
+            m_ImGuiLayer->EndFrame(); 
+            renderer->EndFrame(); 
+            
+            window->Update(); 
+            input->EndFrame(); 
         }
-
-        // 3. Rendering
-        renderer->BeginFrame(); // Clear Screen
-        m_ImGuiLayer->BeginFrame(); // Starts ImGui Frame
-
-        // Render 3D Scene
-        // Render 3D Scene
-        // Reverted to pre-optimization order for stability
-        skybox.Draw(camera, window->GetAspectRatio()); 
-        renderSystem.Update(deltaTime);
-        
-        // static int frameLog = 0; if (frameLog++ < 10) std::cout << "Frame " << frameLog << " Complete" << std::endl;
-        
-        // Render UI (ImGui)
-        if (m_DevModeActive) {
-            editor.BeginDockSpace();
-        if (m_DevModeActive) {
-            editor.BeginDockSpace();
-            editor.DrawMenuBar(m_Scene.get());
-            editor.DrawEditorUI(m_Scene.get());
-            editor.DrawOverlay(m_Scene.get(), &camera);
-        }
-        }
-        
-        DevConsole::Get().Render();
-        
-        // Pass dependencies to PauseMenu
-        pauseMenu.Render(m_IsPaused, *m_FPSController, *window);
-
-        m_ImGuiLayer->EndFrame(); // Render ImGui Draw Data
-        renderer->EndFrame(); // Finalize Frame
-        
-        window->Update(); // Swap Buffers
-        input->EndFrame(); // Update Previous Key State
-
-
+        std::cout << "DEBUG: Exited Loop. ShouldClose: " << window->ShouldClose() << ", Running: " << m_Running << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Unknown Exception" << std::endl;
     }
+    std::cout << "DEBUG: Exiting Application::Run" << std::endl;
 }
 
 } // namespace Archura

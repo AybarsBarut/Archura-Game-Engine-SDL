@@ -18,6 +18,7 @@ mkdir "%DIST_DIR%"
 
 echo Copying binary...
 copy "%BUILD_DIR%\ArchuraEngine.exe" "%DIST_DIR%\"
+if exist "%BUILD_DIR%\SDL2.dll" copy "%BUILD_DIR%\SDL2.dll" "%DIST_DIR%\"
 if exist "%BUILD_DIR%\imgui.ini" copy "%BUILD_DIR%\imgui.ini" "%DIST_DIR%\"
 
 echo Copying assets...

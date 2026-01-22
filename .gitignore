@@ -1,0 +1,8 @@
+logs/
+build/
+bin/
+*.user
+*.opendb
+.vs/
+.vscode/
+*.log
