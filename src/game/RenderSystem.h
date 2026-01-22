@@ -4,6 +4,7 @@
 #include "../rendering/Camera.h"
 #include "../rendering/Shader.h"
 #include <memory>
+#include "../rendering/Skybox.h"
 
 namespace Archura {
 
@@ -40,6 +41,8 @@ private:
     const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
     std::unique_ptr<Shader> m_DepthShader;
     glm::mat4 m_LightSpaceMatrix;
+
+    std::unique_ptr<class Skybox> m_Skybox;
 };
 
 } // namespace Archura

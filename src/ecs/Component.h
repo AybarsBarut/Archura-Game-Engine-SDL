@@ -104,4 +104,16 @@ struct LightComponent : public Component {
     float range = 10.0f; // Sadece Point light icin
 };
 
+/**
+ * @brief Skybox component - Skybox textures
+ */
+struct SkyboxComponent : public Component {
+    std::vector<std::string> facePaths;
+    bool shouldReload = false;
+
+    SkyboxComponent() {
+        facePaths.resize(6);
+    }
+};
+
 } // namespace Archura

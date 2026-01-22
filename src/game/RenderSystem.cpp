@@ -38,6 +38,9 @@ void RenderSystem::Init(Scene* scene) {
     // Debug Mesh (Cube)
     m_DebugMesh = Mesh::CreateCube(1.0f);
     
+    m_Skybox = std::make_unique<Skybox>();
+    m_Skybox->Init();
+
     // std::cout << "RenderSystem initialized." << std::endl;
 }
 
@@ -298,6 +301,20 @@ void RenderSystem::Update(float deltaTime) {
     // Reset Viewport
     glViewport(0, 0, window->GetWidth(), window->GetHeight());
     
+    // 4. Draw Skybox first (optimized via Depth Funcl inside Skybox::Draw)
+    // Find Skybox Component
+    for (const auto& entityPtr : m_Scene->GetEntities()) {
+        auto* skyComp = entityPtr->GetComponent<SkyboxComponent>();
+        if (skyComp) {
+            if (skyComp->shouldReload) {
+                m_Skybox->LoadCubemap(skyComp->facePaths);
+                skyComp->shouldReload = false;
+            }
+             m_Skybox->Draw(*m_Camera, Engine::Get().GetWindow()->GetAspectRatio());
+             break; // Only one skybox
+        }
+    }
+
     for (const auto& batch : batches) {
         if (batch.instanceMatrices.empty()) continue;
         

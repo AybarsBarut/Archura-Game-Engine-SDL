@@ -193,8 +193,18 @@ void Application::Run() {
     
     printf("DEBUG: RenderSystem Initialized\n");
 
-    Skybox skybox;
-    skybox.Init();
+    // 4. Skybox Entity
+    Entity* skyboxEntity = m_Scene->CreateEntity("Skybox");
+    auto* skyComp = skyboxEntity->AddComponent<SkyboxComponent>();
+    skyComp->facePaths = {
+        "assets/skybox/right.jpg",
+        "assets/skybox/left.jpg",
+        "assets/skybox/top.jpg",
+        "assets/skybox/bottom.jpg",
+        "assets/skybox/front.jpg",
+        "assets/skybox/back.jpg"
+    };
+    skyComp->shouldReload = true;
 
     printf("DEBUG: Skybox Initialized\n");
 
@@ -352,7 +362,7 @@ void Application::Run() {
             renderer->BeginFrame(); 
             m_ImGuiLayer->BeginFrame(); 
 
-            skybox.Draw(camera, window->GetAspectRatio()); 
+ 
             renderSystem.Update(deltaTime);
             
             if (m_DevModeActive) {

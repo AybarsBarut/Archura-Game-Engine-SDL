@@ -3,7 +3,9 @@
 #include <vector>
 #include <iostream>
 
+#include <filesystem>
 namespace Archura {
+#include <stb_image.h>
 
 Skybox::Skybox() {}
 
@@ -14,7 +16,7 @@ Skybox::~Skybox() {
 
 void Skybox::Init() {
     float skyboxVertices[] = {
-        // pozisyonlar          
+        // positions          
         -1.0f,  1.0f, -1.0f,
         -1.0f, -1.0f, -1.0f,
          1.0f, -1.0f, -1.0f,
@@ -87,25 +89,11 @@ void Skybox::Init() {
 
         in vec3 TexCoords;
 
-        void main()
-        {
-            vec3 dir = normalize(TexCoords);
-            
-            // Basit gradyan gokyuzu
-            vec3 topColor = vec3(0.2, 0.5, 0.9); // Gokyuzu mavisi
-            vec3 bottomColor = vec3(0.8, 0.9, 1.0); // Ufuk beyazi/mavisi
-            
-            float t = 0.5 * (dir.y + 1.0);
-            t = clamp(t, 0.0, 1.0);
-            
-            // Ustte daha yogun mavi
-            vec3 color = mix(bottomColor, topColor, max(dir.y, 0.0));
-            
-            if (dir.y < 0.0) {
-                 color = vec3(0.3, 0.3, 0.3); // Ufuk altinda daha koyu
-            }
+        uniform samplerCube skybox;
 
-            FragColor = vec4(color, 1.0);
+        void main()
+        {    
+            FragColor = texture(skybox, TexCoords);
         }
     )";
 
@@ -115,19 +103,82 @@ void Skybox::Init() {
     }
 }
 
+void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
+    if (m_TextureID != 0) {
+        glDeleteTextures(1, &m_TextureID);
+        m_TextureID = 0;
+    }
+
+    glGenTextures(1, &m_TextureID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_TextureID);
+
+    int width, height, nrChannels;
+    stbi_set_flip_vertically_on_load(false); // Cubemaps should not be flipped usually
+    
+    std::cout << "Skybox: Loading 6 faces..." << std::endl;
+
+    for (unsigned int i = 0; i < faces.size(); i++)
+    {
+        unsigned char *data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
+        if (data)
+        {
+            GLenum format = GL_RGB;
+            if (nrChannels == 1) format = GL_RED;
+            else if (nrChannels == 3) format = GL_RGB;
+            else if (nrChannels == 4) format = GL_RGBA;
+
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
+                         0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data
+            );
+            stbi_image_free(data);
+        }
+        else
+        {
+            std::cout << "[ERROR] Cubemap texture failed to load: " << faces[i] << std::endl;
+            // Print absolute path to help user debug
+            try {
+                std::filesystem::path p = std::filesystem::absolute(faces[i]);
+                std::cout << "        Tried looking at absolute path: " << p.string() << std::endl;
+            } catch(...) {}
+            std::cout << "        Reason: " << stbi_failure_reason() << std::endl;
+            stbi_image_free(data);
+        }
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    m_Shader->Bind();
+    m_Shader->SetInt("skybox", 0);
+    m_Shader->Unbind();
+    
+    std::cout << "Skybox: LoadCubemap completed (ID=" << m_TextureID << ")" << std::endl;
+}
+
 void Skybox::Draw(const Camera& camera, float aspectRatio) {
     glDepthFunc(GL_LEQUAL);
     m_Shader->Bind();
     
+    // Remove translation from the view matrix
     glm::mat4 view = glm::mat4(glm::mat3(camera.GetViewMatrix())); 
     glm::mat4 projection = camera.GetProjectionMatrix(aspectRatio);
 
     m_Shader->SetMat4("view", view);
     m_Shader->SetMat4("projection", projection);
 
+    // Cube is viewed from inside, so faces are "back" faces.
+    // We must disable culling to see them.
+    glDisable(GL_CULL_FACE);
+
     glBindVertexArray(m_VAO);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_TextureID);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
+
+    glEnable(GL_CULL_FACE);
     glDepthFunc(GL_LESS);
     m_Shader->Unbind();
 }

@@ -690,6 +690,23 @@ void Editor::DrawInspector(Scene *scene) {
     }
   }
 
+  // Skybox Bileseni
+  auto *skyboxComp = m_SelectedEntity->GetComponent<SkyboxComponent>();
+  if (skyboxComp && ImGui::CollapsingHeader("Skybox")) {
+      const char* labels[] = {"Right", "Left", "Top", "Bottom", "Front", "Back"};
+      for(int i=0; i<6; ++i) {
+          char buf[256];
+          strncpy(buf, skyboxComp->facePaths[i].c_str(), sizeof(buf));
+          if(ImGui::InputText(labels[i], buf, sizeof(buf))) {
+              skyboxComp->facePaths[i] = buf;
+          }
+      }
+
+      if (ImGui::Button("Reload Skybox")) {
+          skyboxComp->shouldReload = true;
+      }
+  }
+
   ImGui::Separator();
   ImGui::Spacing();
 

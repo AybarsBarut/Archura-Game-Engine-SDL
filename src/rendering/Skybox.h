@@ -12,11 +12,13 @@ public:
     ~Skybox();
 
     void Init();
+    void LoadCubemap(const std::vector<std::string>& faces);
     void Draw(const Camera& camera, float aspectRatio);
 
 private:
     unsigned int m_VAO = 0;
     unsigned int m_VBO = 0;
+    unsigned int m_TextureID = 0;
     std::unique_ptr<Shader> m_Shader;
 };
 
