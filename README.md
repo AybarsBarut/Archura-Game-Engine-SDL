@@ -8,10 +8,10 @@
 
 ### Çekirdek Sistemler
 *   **Veri Odaklı ECS (Entity Component System)**: Cache-friendly (önbellek dostu) ve yüksek performanslı entity yönetimi.
-*   **Job System (Multithreading)**: [JobSystem](cci:2://file:///c:/Users/4RCHURA/Desktop/Archura_game_engine/src/core/threading/JobSystem.h:12:0-41:1) mimarisi ile fizik, animasyon ve render hazırlık aşamalarında tam paralel işlem gücü.
-*   **Özel Bellek Yönetimi**: Yığın parçalanmasını (fragmentation) önleyen [Stack](cci:1://file:///c:/Users/4RCHURA/Desktop/Archura_game_engine/src/core/memory/StackAllocator.h:9:4-9:37) ve [Pool](cci:1://file:///c:/Users/4RCHURA/Desktop/Archura_game_engine/src/core/memory/PoolAllocator.cpp:8:0-23:1) tahsisçileri (allocators).
+*   **Job System (Multithreading)**: JobSystem mimarisi ile fizik, animasyon ve render hazırlık aşamalarında tam paralel işlem gücü.
+*   **Özel Bellek Yönetimi**: Yığın parçalanmasını (fragmentation) önleyen Stack ve Pool tahsisçileri (allocators).
 
-### Grafik & Render
+### Grafik ve Render
 *   **OpenGL 3.3+**: Modern render pipeline.
 *   **Aydınlatma**: Dinamik ışıklandırma ve gölge haritalama (Shadow Mapping).
 *   **Varlık Yönetimi**: `ufbx` entegrasyonu ile OBJ ve FBX formatında model desteği.
@@ -26,11 +26,11 @@
 
 ### Oyuncular İçin (Release)
 En son kararlı sürümü oynamak için:
-1.  **[StartGame_Release.bat](cci:7://file:///c:/Users/4RCHURA/Desktop/Archura_game_engine/StartGame_Release.bat:0:0-0:0)** dosyasını çalıştırın.
+1.  **StartGame_Release.bat** dosyasını çalıştırın.
 2.  Script, oyunun en güncel sürümünü otomatik olarak indirip başlatacaktır.
 
 ### Geliştiriciler İçin (Build)
-Kaynak koddan derlemek için:
+Kaynak koddan derlemek için aşağıdaki gereksinimleri sağlayın:
 
 **Gereksinimler:**
 *   Visual Studio 2019 veya üzeri (C++17 desteği ile)
@@ -38,10 +38,14 @@ Kaynak koddan derlemek için:
 *   Git
 
 **Adımlar:**
-```bash
-# Projeyi klonlayın
-git clone [https://github.com/aybarsbarut/archura_game_engine.git](https://github.com/aybarsbarut/archura_game_engine.git)
-cd archura_game_engine
 
-# Derleme ve Başlatma
+Projeyi klonlayın:
+```bash
+git clone https://github.com/aybarsbarut/archura_game_engine.git
+cd archura_game_engine
+```
+
+Derleme ve başlatma için:
+```bash
 StartGame_Dev.bat
+```
