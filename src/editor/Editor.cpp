@@ -300,7 +300,6 @@ void Editor::DrawMenuBar(Scene *scene) {
 }
 
 void Editor::DrawOverlay(Scene *scene, Camera *camera) {
-  (void)scene;
   const float DISTANCE = 10.0f;
   static int corner = 1; // Top-right
   ImGuiIO &io = ImGui::GetIO();
@@ -330,6 +329,31 @@ void Editor::DrawOverlay(Scene *scene, Camera *camera) {
       ImGui::Text("Pos: (%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z);
       ImGui::Text("Rot: (%.1f, %.1f, 0.0)", camera->GetPitch(),
                   camera->GetYaw());
+
+      // Karakterin velocity'sini goster
+      if (scene) {
+        Entity* player = nullptr;
+        for (const auto& entity : scene->GetEntities()) {
+          if (entity->GetName() == "Player") {
+            player = entity.get();
+            break;
+          }
+        }
+        
+        if (player) {
+          auto* rigidBody = player->GetComponent<RigidBody>();
+          if (rigidBody) {
+            glm::vec3 vel = rigidBody->velocity;
+            float speed = glm::length(vel);
+            ImGui::Text("Vel: (%.2f, %.2f, %.2f) m/s", vel.x, vel.y, vel.z);
+            ImGui::Text("Speed: %.2f m/s", speed);
+          } else {
+            ImGui::TextDisabled("(No RigidBody)");
+          }
+        } else {
+          ImGui::TextDisabled("(Player not found)");
+        }
+      }
 
       ImGui::Separator();
       // Coordinate Indicator (Axis Gizmo)
@@ -532,9 +556,31 @@ void Editor::DrawInspector(Scene *scene) {
   if (meshRenderer && ImGui::CollapsingHeader("Skin / Texture")) {
     // Dokulari tara
     static std::vector<std::string> textureFiles;
-    static bool filesLoaded = false;
+    static bool wasHeaderOpen = false;
 
-    if (!filesLoaded || ImGui::Button("Refresh List")) {
+    // Header her acilista listeyi refresh et
+    if (!wasHeaderOpen) {
+      wasHeaderOpen = true;
+      textureFiles.clear();
+      
+      std::string texturesDir = "assets/textures";
+      if (std::filesystem::exists(texturesDir)) {
+        for (const auto &entry :
+             std::filesystem::directory_iterator(texturesDir)) {
+          if (entry.is_regular_file()) {
+            std::string ext = entry.path().extension().string();
+            // Uzanti kontrolu
+            if (ext == ".jpg" || ext == ".png" || ext == ".tga" ||
+                ext == ".bmp" || ext == ".jpeg") {
+              textureFiles.push_back(entry.path().filename().string());
+            }
+          }
+        }
+      }
+    }
+
+    // Manual refresh button
+    if (ImGui::Button("Refresh List")) {
       textureFiles.clear();
       std::string texturesDir = "assets/textures";
       if (std::filesystem::exists(texturesDir)) {
@@ -550,13 +596,12 @@ void Editor::DrawInspector(Scene *scene) {
           }
         }
       }
-      filesLoaded = true;
     }
 
     static int selectedTextureIdx = -1;
     if (ImGui::BeginListBox("Available Textures")) {
-      for (int i = 0; i < textureFiles.size(); i++) {
-        const bool isSelected = (selectedTextureIdx == i);
+      for (size_t i = 0; i < textureFiles.size(); i++) {
+        const bool isSelected = (selectedTextureIdx == (int)i);
         if (ImGui::Selectable(textureFiles[i].c_str(), isSelected)) {
           selectedTextureIdx = i;
           // Dokuyu yukle

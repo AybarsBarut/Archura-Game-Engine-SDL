@@ -76,16 +76,16 @@ bool Application::Init() {
 
     m_Window = Engine::Get().GetWindow();
 
-    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing AudioSystem...\n"); fclose(f); }
+    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing AudioSystem...\n"); fclose(f); }
     AudioSystem::Get().Init();
     
-    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing NetworkManager...\n"); fclose(f); }
+    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing NetworkManager...\n"); fclose(f); }
     NetworkManager::Get().Init();
     
-    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Initializing DevConsole...\n"); fclose(f); }
+    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing DevConsole...\n"); fclose(f); }
     DevConsole::Get().Init();
 
-    if(f = fopen("logs/startup_log.txt", "a")) { fprintf(f, "Registering Commands...\n"); fclose(f); }
+    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Registering Commands...\n"); fclose(f); }
     CommandRegistry::Get().RegisterCommand(
         "fps_limit", [](const std::vector<std::string>& args) {
             if (!args.empty()) {
@@ -293,7 +293,7 @@ void Application::Run() {
         wall->GetComponent<Transform>()->scale = w.s;
         
         auto* col = wall->AddComponent<BoxCollider>();
-        col->size = glm::vec3(1.0f, 1.0f, 1.0f);
+        col->size = w.s;  // Collider'ı duvarın gerçek boyutuna ayarla
         col->isTrigger = false;
     }
     // ---------------------------
