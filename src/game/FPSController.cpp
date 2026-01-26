@@ -205,7 +205,41 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
     }
 
     // 3. Fizik Uygula
-    if (m_IsGrounded) {
+    if (m_Noclip) {
+        // --- NOCLIP MODE ---
+        // Gravity devre disi, carpisma devre disi.
+        // Tamamen kamera yonunde hareket.
+        
+        float currentSpeed = m_IsRunning ? m_RunSpeed * 4.0f : m_RunSpeed * 2.0f;
+        
+        // Kamera yonlendirmesi (3D)
+        glm::vec3 flyDir = glm::vec3(0.0f);
+        if (input->IsKeyDown(m_Bindings.forward)) flyDir += m_Camera->GetFront();
+        if (input->IsKeyDown(m_Bindings.backward)) flyDir -= m_Camera->GetFront();
+        if (input->IsKeyDown(m_Bindings.right)) flyDir += m_Camera->GetRight();
+        if (input->IsKeyDown(m_Bindings.left)) flyDir -= m_Camera->GetRight();
+        
+        // Space / Ctrl ile dikey hareket (World Up/Down)
+        if (input->IsKeyDown(m_Bindings.jump)) flyDir += glm::vec3(0.0f, 1.0f, 0.0f);
+        if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) flyDir -= glm::vec3(0.0f, 1.0f, 0.0f);
+
+        if (glm::length(flyDir) > 0.001f) {
+            flyDir = glm::normalize(flyDir);
+            m_Velocity = flyDir * currentSpeed;
+        } else {
+            // Hizli durus
+            m_Velocity = glm::vec3(0.0f);
+        }
+
+        // Pozisyonu guncelle (Carpisma kontrolu YOK)
+        glm::vec3 currentPos = m_Camera->GetPosition();
+        glm::vec3 targetPos = currentPos + m_Velocity * deltaTime;
+        m_Camera->SetPosition(targetPos);
+        
+        return; // Diger fizik hesaplamalarini atla
+    }
+
+    if (m_IsGrounded && m_GravityEnabled) {
         // Yerde Hareket
         MoveParams groundParams;
         groundParams.max_velocity = m_IsRunning ? m_RunSpeed : m_WalkSpeed;
@@ -216,59 +250,81 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
 
         ApplyFriction(groundParams);
         Accelerate(wishDir, groundParams);
-        
-        // Yercekimini sifirla (Sadece gorsel degil, fiziksel reset)
-        // CheckCollision kisminda anyway -2.0f yapiyoruz ama burada birikmesini onleyelim.
     } else {
-        // Havada Hareket (Bunnyhop / Air Control)
-        MoveParams airParams;
-        airParams.max_velocity = m_AirSpeedCap; // Cap air speed for strafing
-        airParams.accelerate = m_AirAcceleration;
-        airParams.friction = 0.0f; // No friction in air
-        airParams.stop_speed = 0.0f;
-        airParams.delta_time = deltaTime;
-
-        // Giris Yönü Analizi (Strafe)
-        int strafeDir = 0;
-        if (input->IsKeyDown(m_Bindings.right)) strafeDir = 1;
-        else if (input->IsKeyDown(m_Bindings.left)) strafeDir = -1;
-
-        // Mouse Yönü Analizi (-1: Sol, 1: Sağ, 0: Durgun)
-        int mouseDir = 0;
-        if (m_MouseDeltaX > 1.0f) mouseDir = 1;
-        else if (m_MouseDeltaX < -1.0f) mouseDir = -1;
-
-        // Sync Kontrolu: Strafe tuşu ile Mouse dönüşü aynı yönde olmalı
-        bool shouldAccelerate = true;
-
-        if (strafeDir != 0) {
-            // Eger strafe yapiyorsak, mouse ile senkronize olmali
-            if (strafeDir == mouseDir) {
-                // Senkronize! Hızlanmaya izin ver.
-                shouldAccelerate = true;
-            } else {
-                // Senkronize degil (veyahut mouse donmuyor), hizlanmayi durdur.
-                shouldAccelerate = false;
+        // Havada Hareket (Bunnyhop / Air Control) OR Flying Mode (Gravity Disabled but NOT Noclip)
+        
+        if (!m_GravityEnabled) {
+            // FLY MODE: Simple accelerated flight (but with collisions)
+            // Manual friction for 3D dampening (ApplyFriction ignores Y and air)
+            
+            float flyFriction = m_Friction * 0.5f;
+            float currentSpeed = glm::length(m_Velocity);
+            
+            if (currentSpeed > 0.0f) {
+                float drop = currentSpeed * flyFriction * deltaTime;
+                float newSpeed = currentSpeed - drop;
+                if (newSpeed < 0.0f) newSpeed = 0.0f;
+                m_Velocity *= (newSpeed / currentSpeed);
             }
-        } 
-        // Not: Eger strafe yapmiyorsa (Sadece W basili ise), shouldAccelerate = true kalir.
-        // Boylece normal hava kontrolu (havada yonlendirme) calisir ama strafe ivmesi kazanilmaz 
-        // (Cunku wishDir ileri dogrudur, AirSpeedCap dusuktur, hiz artmaz).
 
-        if (shouldAccelerate) {
-            AirAccelerate(wishDir, airParams);
-        }
+            MoveParams flyParams;
+            flyParams.max_velocity = (m_IsRunning ? m_RunSpeed : m_WalkSpeed) * 2.0f; // Faster fly
+            flyParams.accelerate = m_Acceleration;
+            flyParams.friction = 0.0f; // Already applied manually above
+            flyParams.stop_speed = m_StopSpeed;
+            flyParams.delta_time = deltaTime;
+            
+            // Allow vertical movement with Jump/Duck keys (Apply Acceleration directly vs Impulse)
+            if (input->IsKeyDown(m_Bindings.jump)) {
+                m_Velocity.y += flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f; 
+            }
+            if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) {
+                m_Velocity.y -= flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f;
+            }
 
-        // Yercekimi
-        m_Velocity.y += m_Gravity * deltaTime;
+            // Cap Vertical Speed manually to avoid infinite buildup
+            if (m_Velocity.y > flyParams.max_velocity) m_Velocity.y = flyParams.max_velocity;
+            if (m_Velocity.y < -flyParams.max_velocity) m_Velocity.y = -flyParams.max_velocity;
 
-        // Max Bunnyhop Hizi Limiti (Soft Cap)
-        // Yatay hizi sinirla (Y ekseni yercekimi etkisinde serbest kalsin)
-        float horizontalSpeed = sqrt(m_Velocity.x * m_Velocity.x + m_Velocity.z * m_Velocity.z);
-        if (horizontalSpeed > m_MaxBunnyhopSpeed) {
-            float scale = m_MaxBunnyhopSpeed / horizontalSpeed;
-            m_Velocity.x *= scale;
-            m_Velocity.z *= scale;
+            Accelerate(wishDir, flyParams);
+
+        } else {
+            // Normal Air Physics
+            MoveParams airParams;
+            airParams.max_velocity = m_AirSpeedCap; 
+            airParams.accelerate = m_AirAcceleration;
+            airParams.friction = 0.0f; 
+            airParams.stop_speed = 0.0f;
+            airParams.delta_time = deltaTime;
+
+            int strafeDir = 0;
+            if (input->IsKeyDown(m_Bindings.right)) strafeDir = 1;
+            else if (input->IsKeyDown(m_Bindings.left)) strafeDir = -1;
+
+            int mouseDir = 0;
+            if (m_MouseDeltaX > 1.0f) mouseDir = 1;
+            else if (m_MouseDeltaX < -1.0f) mouseDir = -1;
+
+            bool shouldAccelerate = true;
+            if (strafeDir != 0) {
+                 if (strafeDir == mouseDir) shouldAccelerate = true;
+                 else shouldAccelerate = false;
+            } 
+
+            if (shouldAccelerate) {
+                AirAccelerate(wishDir, airParams);
+            }
+
+            // Gravity
+            m_Velocity.y += m_Gravity * deltaTime;
+
+            // Bunnyhop Cap
+            float horizontalSpeed = sqrt(m_Velocity.x * m_Velocity.x + m_Velocity.z * m_Velocity.z);
+            if (horizontalSpeed > m_MaxBunnyhopSpeed) {
+                float scale = m_MaxBunnyhopSpeed / horizontalSpeed;
+                m_Velocity.x *= scale;
+                m_Velocity.z *= scale;
+            }
         }
     }
     

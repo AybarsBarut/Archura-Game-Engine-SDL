@@ -32,6 +32,7 @@ namespace Archura {
         
         class FPSController* GetFPSController() { return m_FPSController.get(); }
         class Scene* GetScene() const { return m_Scene.get(); } // Expose Scene
+        class RenderSystem* GetRenderSystem() { return m_RenderSystem.get(); }
 
     private:
         static Application* s_Instance;
@@ -46,6 +47,7 @@ namespace Archura {
         // Game State (Moved from local Run scope)
         std::unique_ptr<class Scene> m_Scene; // Scene is now a member
         std::unique_ptr<class FPSController> m_FPSController;
+        std::unique_ptr<class RenderSystem> m_RenderSystem;
         bool m_DevModeActive = true;
         bool m_IsPaused = false;
     };

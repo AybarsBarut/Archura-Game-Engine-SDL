@@ -19,6 +19,7 @@ private:
     unsigned int m_VAO = 0;
     unsigned int m_VBO = 0;
     unsigned int m_TextureID = 0;
+    bool m_TextureLoaded = false;
     std::unique_ptr<Shader> m_Shader;
 };
 

@@ -3,6 +3,7 @@
 #include "../core/Application.h"
 #include "../ecs/Entity.h"
 #include "../ecs/Component.h"
+#include "../game/FPSController.h"
 #include <iostream>
 #include <vector>
 #include <cstdlib>
@@ -362,6 +363,23 @@ namespace Archura {
         ));
 
         console.RegisterCommand(std::make_shared<ConsoleCommand>(
+            "gravity",
+            "Set gravity enabled: gravity [0|1]",
+            [](const std::vector<std::string>& args) {
+                if (args.empty()) {
+                    std::cout << "[Game] Usage: gravity [0|1]\n";
+                    return;
+                }
+                int val = std::stoi(args[0]);
+                auto* ctrl = Application::Get().GetFPSController();
+                if(ctrl) {
+                     ctrl->SetGravityEnabled(val != 0);
+                     std::cout << "[Physics] Gravity " << (val ? "ENABLED" : "DISABLED") << "\n";
+                }
+            }
+        ));
+
+        console.RegisterCommand(std::make_shared<ConsoleCommand>(
             "teleport",
             "Teleport entity: teleport [name] [x] [y] [z]",
             [](const std::vector<std::string>& args) {
@@ -606,8 +624,12 @@ namespace Archura {
             "noclip",
             "No clip - walk through walls [CHEATS]",
             [](const std::vector<std::string>& args) {
-                GameState::noclipMode = GameState::noclipMode ? 0 : 1;
-                std::cout << "[Cheats] Noclip mode " << (GameState::noclipMode ? "ENABLED" : "DISABLED") << "\n";
+                auto* ctrl = Application::Get().GetFPSController();
+                if (ctrl) {
+                    bool newState = !ctrl->IsNoclipEnabled();
+                    ctrl->SetNoclipEnabled(newState);
+                    std::cout << "[Cheats] Noclip mode " << (newState ? "ENABLED" : "DISABLED") << "\n";
+                }
             },
             true
         ));

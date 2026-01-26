@@ -27,6 +27,8 @@ REM Launch the game
 echo.
 echo [3/3] Launching Archura Engine...
 if exist "build\bin\Release\Release\ArchuraEngine.exe" (
+    echo Syncing Assets...
+    xcopy assets build\bin\Release\Release\assets /E /I /Y
     cd build\bin\Release\Release
     mkdir logs 2>nul
     ArchuraEngine.exe --console

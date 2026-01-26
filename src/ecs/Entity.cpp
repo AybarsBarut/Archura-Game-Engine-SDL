@@ -7,7 +7,32 @@ Entity::Entity(EntityID id, const std::string& name)
     : m_ID(id), m_Name(name)
 {
     // Her varlik otomatik olarak Donusum bilesenine sahip
+    // Her varlik otomatik olarak Donusum bilesenine sahip
     AddComponent<Transform>();
+}
+
+void Entity::SetParent(Entity* parent) {
+    if (m_Parent) {
+        // Remove from old parent
+        auto& kids = m_Parent->m_Children;
+        kids.erase(std::remove(kids.begin(), kids.end(), this), kids.end());
+    }
+    
+    m_Parent = parent;
+    
+    if (m_Parent) {
+        m_Parent->m_Children.push_back(this);
+    }
+}
+
+glm::mat4 Entity::GetWorldTransform() {
+    auto* transform = GetComponent<Transform>();
+    glm::mat4 model = transform ? transform->GetModelMatrix() : glm::mat4(1.0f);
+    
+    if (m_Parent) {
+        return m_Parent->GetWorldTransform() * model;
+    }
+    return model;
 }
 
 // ==================== Scene ====================

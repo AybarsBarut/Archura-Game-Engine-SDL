@@ -864,4 +864,57 @@ Mesh* Mesh::LoadFromFBX(const std::string& path) {
 }
 
 
+
+void Mesh::UpdateVertices() {
+    glBindVertexArray(m_VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
+    // Note: glBufferSubData is faster than glBufferData for updates, assuming size hasn't changed.
+    // If we were rescheduling the size, we'd need glBufferData. For simple deformation, size is const.
+    glBufferSubData(GL_ARRAY_BUFFER, 0, m_Vertices.size() * sizeof(Vertex), m_Vertices.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+void Mesh::RecalculateNormals() {
+    // 1. Reset normals
+    for (auto& v : m_Vertices) {
+        v.normal = glm::vec3(0.0f);
+    }
+
+    // 2. Accumulate face normals
+    // Assumes GL_TRIANGLES
+    for (size_t i = 0; i < m_Indices.size(); i += 3) {
+        if (i + 2 >= m_Indices.size()) break;
+
+        unsigned int i0 = m_Indices[i];
+        unsigned int i1 = m_Indices[i + 1];
+        unsigned int i2 = m_Indices[i + 2];
+
+        // Bounds check
+        if (i0 >= m_Vertices.size() || i1 >= m_Vertices.size() || i2 >= m_Vertices.size()) continue;
+
+        glm::vec3 v0 = m_Vertices[i0].position;
+        glm::vec3 v1 = m_Vertices[i1].position;
+        glm::vec3 v2 = m_Vertices[i2].position;
+
+        glm::vec3 edge1 = v1 - v0;
+        glm::vec3 edge2 = v2 - v0;
+        glm::vec3 normal = glm::cross(edge1, edge2);
+
+        // We don't normalize 'normal' yet -> this weights the vertex normal by the triangle area
+        // (large triangles contribute more to the average normal)
+        
+        m_Vertices[i0].normal += normal;
+        m_Vertices[i1].normal += normal;
+        m_Vertices[i2].normal += normal;
+    }
+
+    // 3. Normalize updated normals
+    for (auto& v : m_Vertices) {
+        if (glm::length(v.normal) > std::numeric_limits<float>::epsilon()) {
+            v.normal = glm::normalize(v.normal);
+        }
+    }
+}
+
 } // namespace Archura

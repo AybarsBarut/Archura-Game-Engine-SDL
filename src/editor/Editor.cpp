@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "Editor.h"
 #include "../core/ProjectSerializer.h"
 #include "../core/Window.h"
@@ -78,99 +82,74 @@ void Editor::DrawEditorUI(Scene *scene) {
   if (m_ShowConsole) DrawConsolePanel();
   if (m_ShowPerformance) DrawPerformanceMetrics(ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
   if (m_ShowDemoWindow) DrawDemoWindow();
+  
+  // Custom Tools
+  m_ObjectTool.Draw(scene, nullptr, m_SelectedEntity);
 }
 
 void Editor::SetupLayout() {
   ImGuiViewport *viewport = ImGui::GetMainViewport();
 
-
   ImVec2 workPos = viewport->WorkPos;
   ImVec2 workSize = viewport->WorkSize;
 
-  // Yerlesim ayari
+  // Layout settings
   float leftPanelWidth = 300.0f;
   float rightPanelWidth = 300.0f;
   float bottomPanelHeight = 250.0f;
 
-  // 1. Arac Cubugu (Kaldirildi)
-  // ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x, viewport->WorkPos.y +
-  // menuBarHeight)); ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,
-  // toolbarHeight));
-
-  // 2. Hiyerarsi (Sol)
+  // 1. Scene Hierarchy (Left)
   if (m_ShowSceneHierarchy) {
-    ImGui::SetNextWindowPos(
-        workPos, ImGuiCond_FirstUseEver); // Konumu sadece ilk seferde ayarla
-    ImGui::SetNextWindowSize(
-        ImVec2(leftPanelWidth, workSize.y - bottomPanelHeight),
-        ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(workPos, ImGuiCond_FirstUseEver); 
+    ImGui::SetNextWindowSize(ImVec2(leftPanelWidth, workSize.y - bottomPanelHeight), ImGuiCond_FirstUseEver);
   }
 
-  // 3. Denetci (Sag)
+  // 2. Inspector (Right)
   if (m_ShowInspector) {
-    ImGui::SetNextWindowPos(
-        ImVec2(workPos.x + workSize.x - rightPanelWidth, workPos.y),
-        ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(rightPanelWidth, workSize.y),
-                             ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(workPos.x + workSize.x - rightPanelWidth, workPos.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(rightPanelWidth, workSize.y), ImGuiCond_FirstUseEver);
   }
 
-  // 4. Proje/Konsol (Alt)
+  // 3. Project/Console (Bottom)
   if (m_ShowProjectPanel || m_ShowConsole) {
-    ImGui::SetNextWindowPos(
-        ImVec2(workPos.x, workPos.y + workSize.y - bottomPanelHeight),
-        ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(
-        ImVec2(workSize.x - (m_ShowInspector ? rightPanelWidth : 0),
-               bottomPanelHeight),
-        ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(workPos.x, workPos.y + workSize.y - bottomPanelHeight), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(workSize.x - (m_ShowInspector ? rightPanelWidth : 0), bottomPanelHeight), ImGuiCond_FirstUseEver);
   }
 }
 
 void Editor::DrawMenuBar(Scene *scene) {
   if (ImGui::BeginMainMenuBar()) {
+    // ... (File, Edit, Selection menus) ...
     if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("New Scene", "Ctrl+N")) {
-      }
-      if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {
-      }
+      if (ImGui::MenuItem("New Scene", "Ctrl+N")) {}
+      if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {}
       ImGui::Separator();
       if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
         if (scene) {
           ProjectConfig config = {"ArchuraGame", "1.0", "MainScene"};
-          // Ensure directory exists
           std::filesystem::create_directories("games/ArchuraGame");
-          ProjectSerializer::SaveProject("games/ArchuraGame/project.gameproj",
-                                         config, scene);
+          ProjectSerializer::SaveProject("games/ArchuraGame/project.gameproj", config, scene);
           Log("Project saved to games/ArchuraGame/project.gameproj");
         }
       }
-      if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) {
-      }
+      if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) {}
       ImGui::Separator();
-      if (ImGui::MenuItem("Exit", "Alt+F4")) {
-      }
+      if (ImGui::MenuItem("Exit", "Alt+F4")) {}
       ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Edit")) {
-      if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      }
-      if (ImGui::MenuItem("Redo", "Ctrl+Y")) {
-      }
+      if (ImGui::MenuItem("Undo", "Ctrl+Z")) {}
+      if (ImGui::MenuItem("Redo", "Ctrl+Y")) {}
       ImGui::Separator();
-      if (ImGui::MenuItem("Cut", "Ctrl+X")) {
-      }
-      if (ImGui::MenuItem("Copy", "Ctrl+C")) {
-      }
-      if (ImGui::MenuItem("Paste", "Ctrl+V")) {
-      }
+      if (ImGui::MenuItem("Cut", "Ctrl+X")) {}
+      if (ImGui::MenuItem("Copy", "Ctrl+C")) {}
+      if (ImGui::MenuItem("Paste", "Ctrl+V")) {}
       ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Selection")) {
-      if (ImGui::MenuItem("Select All", "Ctrl+A")) {
-      }
+      if (ImGui::MenuItem("Select All", "Ctrl+A")) {}
       ImGui::EndMenu();
     }
 
@@ -182,20 +161,23 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::Separator();
       ImGui::MenuItem("Performance Metrics", nullptr, &m_ShowPerformance);
       ImGui::MenuItem("ImGui Demo Window", nullptr, &m_ShowDemoWindow);
+      ImGui::Separator();
+      bool isToolOpen = m_ObjectTool.IsOpen();
+      if (ImGui::MenuItem("Object Manipulator", nullptr, &isToolOpen)) {
+          m_ObjectTool.SetOpen(isToolOpen);
+      }
       ImGui::EndMenu();
     }
-
+    
+    // ... (Rest of menus) ...
     if (ImGui::BeginMenu("Go")) {
-      if (ImGui::MenuItem("Go to File...", "Ctrl+P")) {
-      }
+      if (ImGui::MenuItem("Go to File...", "Ctrl+P")) {}
       ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Run")) {
-      if (ImGui::MenuItem("Start Debugging", "F5")) {
-      }
-      if (ImGui::MenuItem("Run Without Debugging", "Ctrl+F5")) {
-      }
+      if (ImGui::MenuItem("Start Debugging", "F5")) {}
+      if (ImGui::MenuItem("Run Without Debugging", "Ctrl+F5")) {}
       ImGui::EndMenu();
     }
 
@@ -207,46 +189,31 @@ void Editor::DrawMenuBar(Scene *scene) {
     }
 
     if (ImGui::BeginMenu("Entity")) {
-      if (ImGui::BeginMenu("Load Model (.obj / .fbx)")) {
+        // ... (Entity menu content preserved) ...
+        if (ImGui::BeginMenu("Load Model (.obj / .fbx)")) {
         std::string path = "assets/models";
         if (std::filesystem::exists(path)) {
           for (const auto &entry : std::filesystem::directory_iterator(path)) {
             std::string ext = entry.path().extension().string();
-            // Kucuk harfe cevir (windows genelde case-insensitive ama garanti
-            // olsun) std::transform... (ne gerek var, basit kontrol)
-
             bool isObj = (ext == ".obj" || ext == ".OBJ");
             bool isFbx = (ext == ".fbx" || ext == ".FBX");
-
             if (isObj || isFbx) {
               std::string filename = entry.path().filename().string();
-
-              // Gorsel olarak ayirt etmek icin ikon veya yazi eklenebilir
               std::string label = filename + (isFbx ? " [FBX-WIP]" : " [OBJ]");
-
               if (ImGui::MenuItem(label.c_str())) {
                 if (scene) {
                   Entity *e = scene->CreateEntity(entry.path().stem().string());
-
-                  // Transform
                   auto *t = e->GetComponent<Transform>();
                   t->position = glm::vec3(0, 5, 0);
-
-                  // Mesh
                   auto *mr = e->AddComponent<MeshRenderer>();
                   if (isObj) {
                     mr->mesh = Mesh::LoadFromOBJ(entry.path().string());
                     mr->color = glm::vec3(1.0f);
                   } else {
                     mr->mesh = Mesh::LoadFromFBX(entry.path().string());
-                    mr->color = glm::vec3(1.0f, 0.0f,
-                                          0.0f); // Kirmizi (Placeholder
-                                                 // oldugunu belli etmek icin)
+                    mr->color = glm::vec3(1.0f, 0.0f, 0.0f);
                   }
-
-                  // Collider
                   e->AddComponent<BoxCollider>()->size = glm::vec3(1.0f);
-
                   Log("Spawned Model: " + filename);
                 }
               }
@@ -257,7 +224,6 @@ void Editor::DrawMenuBar(Scene *scene) {
         }
         ImGui::EndMenu();
       }
-      // Other entity spawns
       if (ImGui::MenuItem("Cube")) {
         if (scene) {
           Entity *e = scene->CreateEntity("Cube");
@@ -274,33 +240,20 @@ void Editor::DrawMenuBar(Scene *scene) {
     }
 
     if (ImGui::BeginMenu("Help")) {
-      if (ImGui::MenuItem("About Archura Engine")) {
-      }
+      if (ImGui::MenuItem("About Archura Engine")) {}
       ImGui::EndMenu();
     }
-
-    // Play / Stop Button in Menu Bar
-    ImGui::Separator();
-    /*
-    if (m_IsGameRunning) {
-        if (ImGui::MenuItem("STOP [Esc]")) {
-            m_IsGameRunning = false;
-            Log("Game Stopped.");
-        }
-    } else {
-        if (ImGui::MenuItem("PLAY [F5]")) {
-            m_IsGameRunning = true;
-            Log("Game Started.");
-        }
-    }
-    */
 
     ImGui::EndMainMenuBar();
   }
 }
 
 void Editor::DrawOverlay(Scene *scene, Camera *camera) {
-  const float DISTANCE = 10.0f;
+    // Run Tool Logic (Raycasting etc)
+    m_ObjectTool.OnSceneGUI(scene, camera, m_SelectedEntity);
+    
+    // ... Original DrawOverlay content ...
+    const float DISTANCE = 10.0f;
   static int corner = 1; // Top-right
   ImGuiIO &io = ImGui::GetIO();
   ImGuiWindowFlags window_flags =
@@ -461,31 +414,88 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 
   ImGui::Separator();
 
+  std::function<void(Entity*)> DrawEntityNode = [&](Entity* entity) {
+      ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
+      
+      if (entity == m_SelectedEntity)
+          flags |= ImGuiTreeNodeFlags_Selected;
+          
+      if (entity->GetChildren().empty())
+          flags |= ImGuiTreeNodeFlags_Leaf;
+
+      bool isLookedAt = (entity == m_LookedAtEntity);
+      if (isLookedAt) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+      
+      bool opened = ImGui::TreeNodeEx((void*)(uintptr_t)entity->GetID(), flags, "%s (ID: %u)%s", entity->GetName().c_str(), entity->GetID(), isLookedAt ? " <--" : "");
+      
+      if (isLookedAt) ImGui::PopStyleColor();
+
+      if (ImGui::IsItemClicked()) {
+          m_SelectedEntity = entity;
+      }
+
+      // Drag Source
+      if (ImGui::BeginDragDropSource()) {
+          EntityID id = entity->GetID();
+          ImGui::SetDragDropPayload("ENTITY_DRAG", &id, sizeof(EntityID));
+          ImGui::Text("%s", entity->GetName().c_str());
+          ImGui::EndDragDropSource();
+      }
+
+      // Drop Target
+      if (ImGui::BeginDragDropTarget()) {
+          if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG")) {
+              EntityID droppedID = *(const EntityID*)payload->Data;
+              Entity* droppedEntity = scene->GetEntity(droppedID);
+              if (droppedEntity && droppedEntity != entity) {
+                   // Prevent circular hierarchy (check if entity is child of droppedEntity)
+                   // For now simple check:
+                   droppedEntity->SetParent(entity);
+              }
+          }
+          ImGui::EndDragDropTarget();
+      }
+
+      // Context Menu for Unparenting
+      if (ImGui::BeginPopupContextItem()) {
+          if (ImGui::MenuItem("Unparent")) {
+              entity->SetParent(nullptr);
+          }
+           if (ImGui::MenuItem("Delete")) {
+              scene->DestroyEntity(entity->GetID());
+              if (m_SelectedEntity == entity) m_SelectedEntity = nullptr;
+          }
+          ImGui::EndPopup();
+      }
+
+      if (opened) {
+          for (auto* child : entity->GetChildren()) {
+              DrawEntityNode(child);
+          }
+          ImGui::TreePop();
+      }
+  };
+
+  // Draw Roots
   for (const auto &entityPtr : entities) {
-    Entity *entity = entityPtr.get();
+      if (entityPtr->GetParent() == nullptr) {
+          DrawEntityNode(entityPtr.get());
+      }
+  }
 
-    ImGuiTreeNodeFlags flags =
-        ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    if (entity == m_SelectedEntity) {
-      flags |= ImGuiTreeNodeFlags_Selected;
-    }
-
-    bool isLookedAt = (entity == m_LookedAtEntity);
-    if (isLookedAt) {
-      ImGui::PushStyleColor(ImGuiCol_Text,
-                            ImVec4(0.0f, 1.0f, 0.0f, 1.0f)); // Yesil
-    }
-
-    ImGui::TreeNodeEx(entity, flags, "%s (ID: %u)%s", entity->GetName().c_str(),
-                      entity->GetID(), isLookedAt ? " <--" : "");
-
-    if (isLookedAt) {
-      ImGui::PopStyleColor();
-    }
-
-    if (ImGui::IsItemClicked()) {
-      m_SelectedEntity = entity;
-    }
+  // Window Drop Target (Unparent by dropping in empty space)
+  ImVec2 avail = ImGui::GetContentRegionAvail();
+  if (avail.y < 50.0f) avail.y = 50.0f; // Ensure at least some drop space
+  
+  ImGui::InvisibleButton("HierarchyEmptySpace", avail);
+  if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG")) {
+          EntityID droppedID = *(const EntityID*)payload->Data;
+          if (Entity* e = scene->GetEntity(droppedID)) {
+              e->SetParent(nullptr);
+          }
+      }
+      ImGui::EndDragDropTarget();
   }
 
   ImGui::End();
@@ -547,6 +557,13 @@ void Editor::DrawInspector(Scene *scene) {
 
   // Model isleyici bileseni
   auto *meshRenderer = m_SelectedEntity->GetComponent<MeshRenderer>();
+  if (meshRenderer) {
+      if (ImGui::Button("Modify Mesh Geometry")) {
+          m_ObjectTool.SetOpen(true);
+      }
+      ImGui::Spacing();
+  }
+
   if (meshRenderer && ImGui::CollapsingHeader("Mesh Renderer")) {
     ImGui::Text("Mesh: %s", meshRenderer->mesh ? "Loaded" : "None");
     ImGui::ColorEdit3("Color", &meshRenderer->color.x);

@@ -33,6 +33,8 @@ public:
     void SetJumpHeight(float height) { m_JumpHeight = height; }
     void SetMouseSensitivity(float sensitivity) { m_MouseSensitivity = sensitivity; }
     void SetKeyBindings(const KeyBindings& bindings) { m_Bindings = bindings; }
+    void SetGravityEnabled(bool enabled) { m_GravityEnabled = enabled; }
+    void SetNoclipEnabled(bool enabled) { m_Noclip = enabled; }
 
     float GetWalkSpeed() const { return m_WalkSpeed; }
     float GetRunSpeed() const { return m_RunSpeed; }
@@ -43,6 +45,7 @@ public:
     // State
     bool IsGrounded() const { return m_IsGrounded; }
     bool IsRunning() const { return m_IsRunning; }
+    bool IsNoclipEnabled() const { return m_Noclip; }
 
     // Recoil
     void AddRecoil(const glm::vec3& recoil); // Pitch, Yaw, Roll (Roll unused for now)
@@ -76,6 +79,7 @@ private:
     float m_MouseSensitivity = 0.1f;
     float m_Gravity = -20.0f; // Biraz daha sert duşüş
     bool m_GravityEnabled = true;
+    bool m_Noclip = false;
     KeyBindings m_Bindings;
 
     // Physics / Source Style Movement Constants

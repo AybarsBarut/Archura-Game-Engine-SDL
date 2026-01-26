@@ -25,6 +25,14 @@ public:
     const std::string& GetName() const { return m_Name; }
     void SetName(const std::string& name) { m_Name = name; }
 
+    // Hierarchy
+    void SetParent(Entity* parent);
+    Entity* GetParent() const { return m_Parent; }
+    const std::vector<Entity*>& GetChildren() const { return m_Children; }
+    
+    // Transform Helper
+    glm::mat4 GetWorldTransform();
+
     // Component yönetimi
     template<typename T, typename... Args>
     T* AddComponent(Args&&... args) {
@@ -65,6 +73,10 @@ public:
 private:
     EntityID m_ID;
     std::string m_Name;
+    
+    Entity* m_Parent = nullptr;
+    std::vector<Entity*> m_Children;
+
     std::unordered_map<std::type_index, std::shared_ptr<Component>> m_Components;
 };
 

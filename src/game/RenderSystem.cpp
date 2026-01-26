@@ -106,6 +106,8 @@ void RenderSystem::Update(float deltaTime) {
     
     // 1. Collect
     for (const auto& entityPtr : m_Scene->GetEntities()) {
+        if (m_IsolationTarget && entityPtr.get() != m_IsolationTarget) continue; // Isolation Check
+
         auto* meshRenderer = entityPtr->GetComponent<MeshRenderer>();
         auto* transform = entityPtr->GetComponent<Transform>();
         
@@ -131,7 +133,7 @@ void RenderSystem::Update(float deltaTime) {
                 batch.texture == targetTexture &&
                 batch.color == meshRenderer->color) { // Renk de ayni olmali
                 
-                batch.instanceMatrices.push_back(transform->GetModelMatrix());
+                batch.instanceMatrices.push_back(entityPtr->GetWorldTransform());
                 found = true;
                 break;
             }
@@ -143,7 +145,7 @@ void RenderSystem::Update(float deltaTime) {
             newBatch.shader = targetShader;
             newBatch.texture = targetTexture;
             newBatch.color = meshRenderer->color;
-            newBatch.instanceMatrices.push_back(transform->GetModelMatrix());
+            newBatch.instanceMatrices.push_back(entityPtr->GetWorldTransform());
             batches.push_back(newBatch);
         }
     }
@@ -182,7 +184,7 @@ void RenderSystem::Update(float deltaTime) {
             // Assuming default direction is DOWN (0, -1, 0) for Directional Light
             // or FORWARD (0, 0, -1) depending on convention. 
             // Let's use the Transform's orientation.
-            glm::mat4 model = transform->GetModelMatrix();
+            glm::mat4 model = entityPtr->GetWorldTransform();
             // In OpenGL, Forward is usually -Z. But for a "Sun" pointing down, 
             // we often rotate a Forward(-Z) or Down(-Y) vector.
             // Let's assume the light shines in the direction of the object's local Forward (-Z).
@@ -419,7 +421,7 @@ void RenderSystem::DrawColliders() {
         m_DefaultShader->SetVec3("uDiffuse", color);
 
         // Calculate Transform: EntityModel * ColliderOffset * ColliderSize
-        glm::mat4 model = transform->GetModelMatrix();
+        glm::mat4 model = entityPtr->GetWorldTransform();
         model = glm::translate(model, collider->center);
         model = glm::scale(model, collider->size);
         

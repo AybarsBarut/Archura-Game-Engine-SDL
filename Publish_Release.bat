@@ -22,7 +22,8 @@ if exist "%BUILD_DIR%\SDL2.dll" copy "%BUILD_DIR%\SDL2.dll" "%DIST_DIR%\"
 if exist "%BUILD_DIR%\imgui.ini" copy "%BUILD_DIR%\imgui.ini" "%DIST_DIR%\"
 
 echo Copying assets...
-xcopy "%BUILD_DIR%\assets" "%DIST_DIR%\assets\" /E /I /Y
+echo Copying assets...
+xcopy "assets" "%DIST_DIR%\assets\" /E /I /Y
 
 echo.
 echo [SUCCESS] Release published to %DIST_DIR%

@@ -16,6 +16,7 @@ C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\core\thread
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Component.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\Component.obj
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Entity.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\Entity.obj
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\Editor.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\Editor.obj
+C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\ObjectManipulationTool.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\ObjectManipulationTool.obj
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\CommandRegistry.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\CommandRegistry.obj
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\DevConsole.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\DevConsole.obj
 C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSConsoleCommands.cpp;C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\build\ArchuraEngine.dir\Release\FPSConsoleCommands.obj

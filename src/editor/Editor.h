@@ -1,5 +1,17 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+// Prevent Windows.h / minwindef.h from defining near / far macros that break GLM
+#if defined(near)
+#undef near
+#endif
+#if defined(far)
+#undef far
+#endif
+
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <iostream>
@@ -7,6 +19,8 @@
 #include <streambuf>
 #include <string>
 #include <vector>
+
+#include "ObjectManipulationTool.h"
 
 namespace Archura {
 
@@ -95,6 +109,8 @@ private:
   bool m_ShowConsole = true;
   bool m_ShowPerformance = false;
   bool m_ShowDemoWindow = false;
+
+  ObjectManipulationTool m_ObjectTool;
 };
 
 // Custom streambuf to redirect cout to Editor

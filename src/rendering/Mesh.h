@@ -64,6 +64,15 @@ private:
     void SetupMesh();
     void SetupInstancedAttributes();
 
+public:
+    // Dynamic Mesh Modification
+    std::vector<Vertex>& GetVertices() { return m_Vertices; }
+    const std::vector<Vertex>& GetVertices() const { return m_Vertices; }
+    const std::vector<unsigned int>& GetIndices() const { return m_Indices; }
+    
+    void UpdateVertices(); // Re-upload vertices to GPU
+    void RecalculateNormals(); // Recalculate normals based on current positions
+
 private:
     std::vector<Vertex> m_Vertices;
     std::vector<unsigned int> m_Indices;

@@ -8,6 +8,8 @@
 
 namespace Archura {
 
+class Entity; // Forward declaration
+
 /**
  * @brief Rendering System - Tüm entity'leri render eder
  */
@@ -25,7 +27,10 @@ public:
     void SetCamera(Camera* camera) { m_Camera = camera; }
     Camera* GetCamera() const { return m_Camera; }
 
+    void SetIsolatedEntity(Entity* entity) { m_IsolationTarget = entity; }
+
 private:
+    Entity* m_IsolationTarget = nullptr;
     Camera* m_Camera;
     std::unique_ptr<Shader> m_DefaultShader;
     class Mesh* m_DebugMesh = nullptr;

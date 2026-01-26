@@ -1,9 +1,31 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+// 1. System Includes (Windows/SDL first)
+#include <SDL.h>
+
+// 2. Output cleanup
+#if defined(near)
+#undef near
+#endif
+#if defined(far)
+#undef far
+#endif
+
+// 3. GLM Includes (Must be clean of 'near'/'far')
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+// 4. Core Engine Includes
 #include "core/Application.h"
 #include "core/AudioSystem.h"
 #include "core/Engine.h"
 #include "core/ImGuiLayer.h"
 #include "core/Window.h"
 
+// 5. ECS & Game Systems
 #include "ecs/Component.h"
 #include "ecs/Entity.h"
 
@@ -20,6 +42,7 @@
 #include "game/RenderSystem.h"
 #include "game/ScriptSystem.h"
 #include "game/Weapon.h"
+#include "game/FPSConsoleCommands.h"
 
 #include "input/Input.h"
 #include "network/NetworkManager.h"
@@ -30,9 +53,8 @@
 #include "rendering/Renderer.h"
 #include "rendering/Skybox.h"
 
-#include <SDL.h>
+// 6. Third Party (ImGui)
 #include <imgui_impl_sdl2.h>
-#include <glm/glm.hpp>
 #include <iostream>
 #include <string>
 
@@ -86,6 +108,7 @@ bool Application::Init() {
     DevConsole::Get().Init();
 
     if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Registering Commands...\n"); fclose(f); }
+    FPSConsoleCommands::RegisterAllCommands();
     CommandRegistry::Get().RegisterCommand(
         "fps_limit", [](const std::vector<std::string>& args) {
             if (!args.empty()) {
@@ -187,9 +210,9 @@ void Application::Run() {
     m_FPSController = std::make_unique<FPSController>(&camera);
     
     printf("DEBUG: FPSController Created\n");
-
-    RenderSystem renderSystem(&camera);
-    renderSystem.Init(m_Scene.get());
+    
+    m_RenderSystem = std::make_unique<RenderSystem>(&camera);
+    m_RenderSystem->Init(m_Scene.get());
     
     printf("DEBUG: RenderSystem Initialized\n");
 
@@ -363,7 +386,7 @@ void Application::Run() {
             m_ImGuiLayer->BeginFrame(); 
 
  
-            renderSystem.Update(deltaTime);
+            m_RenderSystem->Update(deltaTime);
             
             if (m_DevModeActive) {
                 editor.BeginDockSpace();

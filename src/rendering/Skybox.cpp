@@ -90,10 +90,17 @@ void Skybox::Init() {
         in vec3 TexCoords;
 
         uniform samplerCube skybox;
+        uniform bool uUseTexture;
 
         void main()
         {    
-            FragColor = texture(skybox, TexCoords);
+            if (uUseTexture) {
+                FragColor = texture(skybox, TexCoords);
+            } else {
+                // Debug Rainbow
+                vec3 norm = normalize(TexCoords);
+                FragColor = vec4(norm * 0.5 + 0.5, 1.0);
+            }
         }
     )";
 
@@ -116,6 +123,7 @@ void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
     stbi_set_flip_vertically_on_load(false); // Cubemaps should not be flipped usually
     
     std::cout << "Skybox: Loading 6 faces..." << std::endl;
+    m_TextureLoaded = true; // Assume true until fail
 
     for (unsigned int i = 0; i < faces.size(); i++)
     {
@@ -142,6 +150,7 @@ void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
             } catch(...) {}
             std::cout << "        Reason: " << stbi_failure_reason() << std::endl;
             stbi_image_free(data);
+            m_TextureLoaded = false;
         }
     }
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -167,6 +176,7 @@ void Skybox::Draw(const Camera& camera, float aspectRatio) {
 
     m_Shader->SetMat4("view", view);
     m_Shader->SetMat4("projection", projection);
+    m_Shader->SetInt("uUseTexture", m_TextureLoaded ? 1 : 0);
 
     // Cube is viewed from inside, so faces are "back" faces.
     // We must disable culling to see them.

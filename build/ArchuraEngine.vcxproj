@@ -490,6 +490,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Component.cpp" />
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Entity.cpp" />
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\Editor.cpp" />
+    <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\ObjectManipulationTool.cpp" />
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\CommandRegistry.cpp" />
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\DevConsole.cpp" />
     <ClCompile Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\FPSConsoleCommands.cpp" />
@@ -532,6 +533,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\Entity.h" />
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\ecs\System.h" />
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\Editor.h" />
+    <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\editor\ObjectManipulationTool.h" />
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\Animator.h" />
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\AudioSource.h" />
     <ClInclude Include="C:\Users\4rchura\Documents\code_snippets\Archura-Game-Engine-SDL\src\game\CommandRegistry.h" />
