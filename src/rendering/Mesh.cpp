@@ -11,6 +11,7 @@
 #include <map>
 #include <algorithm>
 #include <ufbx.h>
+#include <fast_obj.h>
 
 namespace Archura {
 
@@ -662,83 +663,71 @@ Mesh* Mesh::CreateRamp(float width, float height, float depth) {
 }
 
 Mesh* Mesh::LoadFromOBJ(const std::string& path) {
-    std::vector<glm::vec3> temp_positions;
-    std::vector<glm::vec3> temp_normals;
-    std::vector<glm::vec2> temp_texCoords;
-    
-    std::vector<Vertex> vertices;
-    std::vector<unsigned int> indices;
-    
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    fastObjMesh* obj = fast_obj_read(path.c_str());
+    if (!obj) {
         std::cerr << "Failed to open OBJ file: " << path << "\n";
         return nullptr;
     }
-    
-    std::string line;
-    while (std::getline(file, line)) {
-        std::stringstream ss(line);
-        std::string prefix;
-        ss >> prefix;
-        
-        if (prefix == "v") {
-            glm::vec3 pos;
-            ss >> pos.x >> pos.y >> pos.z;
-            temp_positions.push_back(pos);
-        }
-        else if (prefix == "vt") {
-            glm::vec2 tex;
-            ss >> tex.x >> tex.y;
-            temp_texCoords.push_back(tex);
-        }
-        else if (prefix == "vn") {
-            glm::vec3 norm;
-            ss >> norm.x >> norm.y >> norm.z;
-            temp_normals.push_back(norm);
-        }
-        else if (prefix == "f") {
-            std::string vertexStr;
-            int vertexCount = 0;
-            
-            while (ss >> vertexStr) {
-                if (vertexCount >= 3) continue;
 
-                unsigned int vIndex = 0, vtIndex = 0, vnIndex = 0;
-                
-                size_t firstSlash = vertexStr.find('/');
-                size_t secondSlash = vertexStr.find('/', firstSlash + 1);
-                
-                if (firstSlash != std::string::npos) {
-                    try { vIndex = std::stoi(vertexStr.substr(0, firstSlash)); } catch (...) { vIndex = 0; }
-                    
-                    if (secondSlash != std::string::npos) {
-                        if (secondSlash > firstSlash + 1) {
-                            try { vtIndex = std::stoi(vertexStr.substr(firstSlash + 1, secondSlash - firstSlash - 1)); } catch (...) { vtIndex = 0; }
-                        }
-                        try { vnIndex = std::stoi(vertexStr.substr(secondSlash + 1)); } catch (...) { vnIndex = 0; }
-                    } else {
-                        try { vtIndex = std::stoi(vertexStr.substr(firstSlash + 1)); } catch (...) { vtIndex = 0; }
-                    }
-                } else {
-                    try { vIndex = std::stoi(vertexStr); } catch (...) { vIndex = 0; }
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    
+    unsigned int index_offset = 0;
+    
+    // fast_obj returns faces (polygons), we need to triangulate them.
+    for (unsigned int i = 0; i < obj->face_count; ++i) {
+        unsigned int num_vertices = obj->face_vertices[i];
+        
+        // Triangulate on the fly using ear clipping (triangle fan)
+        for (unsigned int v = 1; v + 1 < num_vertices; ++v) {
+            fastObjIndex idx[3];
+            idx[0] = obj->indices[index_offset + 0];
+            idx[1] = obj->indices[index_offset + v];
+            idx[2] = obj->indices[index_offset + v + 1];
+
+            // Produce 3 vertices for this triangle
+            for (int k = 0; k < 3; ++k) {
+                Vertex vertex;
+                // Reset to default
+                vertex.position = glm::vec3(0.0f);
+                vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                vertex.texCoords = glm::vec2(0.0f);
+                vertex.color = glm::vec3(1.0f); // Default white color
+
+                if (idx[k].p) {
+                    vertex.position = glm::vec3(
+                        obj->positions[3 * idx[k].p + 0],
+                        obj->positions[3 * idx[k].p + 1],
+                        obj->positions[3 * idx[k].p + 2]
+                    );
                 }
                 
-                Vertex vertex;
-                if (vIndex > 0 && vIndex <= temp_positions.size()) vertex.position = temp_positions[vIndex - 1];
-                if (vtIndex > 0 && vtIndex <= temp_texCoords.size()) vertex.texCoords = temp_texCoords[vtIndex - 1];
-                if (vnIndex > 0 && vnIndex <= temp_normals.size()) vertex.normal = temp_normals[vnIndex - 1];
+                if (idx[k].t) {
+                    vertex.texCoords = glm::vec2(
+                        obj->texcoords[2 * idx[k].t + 0],
+                        obj->texcoords[2 * idx[k].t + 1]
+                    );
+                }
+                
+                if (idx[k].n) {
+                    vertex.normal = glm::vec3(
+                        obj->normals[3 * idx[k].n + 0],
+                        obj->normals[3 * idx[k].n + 1],
+                        obj->normals[3 * idx[k].n + 2]
+                    );
+                }
                 
                 vertices.push_back(vertex);
                 indices.push_back((unsigned int)vertices.size() - 1);
-                
-                vertexCount++;
             }
         }
+        index_offset += num_vertices;
     }
+    
+    fast_obj_destroy(obj);
     
     if (vertices.empty()) return nullptr;
     
-    // std::cout << "Loaded OBJ: " << path << " (" << vertices.size() << " vertices)" << std::endl;
     return new Mesh(vertices, indices);
 }
 
