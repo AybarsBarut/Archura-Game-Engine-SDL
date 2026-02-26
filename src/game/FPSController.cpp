@@ -26,11 +26,12 @@ FPSController::FPSController(Camera* camera)
 }
 
 void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem) {
-    // Reordered: Mouse Look FIRST to capture delta for this frame's movement logic
-    HandleMouseLook(input, deltaTime);
+    // Mouse Look is now handled externally in Application::ProcessInput()
+        
     HandleMovement(input, scene, deltaTime);
 
-    // --- STRAFE TILT (Kamera Yatma) ---
+    // --- STRAFE TILT (Kamera Yatma) --- DISABLED for better FPS experience
+    /*
     float targetTilt = 0.0f;
     if (input->IsKeyDown(m_Bindings.left)) {
         targetTilt = m_StrafeTiltAmount;
@@ -41,6 +42,10 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
     // Smooth transition (Lerp)
     m_CurrentTilt = m_CurrentTilt + (targetTilt - m_CurrentTilt) * m_StrafeTiltSpeed * deltaTime;
     m_Camera->SetRoll(m_CurrentTilt);
+    */
+    
+    // Kamera roll'u sıfırla (düz tut)
+    m_Camera->SetRoll(0.0f);
 
     // --- GERİ TEPME İYİLEŞTİRMESİ ---
     if (glm::length(m_CurrentRecoil) > 0.001f) {
