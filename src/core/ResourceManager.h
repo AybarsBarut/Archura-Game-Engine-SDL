@@ -31,16 +31,22 @@ public:
     Mesh* AddMesh(const std::string& name, Mesh* mesh);
     Mesh* GetMesh(const std::string& name);
 
+    // Camera management (for script-created cameras)
+    class Camera* AddCamera(const std::string& name, Camera* camera);
+    Camera* GetCamera(const std::string& name);
+
     // Resource lifecycle
     void Clear();
     void ClearShaders();
     void ClearTextures();
     void ClearMeshes();
+    void ClearCameras();
 
     // Stats
     size_t GetShaderCount() const { return m_Shaders.size(); }
     size_t GetTextureCount() const { return m_Textures.size(); }
     size_t GetMeshCount() const { return m_Meshes.size(); }
+    size_t GetCameraCount() const { return m_Cameras.size(); }
 
 private:
     ResourceManager() = default;
@@ -53,6 +59,7 @@ private:
     std::unordered_map<std::string, Shader*> m_Shaders;
     std::unordered_map<std::string, Texture*> m_Textures;
     std::unordered_map<std::string, Mesh*> m_Meshes;
+    std::unordered_map<std::string, Camera*> m_Cameras;
 };
 
 } // namespace Archura
