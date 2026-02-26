@@ -12,7 +12,13 @@ Engine& Engine::Get() {
 }
 
 bool Engine::Init(const EngineConfig& config) {
-
+    const char* logPath = "logs/startup_detailed.txt";
+    FILE* f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Init started\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     m_EditorMode = config.editorMode;
 
@@ -25,23 +31,84 @@ bool Engine::Init(const EngineConfig& config) {
         config.fullscreen
     );
     
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Creating Window\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Window = std::make_unique<Window>(windowProps);
     if (!m_Window->GetNativeWindow()) {
         std::cerr << "Failed to create window!" << std::endl;
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] ENGINE: Window creation FAILED\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
         return false;
+    }
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Window created successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
     }
 
     // Giris sistemi
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Creating Input system\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Input = std::make_unique<Input>(m_Window->GetNativeWindow());
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Input system created\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
     // Goruntu sistemi
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Initializing Renderer\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Renderer = std::make_unique<Renderer>();
     if (!m_Renderer->Init()) {
         std::cerr << "Failed to initialize renderer!" << std::endl;
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] ENGINE: Renderer initialization FAILED\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
         return false;
     }
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Renderer initialized successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
     m_Running = true;
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] ENGINE: Init completed successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     return true;
 }

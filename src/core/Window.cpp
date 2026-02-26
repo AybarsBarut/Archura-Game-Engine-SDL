@@ -29,15 +29,43 @@ Window::~Window() {
 }
 
 void Window::Init(const WindowProps& props) {
+    const char* logPath = "logs/startup_detailed.txt";
+    FILE* f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Init started\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Title = props.title;
 
     // Initialize SDL
     if (!s_SDLInitialized) {
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] WINDOW: Initializing SDL\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
+        
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
             std::cerr << "SDL Initialization failed: " << SDL_GetError() << "\n";
+            f = fopen(logPath, "a");
+            if(f) { 
+                fprintf(f, "[%dms] WINDOW: SDL Init FAILED: %s\n", SDL_GetTicks(), SDL_GetError()); 
+                fflush(f);
+                fclose(f); 
+            }
             return;
         }
         s_SDLInitialized = true;
+        
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] WINDOW: SDL initialized successfully\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
     }
 
     // OpenGL Attributes
@@ -50,6 +78,13 @@ void Window::Init(const WindowProps& props) {
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
 
     // Create Window
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Creating SDL window\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
     if (props.fullscreen) {
         flags |= SDL_WINDOW_FULLSCREEN;
@@ -66,25 +101,78 @@ void Window::Init(const WindowProps& props) {
     
     if (!m_Window) {
         std::cerr << "Failed to create SDL Window: " << SDL_GetError() << "\n";
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] WINDOW: SDL window creation FAILED: %s\n", SDL_GetTicks(), SDL_GetError()); 
+            fflush(f);
+            fclose(f); 
+        }
         return;
     }
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: SDL window created successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
     // Create OpenGL Context
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Creating OpenGL context\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Context = SDL_GL_CreateContext(m_Window);
     if (!m_Context) {
         std::cerr << "Failed to create OpenGL context: " << SDL_GetError() << "\n";
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] WINDOW: OpenGL context creation FAILED: %s\n", SDL_GetTicks(), SDL_GetError()); 
+            fflush(f);
+            fclose(f); 
+        }
         return;
+    }
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: OpenGL context created successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
     }
 
     SDL_GL_MakeCurrent(m_Window, m_Context);
 
     // Initialzie GLAD
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Initializing GLAD\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        FILE* f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "GLAD Failed\n"); fclose(f); }
+        f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "GLAD Failed\n"); fclose(f); }
         std::cerr << "Failed to initialize GLAD!\n";
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] WINDOW: GLAD initialization FAILED\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
         return;
     }
-    FILE* f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "GLAD Initialized\n"); fclose(f); }
+    f = fopen("startup_log.txt", "a"); if(f) { fprintf(f, "GLAD Initialized\n"); fclose(f); }
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: GLAD initialized successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     std::cout << "OpenGL Info:" << std::endl;
     std::cout << "  Vendor: " << glGetString(GL_VENDOR) << std::endl;
@@ -92,6 +180,13 @@ void Window::Init(const WindowProps& props) {
     std::cout << "  Version: " << glGetString(GL_VERSION) << std::endl;
 
     // VSync
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Setting up OpenGL state\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     SetVSync(m_VSync);
 
     // OpenGL state
@@ -104,6 +199,13 @@ void Window::Init(const WindowProps& props) {
     glViewport(0, 0, m_Width, m_Height);
 
     m_LastFrameTime = (float)SDL_GetTicks() / 1000.0f;
+    
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] WINDOW: Init completed successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 }
 
 void Window::Shutdown() {

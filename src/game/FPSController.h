@@ -48,14 +48,17 @@ public:
     bool IsNoclipEnabled() const { return m_Noclip; }
 
     // Recoil
+    // Recoil
     void AddRecoil(const glm::vec3& recoil); // Pitch, Yaw, Roll (Roll unused for now)
     void ResetRecoil();
+    
+    // Input Handling (Explicit public call)
+    void HandleMouseLook(Input* input, float deltaTime);
 
 private:
     void HandleMovement(Input* input, class Scene* scene, float deltaTime);
-    void HandleMouseLook(Input* input, float deltaTime);
     bool CheckCollision(const glm::vec3& position, class Scene* scene, float* outGroundHeight = nullptr, float stepHeight = 0.0f);
-    
+
     // Physics Helpers
     struct MoveParams {
         float max_velocity;

@@ -81,6 +81,14 @@ void Application::SetDevMode(bool enabled) {
 }
 
 bool Application::Init() {
+    const char* logPath = "logs/startup_detailed.txt";
+    FILE* f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Started\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     Engine::EngineConfig config;
     config.windowTitle = "Archura FPS Engine - Build 0.2 (SDL2)";
     config.windowWidth = 1920;
@@ -88,24 +96,77 @@ bool Application::Init() {
     config.vsync = false;
     config.fullscreen = false;
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Calling Engine::Get().Init()\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
     if (!Engine::Get().Init(config)) {
         std::cerr << "Failed to initialize engine!" << std::endl;
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] APP::Init: Engine::Init() FAILED\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
         return false;
     }
 
-    FILE* f = fopen("logs/startup_log.txt", "a");
-    if(f) { fprintf(f, "Engine Initialized. Initializing Subsystems...\n"); fclose(f); }
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Engine initialized successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     m_Window = Engine::Get().GetWindow();
 
-    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing AudioSystem...\n"); fclose(f); }
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Initializing AudioSystem\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
     AudioSystem::Get().Init();
     
-    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing NetworkManager...\n"); fclose(f); }
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: AudioSystem initialized\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Initializing NetworkManager\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
     NetworkManager::Get().Init();
     
-    if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Initializing DevConsole...\n"); fclose(f); }
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: NetworkManager initialized\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Initializing DevConsole\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
     DevConsole::Get().Init();
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: DevConsole initialized\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     if((f = fopen("logs/startup_log.txt", "a"))) { fprintf(f, "Registering Commands...\n"); fclose(f); }
     FPSConsoleCommands::RegisterAllCommands();
@@ -182,39 +243,111 @@ bool Application::Init() {
             Application::Get().Quit();
         });
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: Initializing ImGuiLayer\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_ImGuiLayer = std::make_unique<ImGuiLayer>();
     m_ImGuiLayer->Init(m_Window);
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP::Init: ImGuiLayer initialized\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     return true;
 }
 
 void Application::Run() {
-    const char* logPath = "C:/Users/4rchura/Documents/code_snippets/Archura-Game-Engine-SDL/logs/startup_log.txt";
-    FILE* f = fopen(logPath, "w"); 
-    if(f) { fprintf(f, "Application::Run Started\n"); fclose(f); }
-    else { fprintf(stderr, "Failed to open %s\n", logPath); }
-    
-    printf("DEBUG: Application::Run invoked\n");
+    const char* logPath = "logs/startup_detailed.txt";
+    FILE* f = fopen(logPath, "a"); 
+    if(f) { 
+        fprintf(f, "[%dms] APP: Run() started\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Calling Init()\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     if (!Init()) {
+        f = fopen(logPath, "a");
+        if(f) { 
+            fprintf(f, "[%dms] APP: Init() FAILED\n", SDL_GetTicks()); 
+            fflush(f);
+            fclose(f); 
+        }
         fprintf(stderr, "Application::Init Failed\n");
         return;
     }
-    printf("DEBUG: Application::Init Success\n");
+    
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Init() completed successfully\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Creating Scene\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
     m_Scene = std::make_unique<Scene>("Demo Scene");
-    Camera camera(glm::vec3(0.0f, 5.0f, 10.0f));
     
-    printf("DEBUG: Scene Created\n");
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Scene created\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
-    m_FPSController = std::make_unique<FPSController>(&camera);
+    // Initialize Camera as member variable
+    m_Camera = std::make_unique<Camera>(glm::vec3(0.0f, 5.0f, 10.0f));
+
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Creating FPSController\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
     
-    printf("DEBUG: FPSController Created\n");
+    m_FPSController = std::make_unique<FPSController>(m_Camera.get());
     
-    m_RenderSystem = std::make_unique<RenderSystem>(&camera);
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: FPSController created\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: Initializing RenderSystem\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+    
+    m_RenderSystem = std::make_unique<RenderSystem>(m_Camera.get());
     m_RenderSystem->Init(m_Scene.get());
     
-    printf("DEBUG: RenderSystem Initialized\n");
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: RenderSystem initialized\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
 
     // 4. Skybox Entity
     Entity* skyboxEntity = m_Scene->CreateEntity("Skybox");
@@ -231,42 +364,58 @@ void Application::Run() {
 
     printf("DEBUG: Skybox Initialized\n");
 
-    HUDRenderer hudRenderer;
-    hudRenderer.Init();
+    // Initialize HUDRenderer as member
+    m_HUDRenderer = std::make_unique<HUDRenderer>();
+    m_HUDRenderer->Init();
     
     printf("DEBUG: HUDRenderer Initialized\n");
 
-    Editor editor;
-    editor.Init(m_Window); 
-    editor.SetEnabled(true);
+    // Initialize Editor as member
+    m_Editor = std::make_unique<Editor>();
+    m_Editor->Init(m_Window); 
+    m_Editor->SetEnabled(true);
     
     printf("DEBUG: Editor Initialized\n");
 
-    Entity* player = m_Scene->CreateEntity("Player");
-    auto* weapon = player->AddComponent<Weapon>();
+    // Create Player entity (store as member)
+    m_Player = m_Scene->CreateEntity("Player");
+    auto* weapon = m_Player->AddComponent<Weapon>();
     weapon->InitInventory();
 
     printf("DEBUG: Player & Weapon Initialized\n");
 
-    auto* playerHealth = player->AddComponent<Health>();
+    auto* playerHealth = m_Player->AddComponent<Health>();
     playerHealth->max = 100.0f;
     playerHealth->current = 100.0f;
 
-    PhysicsSystem physicsSystem;
-    physicsSystem.Init(m_Scene.get());
+    // Initialize game systems as members
+    m_PhysicsSystem = std::make_unique<PhysicsSystem>();
+    m_PhysicsSystem->Init(m_Scene.get());
     
     printf("DEBUG: PhysicsSystem Initialized\n");
 
-    ScriptSystem scriptSystem;
-    scriptSystem.Init(m_Scene.get());
+    m_ScriptSystem = std::make_unique<ScriptSystem>();
+    m_ScriptSystem->Init(m_Scene.get());
 
-    ParticleSystem particleSystem;
-    particleSystem.Init(m_Scene.get());
+    m_ParticleSystem = std::make_unique<ParticleSystem>();
+    m_ParticleSystem->Init(m_Scene.get());
 
-    ProjectileSystem projectileSystem;
-    projectileSystem.Init(m_Scene.get());
+    m_ProjectileSystem = std::make_unique<ProjectileSystem>();
+    m_ProjectileSystem->Init(m_Scene.get());
 
-    printf("DEBUG: All Systems Initialized. Entering Loop.\n");
+    f = fopen(logPath, "a");
+    if(f) { 
+        fprintf(f, "[%dms] APP: All systems initialized. Entering main loop\n", SDL_GetTicks()); 
+        fflush(f);
+        fclose(f); 
+    }
+
+    // Cache engine subsystem pointers
+    m_EngineWindow = Engine::Get().GetWindow();
+    m_Input = Engine::Get().GetInput();
+    m_Renderer = Engine::Get().GetRenderer();
+
+
 
     // --- SETUP ROBUST MAP (V2) ---
     // 1. Sun
@@ -331,80 +480,68 @@ void Application::Run() {
     }
     // ---------------------------
     
+    // Initialize PauseMenu as member
+    m_PauseMenu = std::make_unique<PauseMenu>();
+
+    // Set initial cursor mode (locked for FPS gameplay)
+    m_Input->SetCursorMode(2); // Locked
 
 
-    PauseMenu pauseMenu;
+    std::cout << "DEBUG: Window ShouldClose: " << m_EngineWindow->ShouldClose() << ", Running: " << m_Running << std::endl;
 
-    auto* window = Engine::Get().GetWindow();
-    auto* input = Engine::Get().GetInput();
-    auto* renderer = Engine::Get().GetRenderer();
+    // Initialize timing for fixed timestep
+    m_LastFrameTime = SDL_GetTicks() / 1000.0f;
+    m_Accumulator = 0.0f;
+    m_TickCount = 0;
 
-
-
-    // 0 = Normal, 1 = Hidden, 2 = Locked/Relative
-    input->SetCursorMode(2); // Locked
-
-
-
-    std::cout << "DEBUG: Window ShouldClose: " << window->ShouldClose() << ", Running: " << m_Running << std::endl;
+    std::cout << "Starting 128 tickrate main loop..." << std::endl;
 
     try {
-        while (!window->ShouldClose() && m_Running) {
-            // std::cout << "Loop Tik" << std::endl; // Too spammy, maybe once
+        while (!m_EngineWindow->ShouldClose() && m_Running) {
+            // Calculate frame time
+            float currentTime = SDL_GetTicks() / 1000.0f;
+            float frameTime = currentTime - m_LastFrameTime;
+            m_LastFrameTime = currentTime;
             
-            float time = (float)SDL_GetTicks() / 1000.0f;
-            float deltaTime = time - (float)m_LastFrameTime;
-            m_LastFrameTime = time;
-
-            // 1. Poll Events
-            input->Update(); 
-            SDL_Event event;
-            while (SDL_PollEvent(&event)) {
-                 ImGui_ImplSDL2_ProcessEvent(&event);
-                 input->OnEvent(event);
-                 if (event.type == SDL_QUIT) window->SetShouldClose(true);
-                 if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) window->SetShouldClose(true);
-            }
-
-            // [Input Handling Code...]
-            if (input->IsKeyJustPressed(SDL_SCANCODE_TAB)) { SetDevMode(!m_DevModeActive); }
-            if (input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) { m_IsPaused = !m_IsPaused; input->SetCursorMode(m_IsPaused ? 0 : 2); }
-            if (input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) { DevConsole::Get().Toggle(); }
-
-            // 2. Game Logic
-            if (!m_IsPaused) {
-                m_FPSController->Update(input, m_Scene.get(), deltaTime, &projectileSystem);
-                projectileSystem.Update(deltaTime);
-                physicsSystem.Update(deltaTime);
-                scriptSystem.Update(deltaTime);
-                particleSystem.Update(deltaTime);
-                AudioSystem::Get().Update(m_Scene.get(), &camera);
-            }
-
-            // 3. Rendering
-            renderer->BeginFrame(); 
-            m_ImGuiLayer->BeginFrame(); 
-
- 
-            m_RenderSystem->Update(deltaTime);
-            
-            if (m_DevModeActive) {
-                editor.BeginDockSpace();
-                editor.DrawMenuBar(m_Scene.get());
-                editor.DrawEditorUI(m_Scene.get());
-                editor.DrawOverlay(m_Scene.get(), &camera);
+            // Cap frame time to prevent spiral of death
+            if (frameTime > 0.25f) {
+                frameTime = 0.25f;  // Max 4 FPS minimum
             }
             
-            DevConsole::Get().Render();
-            pauseMenu.Render(m_IsPaused, *m_FPSController, *window);
-
-            m_ImGuiLayer->EndFrame(); 
-            renderer->EndFrame(); 
+            m_Accumulator += frameTime;
             
-            window->Update(); 
-            input->EndFrame(); 
+            // Fixed timestep update loop (128 Hz)
+            // Process input and events (ONCE PER FRAME)
+            ProcessInput();
+
+            // Fixed timestep update loop (128 Hz)
+            int ticksThisFrame = 0;
+            while (m_Accumulator >= TICK_INTERVAL && ticksThisFrame < MAX_TICKS_PER_FRAME) {
+                
+                // Update game logic with fixed timestep
+                UpdateGameLogic(TICK_INTERVAL);
+
+                m_Accumulator -= TICK_INTERVAL;
+                ticksThisFrame++;
+                m_TickCount++;
+            }
+            
+            // Calculate interpolation alpha for smooth rendering
+            float alpha = m_Accumulator / TICK_INTERVAL;
+            
+            // Render with interpolation
+            RenderFrame(alpha);
+            
+            // FPS Counter (every second)
+            m_FrameCount++;
+            if (currentTime - m_LastFPSUpdateTime >= 1.0) {
+                m_CurrentFPS = m_FrameCount / (currentTime - m_LastFPSUpdateTime);
+                // std::cout << "FPS: " << m_CurrentFPS << " | Ticks: " << m_TickCount << std::endl;
+                m_FrameCount = 0;
+                m_LastFPSUpdateTime = currentTime;
+            }
         }
-        std::cout << "DEBUG: Exited Loop. ShouldClose: " << window->ShouldClose() << ", Running: " << m_Running << std::endl;
+        std::cout << "DEBUG: Exited Loop. ShouldClose: " << m_EngineWindow->ShouldClose() << ", Running: " << m_Running << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Exception: " << e.what() << std::endl;
     } catch (...) {
@@ -413,4 +550,72 @@ void Application::Run() {
     std::cout << "DEBUG: Exiting Application::Run" << std::endl;
 }
 
+void Application::ProcessInput() {
+    // 1. Poll Events
+    m_Input->Update();
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL2_ProcessEvent(&event);
+        m_Input->OnEvent(event);
+        if (event.type == SDL_QUIT) 
+            m_EngineWindow->SetShouldClose(true);
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) 
+            m_EngineWindow->SetShouldClose(true);
+    }
+
+    // 2. Handle special input (pause, dev mode, console)
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_TAB)) { 
+        SetDevMode(!m_DevModeActive); 
+    }
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) { 
+        m_IsPaused = !m_IsPaused; 
+        m_Input->SetCursorMode(m_IsPaused ? 0 : 2); 
+    }
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) { 
+        DevConsole::Get().Toggle(); 
+    }
+
+    // 3. Mouse Look (Raw Input - Per Frame)
+    if (!m_IsPaused && m_FPSController) {
+        m_FPSController->HandleMouseLook(m_Input, 0.0f); // DeltaTime unused for raw mouse delta
+    }
+}
+
+void Application::UpdateGameLogic(float dt) {
+    if (!m_IsPaused) {
+        m_FPSController->Update(m_Input, m_Scene.get(), dt, m_ProjectileSystem.get());
+        m_ProjectileSystem->Update(dt);
+        m_PhysicsSystem->Update(dt);
+        m_ScriptSystem->Update(dt);
+        m_ParticleSystem->Update(dt);
+        AudioSystem::Get().Update(m_Scene.get(), m_Camera.get());
+    }
+}
+
+void Application::RenderFrame(float alpha) {
+    m_Renderer->BeginFrame();
+    m_ImGuiLayer->BeginFrame();
+
+    // Render with interpolation (alpha available for future use)
+    // TODO: Pass alpha to RenderSystem for interpolated rendering
+    m_RenderSystem->Update(TICK_INTERVAL);
+    
+    if (m_DevModeActive) {
+        m_Editor->BeginDockSpace();
+        m_Editor->DrawMenuBar(m_Scene.get());
+        m_Editor->DrawEditorUI(m_Scene.get());
+        m_Editor->DrawOverlay(m_Scene.get(), m_Camera.get());
+    }
+    
+    DevConsole::Get().Render();
+    m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow);
+
+    m_ImGuiLayer->EndFrame();
+    m_Renderer->EndFrame();
+    
+    m_EngineWindow->Update();
+    m_Input->EndFrame();
+}
+
 } // namespace Archura
+
