@@ -1,4 +1,6 @@
 #include "ScriptSystem.h"
+#include "../scripting/ScriptEngine.h"
+#include "../ecs/Component.h"
 #include "DevConsole.h"
 #include <iostream>
 
@@ -6,8 +8,16 @@ namespace Archura {
 
     void ScriptSystem::Init(Scene* scene) {
         m_Scene = scene;
-        // std::cout << "Script System Initialized (Mock .NET Host)" << std::endl;
-        DevConsole::Get().Log("Script System Initialized");
+        ScriptEngine::Init();
+        DevConsole::Get().Log("Script System Initialized (Mono)");
+        
+        // Initialize existing entities
+        for (auto& entityPtr : m_Scene->GetEntities()) {
+            Entity* entity = entityPtr.get();
+            if (entity->HasComponent<ScriptComponent>()) {
+                 ScriptEngine::OnCreateEntity(*entity);
+            }
+        }
     }
 
     void ScriptSystem::Update(float deltaTime) {
@@ -16,30 +26,19 @@ namespace Archura {
         // Iterate over all entities with ScriptComponent
         for (auto& entityPtr : m_Scene->GetEntities()) {
             Entity* entity = entityPtr.get();
-            auto* script = entity->GetComponent<ScriptComponent>();
-
-            if (script) {
-                // Mock Execution: In real engine, we would call C# OnUpdate() here
-                // For now, we just log occasionally to prove the system is running
-                
-                // Example: If script name is "Rotator", rotate the entity
-                if (script->className == "Rotator") {
-                    auto* transform = entity->GetComponent<Transform>();
-                    if (transform) {
-                        transform->rotation.y += 90.0f * deltaTime;
-                    }
-                }
+            if (entity->HasComponent<ScriptComponent>()) {
+                ScriptEngine::OnUpdateEntity(*entity, deltaTime);
             }
         }
     }
 
     void ScriptSystem::Shutdown() {
-        // Unload AppDomain
+        ScriptEngine::Shutdown();
     }
 
     void ScriptSystem::ReloadScripts() {
-        DevConsole::Get().Log("Reloading Assemblies...");
-        // Reload logic
+        ScriptEngine::LoadAssembly("Resources/Scripts/ScriptCore.dll");
+        // Re-initialize entities might be needed here
     }
 
 } // namespace Archura
