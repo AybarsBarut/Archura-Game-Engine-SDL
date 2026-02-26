@@ -6,3 +6,10 @@ bin/
 .vs/
 .vscode/
 *.log
+obj/
+*_log.txt
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tga
