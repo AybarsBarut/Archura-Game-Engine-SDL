@@ -1,0 +1,16 @@
+{
+  "server_name": "Archura Server",
+  "port": 27015,
+  "max_players": 16,
+  "tickrate": 128,
+  "snapshot_rate": 64,
+  "map": "dm_arena",
+  "game_mode": "deathmatch",
+  "password": "",
+  "client_timeout": 30.0,
+  "connection_timeout": 10.0,
+  "rcon_password": "",
+  "enable_rcon": false,
+  "verbose_logging": false,
+  "log_file": "server.log"
+}
