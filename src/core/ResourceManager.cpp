@@ -2,6 +2,7 @@
 #include "../rendering/Shader.h"
 #include "../rendering/Texture.h"
 #include "../rendering/Mesh.h"
+#include "../rendering/Camera.h"
 #include <iostream>
 
 namespace Archura {
@@ -82,13 +83,33 @@ Mesh* ResourceManager::GetMesh(const std::string& name) {
     return (it != m_Meshes.end()) ? it->second : nullptr;
 }
 
+// ==================== Camera Yonetimi ====================
+
+Camera* ResourceManager::AddCamera(const std::string& name, Camera* camera) {
+    if (!camera) return nullptr;
+
+    auto it = m_Cameras.find(name);
+    if (it != m_Cameras.end()) {
+        // Eski kamerayi sil ve yenisiyle degistir
+        delete it->second;
+    }
+
+    m_Cameras[name] = camera;
+    return camera;
+}
+
+Camera* ResourceManager::GetCamera(const std::string& name) {
+    auto it = m_Cameras.find(name);
+    return (it != m_Cameras.end()) ? it->second : nullptr;
+}
+
 // ==================== Temizlik ====================
 
 void ResourceManager::Clear() {
     ClearShaders();
     ClearTextures();
     ClearMeshes();
-
+    ClearCameras();
 }
 
 void ResourceManager::ClearShaders() {
@@ -110,6 +131,13 @@ void ResourceManager::ClearMeshes() {
         delete pair.second;
     }
     m_Meshes.clear();
+}
+
+void ResourceManager::ClearCameras() {
+    for (auto& pair : m_Cameras) {
+        delete pair.second;
+    }
+    m_Cameras.clear();
 }
 
 } // namespace Archura
