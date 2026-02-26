@@ -1,0 +1,52 @@
+name: Feature Request
+description: Suggest an idea, enhancement, or new API for Archura Engine
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement to Archura Engine! We appreciate your feedback.
+
+  - type: dropdown
+    id: system
+    attributes:
+      label: Which engine system does this feature relate to?
+      description: Select the core module your idea targets.
+      options:
+        - Core Engine / Memory / Resource Management
+        - Rendering (OpenGL/Shaders/Models)
+        - ECS & Components
+        - Physics & Collision
+        - C# Scripting API (Mono)
+        - Networking Architecture / Server
+        - Editor / Tools
+        - Entirely New System
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: A clear and concise description of what you want to happen. Provide a C++ or C# API mockup if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe alternatives you've considered
+      description: A clear and concise description of any alternative solutions or features you've considered.
+    validations:
+      required: false
