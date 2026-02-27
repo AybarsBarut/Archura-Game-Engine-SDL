@@ -1,0 +1,48 @@
+serverside files will be splitted to another repo
+Map save system doesnt exist yet, i need to figure out how can i save a map and how can i send map files to every player in the server and also if any user creates a map to play with his friends or make their own game how they gonna pack their own games
+Needs a user id system to admin commands 
+skybox added but it is not perfect yet, maybe a sphere skybox would works better but main focus on this game engine is optimization for low end pc's because of ram and gpu shortage
+Engine needs a fps limitation for better movement calculations
+
+Notes about pyhsics:
+Free fall velocity formula: v = √(2 · g · h) -> m_Velocity.y = sqrt(m_JumpHeight * 2.0f * -m_Gravity); 
+
+friction force calculations;
+float control = speed < stop_speed ? stop_speed : speed;
+float drop = control * friction * deltaTime;
+float newSpeed = (speed - drop) / speed;
+m_Velocity.x *= newSpeed;
+m_Velocity.z *= newSpeed;
+
+vector projection;
+float currentSpeed = glm::dot(m_Velocity, wishDir);  
+float addSpeed = max_velocity - currentSpeed;
+float accelSpeed = accelerate * deltaTime * max_velocity;
+if (accelSpeed > addSpeed) accelSpeed = addSpeed;   // Cap
+m_Velocity += accelSpeed * wishDir;
+
+horizontal movement normalization;
+float horizontalSpeed = sqrt(Vx² + Vz²);   // Horizontal velocity magnitude
+if (horizontalSpeed > m_MaxBunnyhopSpeed) {
+    float scale = m_MaxBunnyhopSpeed / horizontalSpeed;
+    m_Velocity.x *= scale;
+    m_Velocity.z *= scale;
+}
+
+
+Euler integration — Δx = v · Δt 
+m_Velocity.y += m_Gravity * deltaTime;     // FPSController
+rb->velocity += m_Gravity * deltaTime;      // PhysicsSystem
+
+
+linear drag calc.
+rb->velocity *= (1.0f - rb->drag * deltaTime);
+
+Axis-Aligned Bounding Box
+bool xOverlap = |posA.x - posB.x| <= (halfA.x + halfB.x);
+bool yOverlap = |posA.y - posB.y| <= (halfA.y + halfB.y);
+bool zOverlap = |posA.z - posB.z| <= (halfA.z + halfB.z);
+
+Player Capsule Test
+glm::mat4 invModel = glm::inverse(model);           // Inverse model matrix
+glm::vec4 testPos4 = invModel * glm::vec4(worldPos, 1.0f);  // word to space
