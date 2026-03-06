@@ -15,6 +15,7 @@ uniform bool uUseTexture;
 // Light struct
 struct Light {
     vec3 position;
+    vec3 direction; // NEW: Added direction
     vec3 color;
     float intensity;
     float range;
@@ -81,7 +82,7 @@ void main() {
     vec3 totalLight = vec3(0.0);
     
     // Ambient (global, once)
-    vec3 ambient = uAmbient * 0.1; // Reduced ambient base
+    vec3 ambient = uAmbient; // Use full ambient passed from C++
     totalLight += ambient;
 
     for(int i = 0; i < uLightCount; i++) {
@@ -90,7 +91,13 @@ void main() {
         float shadow = 0.0;
 
         if (uLights[i].type == 0) { // Directional
-             lightDir = normalize(vec3(0.2, 1.0, 0.3)); // To Light (Upwards) 
+             // Use the uniform direction!
+             // Direction points FROM light source TO world (usually). 
+             // But standard Phong expects Direction TO light source.
+             // if uLights[i].direction is "Forward" vector of light, it points AWAY from source.
+             // So ToLight = -direction.
+             lightDir = normalize(-uLights[i].direction);
+             
              // Calculate Shadow only for Directional
              vec4 fragPosLightSpace = uLightSpaceMatrix * vec4(FragPos, 1.0);
              shadow = ShadowCalculation(fragPosLightSpace);

@@ -11,124 +11,117 @@ out vec4 FragColor;
 uniform sampler2D uTexture;
 uniform bool uUseTexture;
 
-// Lighting uniforms
-// Light struct
+// Lighting
 struct Light {
-    vec3 position;
-    vec3 direction; // NEW: Added direction
-    vec3 color;
+    vec3  position;
+    vec3  direction;
+    vec3  color;
     float intensity;
     float range;
-    int type; // 0 = Directional, 1 = Point
+    int   type; // 0 = Directional, 1 = Point, 2 = Ambient/Circle
 };
 
 #define MAX_LIGHTS 4
 uniform Light uLights[MAX_LIGHTS];
-uniform int uLightCount;
+uniform int   uLightCount;
 
-uniform vec3 uViewPos;
+uniform vec3  uViewPos;
 
-// Material properties
-uniform vec3 uAmbient;
-uniform vec3 uDiffuse;
-uniform vec3 uSpecular;
+// Material
+uniform vec3  uAmbient;
+uniform vec3  uDiffuse;
+uniform vec3  uSpecular;
 uniform float uShininess;
 
+// Shadow map
 uniform sampler2D uShadowMap;
-uniform mat4 uLightSpaceMatrix;
+uniform mat4      uLightSpaceMatrix;
 
-float ShadowCalculation(vec4 fragPosLightSpace) {
-    // perform perspective divide
-    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    // transform to [0,1] range
+// ── Shadow PCF 3x3 with normal-based bias ────────────────────────────────────
+float ShadowCalculation(vec4 fragPosLS, vec3 norm, vec3 lightDir) {
+    vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
     projCoords = projCoords * 0.5 + 0.5;
-    // get closest depth value from light's perspective (using [0,1] range fragPosLight as coords)
-    float closestDepth = texture(uShadowMap, projCoords.xy).r; 
-    // get depth of current fragment from light's perspective
+
+    // Outside ortho frustum → fully lit
+    if (projCoords.z > 1.0) return 0.0;
+
     float currentDepth = projCoords.z;
-    // check whether current frag pos is in shadow
-    // float bias = 0.005; // Bias to prevent acne
-    // Simple bias based on normal
-    // vec3 normal = normalize(Normal);
-    // vec3 lightDir = normalize(vec3(-0.2, -1.0, -0.3)); // Same as hardcoded dir
-    // float bias = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
-    float bias = 0.005;
+
+    // Normal-based bias: grazing angles get more bias to prevent acne
+    float cosTheta = max(dot(norm, lightDir), 0.0);
+    float bias = mix(0.015, 0.003, cosTheta);
 
     float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
-    for(int x = -1; x <= 1; ++x)
-    {
-        for(int y = -1; y <= 1; ++y)
-        {
-            float pcfDepth = texture(uShadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
+    vec2 texelSize = 1.0 / vec2(textureSize(uShadowMap, 0));
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(uShadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+        }
     }
-    shadow /= 9.0;
-    
-    if(projCoords.z > 1.0)
-        shadow = 0.0;
-        
-    return shadow;
+    return shadow / 9.0;
 }
 
 void main() {
-    // Base color
     vec3 baseColor = uUseTexture ? texture(uTexture, TexCoords).rgb : Color;
-    
-    vec3 norm = normalize(Normal);
+
+    vec3 norm    = normalize(Normal);
     vec3 viewDir = normalize(uViewPos - FragPos);
-    
-    vec3 totalLight = vec3(0.0);
-    
-    // Ambient (global, once)
-    vec3 ambient = uAmbient; // Use full ambient passed from C++
-    totalLight += ambient;
 
-    for(int i = 0; i < uLightCount; i++) {
-        vec3 lightDir;
-        float attenuation = 1.0;
-        float shadow = 0.0;
+    // Ambient floor – C++ controls uAmbient but we guarantee a minimum of 0.15
+    // so walls never go completely black regardless of light position.
+    vec3 totalLight = max(uAmbient, vec3(0.15));
 
-        if (uLights[i].type == 0) { // Directional
-             // Use the uniform direction!
-             // Direction points FROM light source TO world (usually). 
-             // But standard Phong expects Direction TO light source.
-             // if uLights[i].direction is "Forward" vector of light, it points AWAY from source.
-             // So ToLight = -direction.
-             lightDir = normalize(-uLights[i].direction);
-             
-             // Calculate Shadow only for Directional
-             vec4 fragPosLightSpace = uLightSpaceMatrix * vec4(FragPos, 1.0);
-             shadow = ShadowCalculation(fragPosLightSpace);
-        } else if (uLights[i].type == 1) { // Point
-            lightDir = normalize(uLights[i].position - FragPos);
-            float distance = length(uLights[i].position - FragPos);
-            if (distance < uLights[i].range) {
-                float a = distance / uLights[i].range;
-                attenuation = 1.0 - a;
-                attenuation = max(attenuation, 0.0);
-                attenuation *= attenuation;
-            } else {
-                attenuation = 0.0;
-            }
-        } else if (uLights[i].type == 2) { // Circle (Ambient / Everywhere)
-            totalLight += uLights[i].color * uLights[i].intensity;
-            continue; 
+    // Guard shininess: pow(x, 0) = 1 if x>=0, but a zero / undefined uniform
+    // from C++ can still cause NaN/full-bright specular.
+    float shininess = max(uShininess, 1.0);
+
+    for (int i = 0; i < uLightCount; i++) {
+        Light L = uLights[i];
+
+        // Ambient / everywhere light ──────────────────────────────────────────
+        if (L.type == 2) {
+            totalLight += L.color * L.intensity;
+            continue;
         }
-        
-        // Diffuse
-        float diff = max(dot(norm, lightDir), 0.0);
-        vec3 diffuse = uDiffuse * diff * uLights[i].color * uLights[i].intensity;
-        
-        // Specular
-        vec3 halfwayDir = normalize(lightDir + viewDir);
-        float spec = pow(max(dot(norm, halfwayDir), 0.0), uShininess);
-        vec3 specular = uSpecular * spec * uLights[i].color * uLights[i].intensity;
-        
+
+        vec3  lightDir    = vec3(0.0);
+        float attenuation = 1.0;
+        float shadow      = 0.0;
+
+        // Directional ─────────────────────────────────────────────────────────
+        if (L.type == 0) {
+            // L.direction is the Forward vector of the light entity (away from source)
+            // → flip to get "towards light"
+            lightDir = normalize(-L.direction);
+            vec4 fragPosLS = uLightSpaceMatrix * vec4(FragPos, 1.0);
+            shadow = ShadowCalculation(fragPosLS, norm, lightDir);
+        }
+        // Point ───────────────────────────────────────────────────────────────
+        else if (L.type == 1) {
+            vec3  toLight = L.position - FragPos;
+            float dist    = length(toLight);
+            lightDir = toLight / max(dist, 0.0001);
+
+            if (dist >= L.range) continue; // fully outside range
+
+            // Smooth quadratic falloff: 1 at center, 0 at range edge
+            float t = dist / L.range;
+            attenuation = clamp(1.0 - t * t, 0.0, 1.0);
+        }
+
+        // Diffuse (Lambert) ───────────────────────────────────────────────────
+        float diff    = max(dot(norm, lightDir), 0.0);
+        vec3  diffuse = uDiffuse * diff * L.color * L.intensity;
+
+        // Specular (Blinn-Phong) ──────────────────────────────────────────────
+        vec3  halfDir = normalize(lightDir + viewDir);
+        float spec    = pow(max(dot(norm, halfDir), 0.0), shininess);
+        vec3  specular = uSpecular * spec * L.color * L.intensity;
+
         totalLight += (diffuse + specular) * attenuation * (1.0 - shadow);
     }
-    
-    vec3 result = totalLight * baseColor;
+
+    vec3 result = clamp(totalLight, 0.0, 1.0) * baseColor;
     FragColor = vec4(result, 1.0);
 }
