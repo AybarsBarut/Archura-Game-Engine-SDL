@@ -27,6 +27,20 @@ public:
     void SetCamera(Camera* camera) { m_Camera = camera; }
     Camera* GetCamera() const { return m_Camera; }
 
+    /**
+     * @brief Override the view + projection matrices for one frame.
+     *
+     * Call before Update() each frame from the editor when the EditorCamera
+     * is active. RenderSystem will use these matrices instead of deriving them
+     * from m_Camera.  Call ClearViewOverride() to revert to m_Camera.
+     */
+    void SetViewOverride(const glm::mat4& view, const glm::mat4& proj) {
+        m_ViewOverride       = view;
+        m_ProjOverride       = proj;
+        m_HasViewOverride    = true;
+    }
+    void ClearViewOverride() { m_HasViewOverride = false; }
+
     void SetIsolatedEntity(Entity* entity) { m_IsolationTarget = entity; }
 
 private:
@@ -34,6 +48,11 @@ private:
     Camera* m_Camera;
     std::unique_ptr<Shader> m_DefaultShader;
     class Mesh* m_DebugMesh = nullptr;
+
+    // Editor camera view override (set per-frame when EditorCamera is active)
+    glm::mat4 m_ViewOverride     = glm::mat4(1.0f);
+    glm::mat4 m_ProjOverride     = glm::mat4(1.0f);
+    bool      m_HasViewOverride  = false;
     
     // Lighting
     // Lighting

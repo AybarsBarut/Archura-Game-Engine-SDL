@@ -89,7 +89,7 @@ void Mesh::SetupInstancedAttributes() {
     
     for (int i = 0; i < 4; i++) {
         glEnableVertexAttribArray(4 + i);
-        glVertexAttribPointer(4 + i, 4, GL_FLOAT, GL_FALSE, 4 * vec4Size, (void*)(i * vec4Size));
+        glVertexAttribPointer(4 + i, 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(4 * vec4Size), (void*)(i * vec4Size));
         glVertexAttribDivisor(4 + i, 1); // Her instance icin 1 kez ilerle
     }
 
@@ -399,7 +399,7 @@ Mesh* Mesh::CreateCapsule(float radius, float height) {
     
     // Indices
     int verticesPerRing = segments + 1;
-    int ringCount = vertices.size() / verticesPerRing;
+    int ringCount = static_cast<int>(vertices.size() / verticesPerRing);
     
     for (int r = 0; r < ringCount - 1; ++r) {
         for (int s = 0; s < segments; ++s) {

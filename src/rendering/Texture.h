@@ -31,6 +31,7 @@ public:
     int GetChannels() const { return m_Channels; }
 
     bool IsLoaded() const { return m_TextureID != 0; }
+    const std::string& GetPath() const { return m_Path; }
 
 private:
     unsigned int m_TextureID = 0;

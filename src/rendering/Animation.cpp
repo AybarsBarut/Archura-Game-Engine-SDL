@@ -9,6 +9,7 @@
 namespace Archura {
 
 Animation::Animation(const std::string& animationPath, class Model* model) {
+    (void)model;
     ufbx_load_opts loadOpts = {0}; 
     ufbx_error error;
     ufbx_scene* scene = ufbx_load_file(animationPath.c_str(), &loadOpts, &error);
@@ -42,7 +43,7 @@ Animation::Animation(const std::string& animationPath, class Model* model) {
          return;
     }
 
-    m_TicksPerSecond = 30.0f; 
+    m_TicksPerSecond = 30; 
     m_Duration = (float)stack->time_end - (float)stack->time_begin;
     if(m_Duration <= 0.0f) m_Duration = 1.0f;
 
@@ -66,7 +67,7 @@ Animation::Animation(const std::string& animationPath, class Model* model) {
             bone.m_Positions.push_back(kp);
             
             KeyRotation kr;
-            kr.orientation = glm::quat(transform.rotation.w, transform.rotation.x, transform.rotation.y, transform.rotation.z);
+            kr.orientation = glm::quat((float)transform.rotation.w, (float)transform.rotation.x, (float)transform.rotation.y, (float)transform.rotation.z);
             kr.timeStamp = (float)time;
             bone.m_Rotations.push_back(kr);
             
