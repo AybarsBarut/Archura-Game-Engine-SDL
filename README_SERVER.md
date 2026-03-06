@@ -229,18 +229,17 @@ Log seviyelerini kontrol etmek için:
 ## Destek
 
 Sorunlarınız için:
-- GitHub Issues: [repository link]
-- Discord: [discord link]
+- GitHub Issues: [https://github.com/AybarsBarut/Archura-Game-Engine-SDL]
 - Email: support@archura.com
 
 ## Sürüm Notları
 
 ### v1.0.0 (Current)
-- ✅ 128 tickrate desteği
-- ✅ Headless dedicated server
-- ✅ JSON config dosyası
-- ✅ Komut satırı parametreleri
-- ✅ Verbose logging
-- ⏳ UDP network protocol (yakında)
-- ⏳ Client prediction (yakında)
-- ⏳ Server browser (yakında)
+-  128 tickrate desteği
+-  Headless dedicated server
+-  JSON config dosyası
+-  Komut satırı parametreleri
+-  Verbose logging
+-  UDP network protocol (yakında)
+-  Client prediction (yakında)
+-  Server browser (yakında)
