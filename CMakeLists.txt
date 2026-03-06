@@ -35,7 +35,7 @@ if(MSVC)
     # Ignore LIBCMT to prevent LNK4098 warning when using /MD
     add_link_options("/NODEFAULTLIB:LIBCMT")
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-    add_compile_options(/W4 /MP)
+    add_compile_options(/W4 /MP /wd4201)
 else()
     add_compile_options(-O3 -march=native -ffast-math -flto)
 endif()
@@ -146,6 +146,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/core/ResourceManager.cpp"
     "src/core/Logger.cpp"
     "src/core/ProjectSerializer.cpp"
+    "src/core/GameSaveManager.cpp"
     "src/rendering/*.cpp"
     "src/input/*.cpp"
     "src/scripting/*.cpp"
@@ -160,6 +161,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/game/FPSConsoleCommands.cpp"
     "src/game/PauseMenu.cpp"
     "src/game/ScriptSystem.cpp"
+    "src/game/GameModeManager.cpp"
     "src/editor/*.cpp"
 )
 
