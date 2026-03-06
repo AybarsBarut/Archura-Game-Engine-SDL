@@ -20,11 +20,35 @@ namespace Archura {
     #define ARCHURA_ADD_INTERNAL_CALL(Name) mono_add_internal_call("Archura.InternalCalls::" #Name, Name)
 
     static void NativeLog(MonoString* string, int parameter) {
+        (void)parameter;
         char* cStr = mono_string_to_utf8(string);
         // std::cout << "[Script Log] " << cStr << ", " << parameter << std::endl;
         // Ideally use DevConsole
         mono_free(cStr);
     }
+
+    #pragma region Entity Lifecycle
+
+    static uint64_t Entity_Create(MonoString* nameStr) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            char* cStr = mono_string_to_utf8(nameStr);
+            std::string name(cStr);
+            mono_free(cStr);
+            Entity* newEntity = scene->CreateEntity(name);
+            return newEntity ? newEntity->GetID() : 0;
+        }
+        return 0;
+    }
+
+    static void Entity_Destroy(uint64_t entityID) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            scene->DestroyEntity((uint32_t)entityID);
+        }
+    }
+
+    #pragma endregion
 
     #pragma region Transform
 
@@ -52,11 +76,44 @@ namespace Archura {
         }
     }
 
+    static void Transform_GetRotation(uint64_t entityID, glm::vec3* outRotation) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity) *outRotation = entity->GetComponent<Transform>()->rotation;
+        }
+    }
+
+    static void Transform_SetRotation(uint64_t entityID, glm::vec3* rotation) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity) entity->GetComponent<Transform>()->rotation = *rotation;
+        }
+    }
+
+    static void Transform_GetScale(uint64_t entityID, glm::vec3* outScale) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity) *outScale = entity->GetComponent<Transform>()->scale;
+        }
+    }
+
+    static void Transform_SetScale(uint64_t entityID, glm::vec3* scale) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity) entity->GetComponent<Transform>()->scale = *scale;
+        }
+    }
+
     #pragma endregion
 
     #pragma region Input
 
     static bool Input_IsKeyDown(int keycode) {
+        (void)keycode;
         // Placeholder for Input System access
         // return Input::IsKeyDown(keycode); 
         return false; 
@@ -72,6 +129,60 @@ namespace Archura {
             Entity* entity = scene->GetEntity((uint32_t)entityID);
             if (entity && entity->HasComponent<RigidBody>()) {
                 entity->GetComponent<RigidBody>()->force += *force;
+            }
+        }
+    }
+
+    static void RigidBody_GetVelocity(uint64_t entityID, glm::vec3* outVelocity) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity && entity->HasComponent<RigidBody>()) {
+                *outVelocity = entity->GetComponent<RigidBody>()->velocity;
+            }
+        }
+    }
+
+    static void RigidBody_SetVelocity(uint64_t entityID, glm::vec3* velocity) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity && entity->HasComponent<RigidBody>()) {
+                entity->GetComponent<RigidBody>()->velocity = *velocity;
+            }
+        }
+    }
+
+    static void RigidBody_SetGravityEnabled(uint64_t entityID, bool enabled) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity && entity->HasComponent<RigidBody>()) {
+                entity->GetComponent<RigidBody>()->useGravity = enabled;
+            }
+        }
+    }
+
+    #pragma endregion
+
+    #pragma region MeshRenderer
+
+    static void MeshRenderer_GetColor(uint64_t entityID, glm::vec3* outColor) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity && entity->HasComponent<MeshRenderer>()) {
+                *outColor = entity->GetComponent<MeshRenderer>()->color;
+            }
+        }
+    }
+
+    static void MeshRenderer_SetColor(uint64_t entityID, glm::vec3* color) {
+        Scene* scene = Application::Get().GetScene();
+        if (scene) {
+            Entity* entity = scene->GetEntity((uint32_t)entityID);
+            if (entity && entity->HasComponent<MeshRenderer>()) {
+                entity->GetComponent<MeshRenderer>()->color = *color;
             }
         }
     }
@@ -141,12 +252,25 @@ namespace Archura {
     void ScriptGlue::RegisterFunctions() {
         ARCHURA_ADD_INTERNAL_CALL(NativeLog);
         
+        ARCHURA_ADD_INTERNAL_CALL(Entity_Create);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_Destroy);
+
         ARCHURA_ADD_INTERNAL_CALL(Transform_GetPosition);
         ARCHURA_ADD_INTERNAL_CALL(Transform_SetPosition);
+        ARCHURA_ADD_INTERNAL_CALL(Transform_GetRotation);
+        ARCHURA_ADD_INTERNAL_CALL(Transform_SetRotation);
+        ARCHURA_ADD_INTERNAL_CALL(Transform_GetScale);
+        ARCHURA_ADD_INTERNAL_CALL(Transform_SetScale);
         
         ARCHURA_ADD_INTERNAL_CALL(Input_IsKeyDown);
         
         ARCHURA_ADD_INTERNAL_CALL(RigidBody_ApplyForce);
+        ARCHURA_ADD_INTERNAL_CALL(RigidBody_GetVelocity);
+        ARCHURA_ADD_INTERNAL_CALL(RigidBody_SetVelocity);
+        ARCHURA_ADD_INTERNAL_CALL(RigidBody_SetGravityEnabled);
+
+        ARCHURA_ADD_INTERNAL_CALL(MeshRenderer_GetColor);
+        ARCHURA_ADD_INTERNAL_CALL(MeshRenderer_SetColor);
         
         ARCHURA_ADD_INTERNAL_CALL(AudioSource_Play);
 

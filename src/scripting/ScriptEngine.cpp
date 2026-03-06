@@ -80,8 +80,8 @@ namespace Archura {
         MonoImage* image = mono_image_open_from_data_full(fileData, fileSize, 1, &status, 0);
 
         if (status != MONO_IMAGE_OK) {
-            const char* errorMessage = mono_image_strerror(status);
             // Log Error
+            std::cout << "[ScriptEngine] Mono Image Load Error: " << mono_image_strerror(status) << std::endl;
             return nullptr;
         }
 
@@ -98,10 +98,15 @@ namespace Archura {
         s_Data = new ScriptEngineData();
 
         InitMono();
-        LoadAssembly("Resources/Scripts/ScriptCore.dll"); // Default path for now
-        
-        ScriptGlue::RegisterFunctions();
 
+        // Only proceed if Mono initialized successfully
+        if (s_Data->RootDomain == nullptr) {
+            std::cout << "[ScriptEngine] Scripting unavailable (Mono not loaded)." << std::endl;
+            return;
+        }
+
+        LoadAssembly("Resources/Scripts/ScriptCore.dll");
+        ScriptGlue::RegisterFunctions();
         std::cout << "ScriptEngine Initialized!" << std::endl;
     }
 
@@ -111,23 +116,19 @@ namespace Archura {
     }
 
     void ScriptEngine::InitMono() {
-        // mono_set_assemblies_path("mono/lib"); 
-
-        // New Robust Path Setup
-        // We assume "mono" folder is next to the executable
-        // Structure: 
-        //  exe_dir/
-        //    mono/
-        //      lib/
-        //        4.5/mscorlib.dll
-        //      etc/ (optional for now)
-        
         std::filesystem::path exePath = std::filesystem::current_path();
         std::filesystem::path assemblyPath = exePath / "mono/lib";
-        std::filesystem::path configPath = exePath / "mono/etc"; // Need to copy etc if we want config support
+        std::filesystem::path configPath   = exePath / "mono/etc";
+
+        // Guard: if Mono runtime DLLs aren't deployed, skip init entirely.
+        // mono_jit_init will hard-crash if the DLL is missing from PATH on Windows.
+        if (!std::filesystem::exists(assemblyPath)) {
+            std::cout << "[ScriptEngine] Mono lib path not found (" << assemblyPath
+                      << "). Scripting disabled." << std::endl;
+            return;
+        }
 
         mono_set_dirs(assemblyPath.string().c_str(), configPath.string().c_str());
-
         std::cout << "[ScriptEngine] Setting Mono Assembly Path: " << assemblyPath << std::endl;
 
         MonoDomain* rootDomain = mono_jit_init("ArchuraJIT");
@@ -158,7 +159,7 @@ namespace Archura {
             std::cout << "Could not load assembly: " << filepath << std::endl;
     }
 
-    void ScriptEngine::OnRuntimeStart(Scene* scene) {
+    void ScriptEngine::OnRuntimeStart(Scene* /*scene*/) {
         // Override with scene context
     }
 
