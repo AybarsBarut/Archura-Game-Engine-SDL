@@ -200,3 +200,4 @@ build/imgui.vcxproj
 build/ufbx.vcxproj
 build/x64/Release/ALL_BUILD/ALL_BUILD.recipe
 build/ZERO_CHECK.vcxproj
+/build
