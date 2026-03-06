@@ -8,12 +8,31 @@ namespace Archura
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void NativeLog(string text, int parameter);
 
+        #region Entity Lifecycle
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern ulong Entity_Create(string name);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Entity_Destroy(ulong entityID);
+        #endregion
+
         #region Transform
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void Transform_GetPosition(ulong entityID, out Vector3 position);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void Transform_SetPosition(ulong entityID, ref Vector3 position);
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Transform_GetRotation(ulong entityID, out Vector3 rotation);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Transform_SetRotation(ulong entityID, ref Vector3 rotation);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Transform_GetScale(ulong entityID, out Vector3 scale);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Transform_SetScale(ulong entityID, ref Vector3 scale);
         #endregion
 
         #region Input
@@ -21,9 +40,26 @@ namespace Archura
         public static extern bool Input_IsKeyDown(int keycode);
         #endregion
 
-        #region Physics
+        #region Physics (RigidBody)
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void RigidBody_ApplyForce(ulong entityID, ref Vector3 force);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void RigidBody_GetVelocity(ulong entityID, out Vector3 velocity);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void RigidBody_SetVelocity(ulong entityID, ref Vector3 velocity);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void RigidBody_SetGravityEnabled(ulong entityID, bool enabled);
+        #endregion
+
+        #region MeshRenderer
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void MeshRenderer_GetColor(ulong entityID, out Vector3 color);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void MeshRenderer_SetColor(ulong entityID, ref Vector3 color);
         #endregion
 
         #region Audio

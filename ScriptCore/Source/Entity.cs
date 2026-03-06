@@ -10,15 +10,35 @@ namespace Archura
 
         public Vector3 Translation
         {
-            get
-            {
-                InternalCalls.Transform_GetPosition(ID, out Vector3 result);
-                return result;
-            }
-            set
-            {
-                InternalCalls.Transform_SetPosition(ID, ref value);
-            }
+            get { InternalCalls.Transform_GetPosition(ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetPosition(ID, ref value); }
+        }
+
+        public Vector3 Rotation
+        {
+            get { InternalCalls.Transform_GetRotation(ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetRotation(ID, ref value); }
+        }
+
+        public Vector3 Scale
+        {
+            get { InternalCalls.Transform_GetScale(ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetScale(ID, ref value); }
+        }
+
+        // --- Lifecycle ---
+        public static Entity Instantiate(string name = "New Entity")
+        {
+            ulong newID = InternalCalls.Entity_Create(name);
+            Entity newEntity = new Entity();
+            newEntity.ID = newID;
+            return newEntity;
+        }
+
+        public void Destroy()
+        {
+            InternalCalls.Entity_Destroy(ID);
+            ID = 0; // Invalidate
         }
 
         // Called when the entity is created
