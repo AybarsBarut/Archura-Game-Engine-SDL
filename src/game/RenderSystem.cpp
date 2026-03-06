@@ -71,6 +71,7 @@ void RenderSystem::InitShadowMap() {
 }
 
 void RenderSystem::Update(float deltaTime) {
+    (void)deltaTime;
     if (!m_Scene || !m_Camera) return;
 
     // Reset State to defaults for normal rendering
@@ -78,10 +79,22 @@ void RenderSystem::Update(float deltaTime) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    // Kamera matrisleri
-    glm::mat4 view = m_Camera->GetViewMatrix();
+    // Kamera matrisleri – use EditorCamera override when injected
+    glm::mat4 view;
+    glm::mat4 projection;
+    glm::vec3 viewPos;
     Window* window = Engine::Get().GetWindow();
-    glm::mat4 projection = m_Camera->GetProjectionMatrix(window->GetAspectRatio());
+
+    if (m_HasViewOverride) {
+        view       = m_ViewOverride;
+        projection = m_ProjOverride;
+        // Derive view position from the inverse view matrix (column 3 of inv)
+        viewPos = glm::vec3(glm::inverse(view)[3]);
+    } else {
+        view       = m_Camera->GetViewMatrix();
+        projection = m_Camera->GetProjectionMatrix(window->GetAspectRatio());
+        viewPos    = m_Camera->GetPosition();
+    }
 
     // Batch Rendering Logic
     // Gruplandirma: Mesh -> (Texture/Shader) -> Transforms
@@ -115,11 +128,10 @@ void RenderSystem::Update(float deltaTime) {
 
         // Frustum Culling
         glm::vec3 entityPos = transform->position;
-            glm::vec3 camPos = m_Camera->GetPosition();
-            float distance = glm::length(entityPos - camPos);
-            if (distance > 1000.0f) { // Uzakligi arttirdim
-                culledCount++;
-                continue;
+        float distance = glm::length(entityPos - viewPos);
+        if (distance > 1000.0f) {
+            culledCount++;
+            continue;
         }
 
         // Batch bul veya olustur
@@ -325,7 +337,7 @@ void RenderSystem::Update(float deltaTime) {
         
         shader->SetMat4("uView", view);
         shader->SetMat4("uProjection", projection);
-        shader->SetVec3("uViewPos", m_Camera->GetPosition());
+        shader->SetVec3("uViewPos", viewPos);
 
         // Shadow Map Uniforms
         shader->SetMat4("uLightSpaceMatrix", m_LightSpaceMatrix);
@@ -360,15 +372,15 @@ void RenderSystem::Update(float deltaTime) {
         }
 
         // Global Ambient (could be uniform or derived from a Light)
-        // Let's create a base ambient level.
-        // Global Ambient (could be uniform or derived from a Light)
         // Set higher base ambient to prevent "Gray/Black" walls
-        shader->SetVec3("uAmbient", glm::vec3(0.4f)); // Increased from 0.1 to 0.4
+        shader->SetVec3("uAmbient",   glm::vec3(0.4f));
+        shader->SetVec3("uSpecular",  glm::vec3(0.0f));   // no specular for rough surfaces
+        shader->SetFloat("uShininess", 32.0f);             // safe value (not 0)
         
         // Tek seferde ciz (Instanced)
         batch.mesh->DrawInstanced(shader, batch.instanceMatrices);
         
-        renderedCount += batch.instanceMatrices.size();
+        renderedCount += static_cast<int>(batch.instanceMatrices.size());
     }
 
     // Hata ayiklama: her 60 karede bir culling istatistiklerini yazdir

@@ -136,6 +136,8 @@ void HUDRenderer::DrawTexture(Texture* texture, float x, float y, float width, f
 }
 
 void HUDRenderer::DrawCrosshair(float size, const glm::vec4& color) {
+    (void)size;
+    (void)color;
     float centerX = m_ScreenWidth * 0.5f;
     float centerY = m_ScreenHeight * 0.5f;
     

@@ -55,6 +55,9 @@ public:
     void SetMouseSensitivity(float sensitivity) { m_MouseSensitivity = sensitivity; }
     void SetFOV(float fov) { m_FOV = fov; }
     void SetRoll(float roll) { m_Roll = roll; UpdateCameraVectors(); } // [NEW]
+    void SetPitch(float pitch) { m_Pitch = pitch; UpdateCameraVectors(); }
+    void SetYaw(float yaw)   { m_Yaw   = yaw;   UpdateCameraVectors(); }
+
 
 private:
     void UpdateCameraVectors();
