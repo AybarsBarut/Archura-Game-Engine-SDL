@@ -19,7 +19,7 @@ We take the security of Archura Engine (especially its new networking and dedica
 If you discover a security vulnerability, please **DO NOT** open a public issue. 
 
 Instead, please report it privately:
-1.  **Email:** Send an email detailing the vulnerability to the repository owner/lead maintainer (include your contact email here, e.g., `[Your Email Address]`).
+1.  **Email:** Send an email detailing the vulnerability to the repository owner/lead maintainer (include your contact email here, e.g., `[reports@archuragameengine.com]`).
 2.  **GitHub Security Advisories:** Alternatively, you can privately report the vulnerability via the "Security" tab on our GitHub repository. 
 
 **What to expect:**
