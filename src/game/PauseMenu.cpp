@@ -4,6 +4,9 @@
 #include "../network/NetworkManager.h"
 #include "../core/Window.h"
 #include "../game/FPSController.h"
+#include "../game/GameModeManager.h"
+#include "../core/GameSaveManager.h"
+#include "../ecs/Entity.h"
 
 #include <string>
 #include <iostream>
@@ -100,7 +103,7 @@ const char* PauseMenu::GetKeyName(int keycode) {
     }
 }
 
-    void PauseMenu::Render(bool& isPaused, FPSController& controller, Window& window) {
+    void PauseMenu::Render(bool& isPaused, FPSController& controller, Window& window, Scene* scene) {
         if (!isPaused) {
             m_CurrentState = MenuState::Main; // Reset to main when closed
             return;
@@ -124,7 +127,6 @@ const char* PauseMenu::GetKeyName(int keycode) {
             float centerX = io.DisplaySize.x * 0.5f;
             float centerY = io.DisplaySize.y * 0.5f;
             float btnWidth = 300.0f;
-            float spacing = 20.0f;
 
             // Title
             ImGui::SetWindowFontScale(3.0f);
@@ -155,6 +157,15 @@ const char* PauseMenu::GetKeyName(int keycode) {
                 case MenuState::Keybinds:
                     RenderKeybinds(controller);
                     break;
+                case MenuState::SaveGame:
+                    RenderSaveGame(scene);
+                    break;
+                case MenuState::LoadGame:
+                    RenderLoadGame(scene);
+                    break;
+                case MenuState::Multiplayer:
+                    RenderMultiplayerSetup();
+                    break;
             }
 
             ImGui::EndGroup();
@@ -169,19 +180,39 @@ const char* PauseMenu::GetKeyName(int keycode) {
         float btnHeight = 50.0f;
         float spacing = 15.0f;
 
-        if (ImGui::Button("RESUME GAME", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("OYUNA DEVAM (RESUME)", ImVec2(btnWidth, btnHeight))) {
             isPaused = false;
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("OPTIONS", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("PROJEYI KAYDET (Save Project)", ImVec2(btnWidth, btnHeight))) {
+            m_CurrentState = MenuState::SaveGame;
+            GameSaveManager::Get().RefreshProjects();
+        }
+
+        ImGui::Dummy(ImVec2(0, spacing / 2));
+
+        if (ImGui::Button("PROJEYI YUKLE (Load Project)", ImVec2(btnWidth, btnHeight))) {
+            m_CurrentState = MenuState::LoadGame;
+            GameSaveManager::Get().RefreshProjects();
+        }
+
+        ImGui::Dummy(ImVec2(0, spacing));
+
+        if (ImGui::Button("MULTIPLAYER", ImVec2(btnWidth, btnHeight))) {
+            m_CurrentState = MenuState::Multiplayer;
+        }
+
+        ImGui::Dummy(ImVec2(0, spacing));
+
+        if (ImGui::Button("SECENEKLER (OPTIONS)", ImVec2(btnWidth, btnHeight))) {
             m_CurrentState = MenuState::Options;
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("QUIT TO DESKTOP", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("CIKIS (QUIT)", ImVec2(btnWidth, btnHeight))) {
             Application::Get().Quit();
         }
     }
@@ -298,6 +329,204 @@ const char* PauseMenu::GetKeyName(int keycode) {
 
         if (ImGui::Button("BACK", ImVec2(300, 40))) {
             m_CurrentState = MenuState::Options;
+        }
+    }
+
+    void PauseMenu::RenderSaveGame(Scene* scene) {
+        float btnWidth = 380.0f;
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "PROJEYI KAYDET");
+        ImGui::TextDisabled("Sahnenizi bir proje dosyasi olarak kaydedin.");
+        ImGui::TextDisabled("Kaydedilen: tum entity'ler, texture'lar, isimleri ve pozisyonlari.");
+        ImGui::TextDisabled("NOT: Floor, Wall, Player gibi sistem entity'leri kaydedilmez.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        auto& mgr = GameSaveManager::Get();
+
+        // Proje adı giriş alanı
+        ImGui::Text("Proje Adi:");
+        ImGui::SetNextItemWidth(btnWidth);
+        ImGui::InputText("##projname", m_ProjectNameBuf, sizeof(m_ProjectNameBuf));
+
+        if (strlen(m_ProjectNameBuf) == 0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(" (bos birakilirsa 'Unnamed' olur)");
+        }
+
+        ImGui::Spacing();
+
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.1f, 0.6f, 0.1f, 1.f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.8f, 0.2f, 1.f));
+        if (ImGui::Button("KAYDET", ImVec2(btnWidth, 50))) {
+            if (scene) {
+                std::string name = (strlen(m_ProjectNameBuf) > 0)
+                    ? std::string(m_ProjectNameBuf)
+                    : "Unnamed";
+                mgr.SaveProject(name, scene);
+                memset(m_ProjectNameBuf, 0, sizeof(m_ProjectNameBuf));
+            }
+        }
+        ImGui::PopStyleColor(2);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Mevcut kayıtlı projeleri listele
+        const auto& projects = mgr.GetProjects();
+        if (!projects.empty()) {
+            ImGui::TextDisabled("Mevcut kayitli projeler:");
+            for (const auto& proj : projects) {
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 0.6f, 1.f), "  %s", proj.name.c_str());
+                ImGui::SameLine();
+                ImGui::TextDisabled(" - %s", proj.timestamp.c_str());
+            }
+        } else {
+            ImGui::TextDisabled("Henuz kayitli proje yok.");
+        }
+
+        ImGui::Spacing();
+        ImGui::Dummy(ImVec2(0, 10));
+        if (ImGui::Button("GERI (BACK)", ImVec2(btnWidth, 40))) {
+            m_CurrentState = MenuState::Main;
+        }
+    }
+
+    void PauseMenu::RenderLoadGame(Scene* scene) {
+        float btnWidth = 380.0f;
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "PROJEYI YUKLE");
+        ImGui::TextDisabled("Kayitli bir projeyi sahneye yukleyin.");
+        ImGui::TextDisabled("Mevcut kullanici entity'leri silinir ve proje entity'leri eklenir.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        auto& mgr = GameSaveManager::Get();
+        if (ImGui::Button("Listeyi Yenile", ImVec2(btnWidth, 30))) {
+            mgr.RefreshProjects();
+        }
+        ImGui::Spacing();
+
+        const auto& projects = mgr.GetProjects();
+
+        if (projects.empty()) {
+            ImGui::TextColored(ImVec4(0.8f, 0.5f, 0.2f, 1.f), "Kayitli proje bulunamadi.");
+            ImGui::TextDisabled("'Projeyi Kaydet' ile once bir proje kaydedin.");
+        } else {
+            // Kaydırılabilir liste
+            ImGui::BeginChild("##projlist", ImVec2(btnWidth, 300), true);
+            for (const auto& proj : projects) {
+                ImGui::PushID(proj.filePath.c_str());
+
+                // Proje butonu
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.15f, 0.4f, 0.7f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.55f, 0.9f, 1.f));
+
+                std::string btnLabel = proj.name + "  [" + std::to_string(proj.entityCount) + " obje]";
+                if (ImGui::Button(btnLabel.c_str(), ImVec2(btnWidth - 50, 48))) {
+                    if (mgr.LoadProject(proj.filePath, scene)) {
+                        m_CurrentState = MenuState::Main;
+                    }
+                }
+                ImGui::PopStyleColor(2);
+
+                ImGui::SameLine();
+
+                // Silme butonu
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.7f, 0.1f, 0.1f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.f));
+                if (ImGui::Button("X", ImVec2(36, 48))) {
+                    mgr.DeleteProject(proj.filePath);
+                }
+                ImGui::PopStyleColor(2);
+
+                // Alt bilgi
+                ImGui::TextDisabled("  %s", proj.timestamp.c_str());
+                ImGui::Spacing();
+
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("GERI (BACK)", ImVec2(btnWidth, 40))) {
+            m_CurrentState = MenuState::Main;
+        }
+    }
+
+    void PauseMenu::RenderMultiplayerSetup() {
+        float width = 300.0f;
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "MULTIPLAYER KURULUM");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        auto& gmm = GameModeManager::Get();
+        ImGui::Text("Mevcut Mod: ");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "%s", gmm.GetModeString());
+        ImGui::Spacing();
+
+        // Single Player
+        bool isSP = gmm.GetMode() == GameMode::SinglePlayer;
+        if (isSP) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.5f, 0.1f, 1.f));
+        if (ImGui::Button("TEK OYUNCU (Single Player)", ImVec2(width, 44))) {
+            gmm.Disconnect();
+        }
+        if (isSP) ImGui::PopStyleColor();
+
+        ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+        // IP & Port
+        ImGui::Text("IP Adresi:");
+        ImGui::SetNextItemWidth(width);
+        ImGui::InputText("##mp_ip", gmm.m_HostIP, sizeof(gmm.m_HostIP));
+
+        ImGui::Text("Port:");
+        int portVal = (int)gmm.m_Port;
+        ImGui::SetNextItemWidth(width);
+        if (ImGui::InputInt("##mp_port", &portVal, 1, 100)) {
+            if (portVal < 1024) portVal = 1024;
+            if (portVal > 65535) portVal = 65535;
+            gmm.m_Port = (uint16_t)portVal;
+        }
+
+        ImGui::Spacing();
+
+        // Host
+        bool isHost = gmm.GetMode() == GameMode::MultiplayerHost;
+        if (isHost) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.3f, 0.7f, 1.f));
+        if (ImGui::Button("SUNUCU BASLAT (Host)", ImVec2(width, 44))) {
+            gmm.StartHost(gmm.m_HostIP, gmm.m_Port);
+        }
+        if (isHost) {
+            ImGui::PopStyleColor();
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Hosting on port %d", (int)gmm.m_Port);
+            if (ImGui::Button("SUNUCUYU DURDUR", ImVec2(width, 34))) {
+                gmm.Disconnect();
+            }
+        }
+
+        ImGui::Spacing();
+
+        // Join
+        bool isClient = gmm.GetMode() == GameMode::MultiplayerClient;
+        if (isClient) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.5f, 1.f));
+        if (ImGui::Button("OYUNA KATIL (Join)", ImVec2(width, 44))) {
+            gmm.ConnectToHost(gmm.m_HostIP, gmm.m_Port);
+        }
+        if (isClient) {
+            ImGui::PopStyleColor();
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Baglandi: %s:%d", gmm.m_HostIP, (int)gmm.m_Port);
+            if (ImGui::Button("BAGLANTIY\xC4\xB0 KES", ImVec2(width, 34))) {
+                gmm.Disconnect();
+            }
+        }
+
+        ImGui::Dummy(ImVec2(0, 20));
+        if (ImGui::Button("GERI (BACK)", ImVec2(width, 40))) {
+            m_CurrentState = MenuState::Main;
         }
     }
 

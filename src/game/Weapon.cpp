@@ -12,6 +12,9 @@
 namespace Archura {
 
 void WeaponSystem::Update(Entity* entity, Input* input, Scene* scene, Camera* camera, ProjectileSystem* projectileSystem, float deltaTime) {
+    (void)scene;
+    (void)camera;
+    (void)projectileSystem;
     if (!entity) return;
 
     auto* weapon = entity->GetComponent<Weapon>();

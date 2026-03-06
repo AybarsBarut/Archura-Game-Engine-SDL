@@ -1,3 +1,4 @@
+#pragma warning(disable: 4100)
 #include "FPSConsoleCommands.h"
 #include "../core/DeveloperConsole.h"
 #include "../core/Application.h"
@@ -914,7 +915,7 @@ namespace Archura {
             "bot_removeall",
             "Remove all bots [CHEATS]",
             [](const std::vector<std::string>& args) {
-                int count = GameState::activeBots.size();
+                int count = static_cast<int>(GameState::activeBots.size());
                 GameState::activeBots.clear();
                 std::cout << "[Bot] Removed " << count << " bots\n";
             },
@@ -942,7 +943,7 @@ namespace Archura {
             "bot_kick",
             "Kick all bots [CHEATS]",
             [](const std::vector<std::string>& args) {
-                int count = GameState::activeBots.size();
+                int count = static_cast<int>(GameState::activeBots.size());
                 GameState::activeBots.clear();
                 std::cout << "[Bot] Kicked " << count << " bots\n";
             },

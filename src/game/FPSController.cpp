@@ -383,7 +383,6 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
     } else {
         // Havada (En azindan su anlik carpmadi)
         // Ama onceki karede yerdeydik, simdi boslukta miyiz?
-        float groundCheckY = targetPos.y - 0.2f; // Biraz asagi bak
         // Eger asagi dogru hizimiz varsa ve yere cok yakinsak 'snap' yapabiliriz (Merdiven inisi vb)
         // Simdilik basit: Carpmadiysa havadadir.
         
@@ -535,6 +534,7 @@ bool FPSController::CheckCollision(const glm::vec3& position, Scene* scene, floa
 }
 
 void FPSController::HandleMouseLook(Input* input, float deltaTime) {
+    (void)deltaTime;
     // Imlec kilitli ise (FPS modu) kamerayi dondur
     if (input->IsCursorLocked()) {
         glm::vec2 mouseDelta = input->GetMouseDelta();
