@@ -5,19 +5,23 @@ namespace Archura {
     // Forward declarations
     class FPSController;
     class Window;
+    class Scene;
 
     class PauseMenu {
     public:
         PauseMenu() = default;
         ~PauseMenu() = default;
 
-        // Updated Render to take dependencies
-        void Render(bool& isPaused, FPSController& controller, Window& window);
+        // Scene* eklendi: save/load için gerekli
+        void Render(bool& isPaused, FPSController& controller, Window& window, Scene* scene = nullptr);
 
     private:
         void RenderMainMenu(bool& isPaused);
         void RenderOptions(FPSController& controller, Window& window);
         void RenderKeybinds(FPSController& controller);
+        void RenderSaveGame(Scene* scene);
+        void RenderLoadGame(Scene* scene);
+        void RenderMultiplayerSetup();
 
         // Helpers
         const char* GetKeyName(int keycode);
@@ -25,11 +29,17 @@ namespace Archura {
         enum class MenuState {
             Main,
             Options,
-            Keybinds
+            Keybinds,
+            SaveGame,
+            LoadGame,
+            Multiplayer
         };
 
         MenuState m_CurrentState = MenuState::Main;
-        int m_WaitingForKey = -1; // -1: Not waiting, otherwise index of binding
+        int m_WaitingForKey = -1;
+
+        // Proje kaydetme için isim göriş tamponu
+        char m_ProjectNameBuf[128] = "";
     };
 
 }
