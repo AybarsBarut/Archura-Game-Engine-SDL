@@ -33,6 +33,7 @@ namespace Archura {
         class FPSController* GetFPSController() { return m_FPSController.get(); }
         class Scene* GetScene() const { return m_Scene.get(); } // Expose Scene
         class RenderSystem* GetRenderSystem() { return m_RenderSystem.get(); }
+        class Camera* GetCamera() { return m_Camera.get(); } // Expose Camera
 
     private:
         static Application* s_Instance;
