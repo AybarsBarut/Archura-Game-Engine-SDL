@@ -43,6 +43,8 @@
 #include "game/ScriptSystem.h"
 #include "game/Weapon.h"
 #include "game/FPSConsoleCommands.h"
+#include "game/GameModeManager.h"
+#include "core/GameSaveManager.h"
 
 #include "input/Input.h"
 #include "network/NetworkManager.h"
@@ -243,6 +245,65 @@ bool Application::Init() {
             Application::Get().Quit();
         });
 
+    CommandRegistry::Get().RegisterCommand(
+        "save_game", [](const std::vector<std::string>& args) {
+            std::string name = args.empty() ? "QuickSave" :
+                               [&]{ std::string r; for (auto& a : args) r += a + " "; if(!r.empty()) r.pop_back(); return r; }();
+            Scene* scene = Application::Get().GetScene();
+            if (scene) {
+                GameSaveManager::Get().SaveProject(name, scene);
+                std::cout << "Proje kaydedildi: " << name << std::endl;
+            }
+        });
+
+    CommandRegistry::Get().RegisterCommand(
+        "load_game", [](const std::vector<std::string>& args) {
+            if (args.empty()) {
+                // Projeleri listele
+                GameSaveManager::Get().RefreshProjects();
+                auto& projects = GameSaveManager::Get().GetProjects();
+                if (projects.empty()) {
+                    std::cout << "Kayitli proje bulunamadi!" << std::endl;
+                } else {
+                    for (const auto& p : projects)
+                        std::cout << "  [" << p.entityCount << " obj] " << p.name << " - " << p.timestamp << std::endl;
+                }
+                return;
+            }
+            // Dosya yolu veya proje adıyla yükle
+            std::string filePath = args[0];
+            if (filePath.find(".scene") == std::string::npos)
+                filePath = "saves/" + GameSaveManager::MakeSafeFileName(filePath) + ".scene";
+            Scene* scene = Application::Get().GetScene();
+            if (scene) {
+                if (GameSaveManager::Get().LoadProject(filePath, scene))
+                    std::cout << "Proje yuklendi: " << filePath << std::endl;
+                else
+                    std::cout << "Proje yuklenemedi: " << filePath << std::endl;
+            }
+        });
+
+    CommandRegistry::Get().RegisterCommand(
+        "game_mode", [](const std::vector<std::string>& args) {
+            if (args.empty()) {
+                std::cout << "Mod: " << GameModeManager::Get().GetModeString() << std::endl;
+                return;
+            }
+            auto& gmm = GameModeManager::Get();
+            if (args[0] == "sp" || args[0] == "singleplayer") {
+                gmm.Disconnect();
+            } else if (args[0] == "host") {
+                uint16_t port = args.size() > 1 ? (uint16_t)std::stoi(args[1]) : 7777;
+                gmm.StartHost("0.0.0.0", port);
+            } else if (args[0] == "join") {
+                std::string ip  = args.size() > 1 ? args[1] : "127.0.0.1";
+                uint16_t port   = args.size() > 2 ? (uint16_t)std::stoi(args[2]) : 7777;
+                gmm.ConnectToHost(ip, port);
+            } else {
+                std::cout << "game_mode <sp|host [port]|join [ip] [port]>" << std::endl;
+            }
+        });
+
     f = fopen(logPath, "a");
     if(f) { 
         fprintf(f, "[%dms] APP::Init: Initializing ImGuiLayer\n", SDL_GetTicks()); 
@@ -362,44 +423,40 @@ void Application::Run() {
     };
     skyComp->shouldReload = true;
 
-    printf("DEBUG: Skybox Initialized\n");
-
     // Initialize HUDRenderer as member
     m_HUDRenderer = std::make_unique<HUDRenderer>();
     m_HUDRenderer->Init();
-    
-    printf("DEBUG: HUDRenderer Initialized\n");
 
     // Initialize Editor as member
     m_Editor = std::make_unique<Editor>();
-    m_Editor->Init(m_Window); 
+    m_Editor->Init(m_Window);
     m_Editor->SetEnabled(true);
-    
-    printf("DEBUG: Editor Initialized\n");
+
+    // ── Play / Stop callbacks ────────────────────────────────────────────
+    m_Editor->RegisterOnPlay([this]() {
+        m_Input->SetCursorMode(2);
+        m_IsPaused = false;
+        std::cout << "[Editor] Entered Play mode" << std::endl;
+    });
+    m_Editor->RegisterOnStop([this]() {
+        m_Input->SetCursorMode(0);
+        std::cout << "[Editor] Returned to Edit mode" << std::endl;
+    });
 
     // Create Player entity (store as member)
     m_Player = m_Scene->CreateEntity("Player");
     auto* weapon = m_Player->AddComponent<Weapon>();
     weapon->InitInventory();
-
-    printf("DEBUG: Player & Weapon Initialized\n");
-
     auto* playerHealth = m_Player->AddComponent<Health>();
     playerHealth->max = 100.0f;
     playerHealth->current = 100.0f;
 
-    // Initialize game systems as members
     m_PhysicsSystem = std::make_unique<PhysicsSystem>();
     m_PhysicsSystem->Init(m_Scene.get());
-    
-    printf("DEBUG: PhysicsSystem Initialized\n");
-
     m_ScriptSystem = std::make_unique<ScriptSystem>();
     m_ScriptSystem->Init(m_Scene.get());
-
     m_ParticleSystem = std::make_unique<ParticleSystem>();
     m_ParticleSystem->Init(m_Scene.get());
-
     m_ProjectileSystem = std::make_unique<ProjectileSystem>();
     m_ProjectileSystem->Init(m_Scene.get());
 
@@ -410,14 +467,11 @@ void Application::Run() {
         fclose(f); 
     }
 
-    // Cache engine subsystem pointers
     m_EngineWindow = Engine::Get().GetWindow();
     m_Input = Engine::Get().GetInput();
     m_Renderer = Engine::Get().GetRenderer();
 
-
-
-    // --- SETUP ROBUST MAP (V2) ---
+    // --- SETUP ROBUST MAP ---
     // 1. Sun
     Entity* light = m_Scene->CreateEntity("Sun");
     auto* lightComp = light->AddComponent<LightComponent>();
@@ -475,16 +529,15 @@ void Application::Run() {
         wall->GetComponent<Transform>()->scale = w.s;
         
         auto* col = wall->AddComponent<BoxCollider>();
-        col->size = w.s;  // Collider'ı duvarın gerçek boyutuna ayarla
+        col->size = w.s;
         col->isTrigger = false;
     }
-    // ---------------------------
-    
+
     // Initialize PauseMenu as member
     m_PauseMenu = std::make_unique<PauseMenu>();
 
-    // Set initial cursor mode (locked for FPS gameplay)
-    m_Input->SetCursorMode(2); // Locked
+    // Set initial cursor mode: free in editor, locked in Play mode
+    m_Input->SetCursorMode(m_DevModeActive ? 0 : 2);
 
 
     std::cout << "DEBUG: Window ShouldClose: " << m_EngineWindow->ShouldClose() << ", Running: " << m_Running << std::endl;
@@ -527,15 +580,15 @@ void Application::Run() {
             }
             
             // Calculate interpolation alpha for smooth rendering
-            float alpha = m_Accumulator / TICK_INTERVAL;
+            float alpha = static_cast<float>(m_Accumulator / TICK_INTERVAL);
             
             // Render with interpolation
             RenderFrame(alpha);
             
             // FPS Counter (every second)
             m_FrameCount++;
-            if (currentTime - m_LastFPSUpdateTime >= 1.0) {
-                m_CurrentFPS = m_FrameCount / (currentTime - m_LastFPSUpdateTime);
+            if (currentTime - m_LastFPSUpdateTime >= 1.0f) {
+                m_CurrentFPS = static_cast<float>(m_FrameCount / (currentTime - m_LastFPSUpdateTime));
                 // std::cout << "FPS: " << m_CurrentFPS << " | Ticks: " << m_TickCount << std::endl;
                 m_FrameCount = 0;
                 m_LastFPSUpdateTime = currentTime;
@@ -564,20 +617,54 @@ void Application::ProcessInput() {
     }
 
     // 2. Handle special input (pause, dev mode, console)
-    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_TAB)) { 
-        SetDevMode(!m_DevModeActive); 
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_TAB)) {
+        bool entering = !m_DevModeActive;
+        SetDevMode(entering);
+        // In editor mode: free cursor. In play-through: respect game state.
+        if (entering) {
+            m_Input->SetCursorMode(0); // Free – ImGui usable
+        } else {
+            m_Input->SetCursorMode(m_IsPaused ? 0 : 2);
+        }
     }
-    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) { 
-        m_IsPaused = !m_IsPaused; 
-        m_Input->SetCursorMode(m_IsPaused ? 0 : 2); 
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_ESCAPE)) {
+        if (!m_DevModeActive || (m_Editor && m_Editor->GetMode() == EditorMode::Play)) {
+            m_IsPaused = !m_IsPaused;
+            m_Input->SetCursorMode(m_IsPaused ? 0 : 2);
+        }
     }
-    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) { 
-        DevConsole::Get().Toggle(); 
+    if (m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) {
+        DevConsole::Get().Toggle();
     }
 
-    // 3. Mouse Look (Raw Input - Per Frame)
-    if (!m_IsPaused && m_FPSController) {
-        m_FPSController->HandleMouseLook(m_Input, 0.0f); // DeltaTime unused for raw mouse delta
+    // 3. Mouse / Camera look routing
+    const bool inEditMode = m_DevModeActive &&
+                            m_Editor &&
+                            m_Editor->GetMode() == EditorMode::Edit;
+    if (inEditMode) {
+        // Editor fly-cam: update reads Input directly inside EditorCamera::Update
+        float frameDt = ImGui::GetIO().DeltaTime;
+        if (frameDt <= 0.0f) frameDt = 0.016f;
+        m_Editor->GetEditorCamera()->Update(m_Input, frameDt);
+
+        // --- Gizmo input (runs BEFORE picking so handle drags take priority) ---
+        int w = 0, h = 0;
+        if (m_Window) {
+            w = static_cast<int>(m_Window->GetWidth());
+            h = static_cast<int>(m_Window->GetHeight());
+        }
+        m_Editor->ProcessGizmoInput(m_Input, w, h);
+
+        // --- Mouse picking: LMB selects entity (skipped while gizmo is active) ---
+        if (!m_Editor->IsGizmoInteracting()) {
+            Entity* picked = m_Editor->PickEntityAtScreenPos(m_Scene.get(), m_Input, w, h);
+            if (picked) m_Editor->SetSelectedEntity(picked);
+        }
+
+        // --- Keyboard Shortcuts (Undo, Copy/Paste, Focus) ---
+        m_Editor->ProcessEditorShortcuts(m_Input, m_Scene.get());
+    } else if (!m_IsPaused && m_FPSController) {
+        m_FPSController->HandleMouseLook(m_Input, 0.0f);
     }
 }
 
@@ -592,23 +679,44 @@ void Application::UpdateGameLogic(float dt) {
     }
 }
 
-void Application::RenderFrame(float alpha) {
+void Application::RenderFrame(float /*alpha*/) {
     m_Renderer->BeginFrame();
     m_ImGuiLayer->BeginFrame();
 
-    // Render with interpolation (alpha available for future use)
-    // TODO: Pass alpha to RenderSystem for interpolated rendering
+    // If editor is active and in Edit mode, inject the editor camera view/proj
+    // so the 3D viewport shows the fly-cam perspective, not the game camera.
+    const bool editorEditMode = m_DevModeActive &&
+                                m_Editor &&
+                                m_Editor->GetMode() == EditorMode::Edit;
+    if (editorEditMode) {
+        EditorCamera* ec = m_Editor->GetEditorCamera();
+        const float aspect = (m_Window && m_Window->GetHeight() > 0)
+            ? m_Window->GetAspectRatio() : 1.777f;
+        m_RenderSystem->SetViewOverride(
+            ec->GetViewMatrix(),
+            ec->GetProjectionMatrix(aspect));
+    } else {
+        m_RenderSystem->ClearViewOverride();
+    }
+
     m_RenderSystem->Update(TICK_INTERVAL);
-    
+
     if (m_DevModeActive) {
         m_Editor->BeginDockSpace();
         m_Editor->DrawMenuBar(m_Scene.get());
         m_Editor->DrawEditorUI(m_Scene.get());
         m_Editor->DrawOverlay(m_Scene.get(), m_Camera.get());
+
+        // Draw 3-D transform gizmo when an entity is selected in Edit mode
+        if (editorEditMode && m_Window) {
+            m_Editor->DrawTransformGizmo(
+                static_cast<int>(m_Window->GetWidth()),
+                static_cast<int>(m_Window->GetHeight()));
+        }
     }
     
     DevConsole::Get().Render();
-    m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow);
+    m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow, m_Scene.get());
 
     m_ImGuiLayer->EndFrame();
     m_Renderer->EndFrame();
