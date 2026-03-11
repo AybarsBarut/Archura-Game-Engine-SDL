@@ -1,125 +1,81 @@
 # Archura Engine
 
-A C++ game engine built on SDL2 and OpenGL, targeting a deterministic, data-oriented runtime for interactive 3D applications. This is an active prototype — architecture decisions are intentional and documented; the goal is a foundation worth building on, not feature count.
+A C++ game engine built on SDL2 and OpenGL, targeting a deterministic, data-oriented runtime for interactive 3D applications. Archura is designed with strict boundaries between subsystems to maintain a clean architecture, separating the core engine execution from the game logic layer.
 
----
+**The architecture is divided into three layers:**
 
-## Architecture Philosophy
+*   **Game Layer:** Handles game logic such as the FPS Controller, Weapons, Map Loading, and Game Modes. It has no direct knowledge of rendering APIs like OpenGL.
+*   **Runtime Layer:** Manages the System Scheduler, ECS World, and Render Pipeline.
+*   **Engine Core Layer:** Handles low-level functionality such as the Clock, Platform API, Logger, Memory, and Asset Registry.
 
-Most hobby engines collapse under their own code over time because they treat *features* as the primary design concern. Archura treats *boundaries* as the primary concern. Every subsystem owns a clearly defined input contract and output surface. Systems do not reach into each other's internals.
+**Core Principles:**
+*   Fixed-timestep loop with variable-rate rendering (128 Hz logic tick) and interpolation for smoothness. 
+*   Explicit dependency passing instead of singletons for subsystems.
 
-**Three-layer model:**
+## Current State - version 2.0.3
 
-```
-[ Game Layer  ]  FPSController · Weapons · MapLoader · GameMode
-[ Runtime     ]  SystemScheduler · ECS World · RenderPipeline
-[ Engine Core ]  Clock · Platform · Logger · Memory · AssetRegistry
-```
+The engine is actively evolving and currently includes a playable client and a dedicated server application. 
 
-Each layer depends only on the one below it. The game layer has no knowledge of OpenGL. The engine core has no knowledge of what a `Weapon` is.
+Key Features:
+*   **Client & Dedicated Server Build:** Standalone networked architecture with independent game and server executables using SDL_net.
+*   **Rendering Pipeline:** OpenGL 4.x context, forward rendering with shadow mapping, terrain support, and a post-processing system.
+*   **Entity Component System:** Highly decoupled data-oriented ECS architecture.
+*   **Asset Management:** Support for recursive directory scanning, advanced model loading (FBX and OBJ via ufbx and fast_obj), and background loading foundations.
+*   **Editor:** An integrated ImGui-based editor overlay featuring a scene hierarchy, entity inspector, direct entity management (create, rename, delete), and advanced model spawning from nested folders.
+*   **Scripting:** Mono integration for C# scripting capabilities.
+*   **Physics & Particles:** Integrated physics system, and both CPU and GPU-based particle emitters.
+*   **Build Archiving & Versioning:** Custom build scripts for tracking historical compilation iterations of both Debug and Release branches.
 
-**Fixed-timestep loop, variable-rate rendering.** Game logic ticks at a fixed 128 Hz. The renderer runs at display rate and receives an interpolation alpha so object positions between ticks are smooth. This isn't an optimization — it's a correctness requirement for deterministic physics replay and future networking.
+## Requirements
 
-**Explicit ownership over convenient globals.** The engine instance is passed by reference. Subsystems don't call each other through singletons; they declare dependencies and receive them at init time.
+*   CMake 3.20+
+*   MSVC (MultiThreaded DLL configured) or MinGW (C++17 context)
+*   SDL2, SDL2_mixer, SDL2_net, SDL2_ttf (Bundled)
+*   glad, glm, ImGui (Bundled)
+*   Mono SDK (Bundled)
+*   ufbx and fast_obj for 3D model processing (Bundled)
 
----
+## Building & Running
 
-## Current State — v0.1 (Prototype)
+The engine handles Windows builds through a unified set of batch scripts, providing build versioning and archiving out of the box.
 
-- SDL2 window + OpenGL 4.x context
-- Forward-rendered scene with shadow mapping
-- Type-indexed component system (ECS structure, not yet archetype-based)
-- 128 Hz fixed-timestep with spiral-of-death protection
-- Source-style FPS movement: friction, air acceleration, bunnyhop cap
-- ImGui-based editor overlay (scene hierarchy, entity inspector)
-- Developer console with runtime command binding
-- SDL_mixer 3D audio
-- SDL_net network stub (multiplayer scaffolding)
-- C# scripting bridge placeholder (ScriptCore project)
+### Build Executables
 
----
-
-## Building
-
-### Requirements
-
-| Dependency | Version | Notes |
-|---|---|---|
-| CMake | 3.20+ | |
-| MSVC / MinGW | C++17 | Clang untested |
-| SDL2 | 2.x | Bundled in `external/` |
-| SDL2\_mixer | 2.x | Bundled |
-| SDL2\_net | 2.x | Bundled |
-| SDL2\_ttf | 2.x | Bundled |
-| glad | GL 4.6 core | Bundled |
-| glm | 0.9.9 | Bundled |
-| ImGui | 1.90 | Bundled |
-
-### Build
+You can build the engine via standard CMake, or use the provided batch script for a streamlined process that also archives the builds:
 
 ```batch
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+Build.bat
 ```
+Running `Build.bat` will trigger CMake, compile both the ArchuraEngine client and the ArchuraServer executable, and then archive the binaries into respective `builds/debug` or `builds/release` versioned folders.
 
-Or use the provided `Build.bat` for a one-step MSVC build.
-
-### Running
+### Run Client
 
 ```batch
-DebugRun.bat       :: Debug build with console
-StartGame_Dev.bat  :: Dev build, editor overlay enabled
+StartGame_Dev.bat
 StartGame_Release.bat
+DebugRun.bat
 ```
+`StartGame_Dev.bat` will prompt you to select an archived build with the developer console and editor overlay enabled. `StartGame_Release.bat` executes the clean production build version.
 
-Assets must be present at `assets/` relative to the executable. Skybox images, fonts, and shaders are not redistributed; see `assets/README.txt` for placement.
+### Run Dedicated Server
 
----
+```batch
+start_server.bat
+```
+The server will start headlessly and utilize the `server_config.json` parameters.
 
-## Roadmap
+*Note: Required game assets (models, textures, audio) must reside in the `assets/` relative path of the executable.*
 
-### v0.1 — Current (Foundation Cleanup)
-Fix the structural issues before adding features:
-- Single authoritative main loop — eliminate the `Engine`/`Application` split
-- Replace C-style `fopen` log tracing with the existing `Logger` ring buffer
-- Replace `ResourceManager` raw pointer maps with a handle-based `AssetRegistry`
-- Extract hardcoded map geometry to a JSON scene format
+## Upcoming Roadmap
 
-### v0.2 — Data-Oriented ECS
-- Archetype-based contiguous component storage
-- `World::Query<T...>()` typed view with zero overhead at iteration
-- Explicit system read/write declarations for future parallel scheduling
-- Entity generation counter — detect use-after-destroy
-
-### v0.3 — Render Pipeline
-- `RenderContext` as the exclusive GL state owner — no `glEnable` outside this module
-- Explicit render graph: shadow pass → geometry pass → post-process
-- Material system with compile-time shader permutations
-- Renderer interpolation using the fixed-timestep alpha
-
-### v0.4 — Asset Pipeline
-- Background asset loading with `AssetHandle<T>` reference counting
-- Hot-reload for shaders in debug builds
-- glTF2 static mesh loader
-
-### v0.5 — Physics
-- `PhysicsWorld` API replacing ad-hoc per-controller collision queries
-- Jolt Physics integration behind the `PhysicsWorld` interface boundary
-
-### v1.0 — Shippable Prototype
-- Scene serialization / deserialization round-trip (no hardcoded world construction)
-- Editor as an optional compile target, not tangled into the runtime
-- Lua or WASM scripting sandbox replacing the C# placeholder
-- Headless server build: no window, no renderer — for authoritative simulation
-
----
+*   **Render Pipeline Enhancements:** Material system, explicit render graph, complete glTF handling.
+*   **Physics Integration:** Transition physics to Jolt Physics backend.
+*   **Networking Realtime State:** Full client server state replication based on the new networking abstraction.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports via the GitHub issue template; feature discussion in Discussions before any PR.
-
----
+See CONTRIBUTING.md. Please submit bug reports through the GitHub issue template and initiate feature discussions in the project Discussions board before generating pull requests.
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Apache 2.0. See LICENSE for more details.
