@@ -58,10 +58,12 @@ private:
 // Convenience macro
 #ifdef _DEBUG
     #define ARCH_LOG_DEBUG(msg) Archura::Logger::Debug(msg)
+    #define ARCH_LOG_INFO(msg)  Archura::Logger::Info(msg)
     #define ARCH_LOG_ERROR(msg) Archura::Logger::Error(msg)
-    #define ARCH_LOG_WARN(msg) Archura::Logger::Warning(msg)
+    #define ARCH_LOG_WARN(msg)  Archura::Logger::Warning(msg)
 #else
     #define ARCH_LOG_DEBUG(msg)
+    #define ARCH_LOG_INFO(msg)
     #define ARCH_LOG_ERROR(msg)
     #define ARCH_LOG_WARN(msg)
 #endif

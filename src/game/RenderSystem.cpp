@@ -74,6 +74,12 @@ void RenderSystem::Update(float deltaTime) {
     (void)deltaTime;
     if (!m_Scene || !m_Camera) return;
 
+    // --- Shader Hot-Reload (sadece DEBUG modda dosyalar degistiyse yeniden derle) ---
+#ifndef NDEBUG
+    if (m_DefaultShader) m_DefaultShader->CheckAndReload();
+    if (m_DepthShader)   m_DepthShader->CheckAndReload();
+#endif
+
     // Reset State to defaults for normal rendering
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glEnable(GL_DEPTH_TEST);

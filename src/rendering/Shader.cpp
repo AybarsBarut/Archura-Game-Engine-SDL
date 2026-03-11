@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 namespace Archura {
 
@@ -57,7 +58,53 @@ bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& frag
     fragmentStream << fragmentFile.rdbuf();
     std::string fragmentSrc = fragmentStream.str();
 
-    return LoadFromSource(vertexSrc, fragmentSrc);
+    bool ok = LoadFromSource(vertexSrc, fragmentSrc);
+    if (ok) {
+        // Hot-reload icin dosya bilgilerini kaydet
+        m_VertexPath    = vertexPath;
+        m_FragmentPath  = fragmentPath;
+        m_LoadedFromFile = true;
+        namespace fs = std::filesystem;
+        m_VertLastWrite = fs::last_write_time(fs::path(vertexPath));
+        m_FragLastWrite = fs::last_write_time(fs::path(fragmentPath));
+    }
+    return ok;
+}
+
+bool Shader::CheckAndReload() {
+    if (!m_LoadedFromFile) return false;
+    namespace fs = std::filesystem;
+
+    bool changed = false;
+    try {
+        auto vertNow = fs::last_write_time(fs::path(m_VertexPath));
+        auto fragNow = fs::last_write_time(fs::path(m_FragmentPath));
+        if (vertNow != m_VertLastWrite || fragNow != m_FragLastWrite) {
+            changed = true;
+        }
+    } catch (...) {
+        return false; // Dosya gecici olarak erisilemez durumda olabilir
+    }
+
+    if (!changed) return false;
+
+    ARCH_LOG_INFO("[HotReload] Shader degisti, yeniden derleniyor: " + m_VertexPath);
+
+    // Eski program'i sil
+    if (m_ProgramID) {
+        glDeleteProgram(m_ProgramID);
+        m_ProgramID = 0;
+    }
+    m_UniformLocationCache.clear();
+
+    // Yeniden yukle
+    bool ok = LoadFromFile(m_VertexPath, m_FragmentPath);
+    if (ok) {
+        ARCH_LOG_INFO("[HotReload] Shader basariyla yeniden derlendi.");
+    } else {
+        ARCH_LOG_ERROR("[HotReload] Shader yeniden derleme HATASI: " + m_VertexPath);
+    }
+    return ok;
 }
 
 void Shader::Bind() const {
