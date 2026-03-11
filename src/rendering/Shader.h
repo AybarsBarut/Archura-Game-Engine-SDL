@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <filesystem>
 #include <glm/glm.hpp>
 
 namespace Archura {
@@ -21,6 +22,13 @@ public:
     
     // Shader'ı dosyadan yükle
     bool LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath);
+
+    /**
+     * @brief Disk'teki shader dosyaları değiştiyse programı otomatik yeniden derler.
+     *        Sadece dosyadan yüklenmiş shader'larda çalışır.
+     * @return true eğer shader yeniden derlendiyse
+     */
+    bool CheckAndReload();
 
     void Bind() const;
     void Unbind() const;
@@ -44,6 +52,13 @@ private:
 private:
     unsigned int m_ProgramID = 0;
     std::unordered_map<std::string, int> m_UniformLocationCache;
+
+    // Hot-reload için dosya yolları ve son değişiklik zamanları
+    std::string m_VertexPath;
+    std::string m_FragmentPath;
+    std::filesystem::file_time_type m_VertLastWrite;
+    std::filesystem::file_time_type m_FragLastWrite;
+    bool m_LoadedFromFile = false;
 };
 
 } // namespace Archura

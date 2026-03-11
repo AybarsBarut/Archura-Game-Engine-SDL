@@ -153,6 +153,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/game/FPSController.cpp"
     "src/game/RenderSystem.cpp"
     "src/game/ParticleSystem.cpp"
+    "src/game/GPUParticleSystem.cpp"
     "src/game/Projectile.cpp"
     "src/game/ProjectileSystem.cpp"
     "src/game/Weapon.cpp"
@@ -162,6 +163,8 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/game/PauseMenu.cpp"
     "src/game/ScriptSystem.cpp"
     "src/game/GameModeManager.cpp"
+    "src/rendering/Terrain.cpp"
+    "src/rendering/PostProcess.cpp"
     "src/editor/*.cpp"
 )
 
@@ -177,6 +180,8 @@ file(GLOB_RECURSE CLIENT_HEADERS
     "src/game/FPSController.h"
     "src/game/RenderSystem.h"
     "src/game/ParticleSystem.h"
+    "src/game/GPUParticleSystem.h"
+    "src/game/CollisionEvent.h"
     "src/game/Projectile.h"
     "src/game/ProjectileSystem.h"
     "src/game/Weapon.h"
@@ -185,6 +190,9 @@ file(GLOB_RECURSE CLIENT_HEADERS
     "src/game/FPSConsoleCommands.h"
     "src/game/PauseMenu.h"
     "src/game/ScriptSystem.h"
+    "src/rendering/Terrain.h"
+    "src/rendering/PostProcess.h"
+    "src/core/GpuBuffer.h"
     "src/editor/*.h"
 )
 

@@ -201,3 +201,18 @@ build/ufbx.vcxproj
 build/x64/Release/ALL_BUILD/ALL_BUILD.recipe
 build/ZERO_CHECK.vcxproj
 /build
+# Build arsiv klasoru - EXE ve meta izlenmez, klasor yapisi korunur
+builds/debug/*.exe
+builds/debug/*.meta
+builds/release/*.exe
+builds/release/*.meta
+
+# Artifact / dokumantasyon markdown dosyalari
+*.md
+
+# Build arsiv klasoru - EXE,  meta ve DLL'ler izlenmez
+builds/debug/*.exe
+builds/debug/*.meta
+builds/release/*.exe
+builds/release/*.meta
+builds/release/*.dll
