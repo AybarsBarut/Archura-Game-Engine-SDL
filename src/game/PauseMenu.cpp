@@ -14,92 +14,124 @@
 
 namespace Archura {
 
-const char* PauseMenu::GetKeyName(int keycode) {
-    switch (keycode) {
-        case 32: return "SPACE";
-        case 39: return "APOSTROPHE";
-        case 44: return "COMMA";
+const char* PauseMenu::GetKeyName(int scancode) {
+    // Uses SDL Scancode values (SDL_SCANCODE_*)
+    // These are hardware-position codes, NOT ASCII or GLFW keycodes
+    switch (scancode) {
+        // --- Letters (SDL_SCANCODE_A=4 through SDL_SCANCODE_Z=29) ---
+        case 4:  return "A";
+        case 5:  return "B";
+        case 6:  return "C";
+        case 7:  return "D";
+        case 8:  return "E";
+        case 9:  return "F";
+        case 10: return "G";
+        case 11: return "H";
+        case 12: return "I";
+        case 13: return "J";
+        case 14: return "K";
+        case 15: return "L";
+        case 16: return "M";
+        case 17: return "N";
+        case 18: return "O";
+        case 19: return "P";
+        case 20: return "Q";
+        case 21: return "R";
+        case 22: return "S";
+        case 23: return "T";
+        case 24: return "U";
+        case 25: return "V";
+        case 26: return "W";
+        case 27: return "X";
+        case 28: return "Y";
+        case 29: return "Z";
+        // --- Number row (SDL_SCANCODE_1=30 .. SDL_SCANCODE_0=39) ---
+        case 30: return "1";
+        case 31: return "2";
+        case 32: return "3";
+        case 33: return "4";
+        case 34: return "5";
+        case 35: return "6";
+        case 36: return "7";
+        case 37: return "8";
+        case 38: return "9";
+        case 39: return "0";
+        // --- Control keys ---
+        case 40: return "ENTER";
+        case 41: return "ESCAPE";
+        case 42: return "BACKSPACE";
+        case 43: return "TAB";
+        case 44: return "SPACE";
         case 45: return "MINUS";
-        case 46: return "PERIOD";
-        case 47: return "SLASH";
-        case 48: return "0";
-        case 49: return "1";
-        case 50: return "2";
-        case 51: return "3";
-        case 52: return "4";
-        case 53: return "5";
-        case 54: return "6";
-        case 55: return "7";
-        case 56: return "8";
-        case 57: return "9";
-        case 59: return "SEMICOLON";
-        case 61: return "EQUAL";
-        case 65: return "A";
-        case 66: return "B";
-        case 67: return "C";
-        case 68: return "D";
-        case 69: return "E";
-        case 70: return "F";
-        case 71: return "G";
-        case 72: return "H";
-        case 73: return "I";
-        case 74: return "J";
-        case 75: return "K";
-        case 76: return "L";
-        case 77: return "M";
-        case 78: return "N";
-        case 79: return "O";
-        case 80: return "P";
-        case 81: return "Q";
-        case 82: return "R";
-        case 83: return "S";
-        case 84: return "T";
-        case 85: return "U";
-        case 86: return "V";
-        case 87: return "W";
-        case 88: return "X";
-        case 89: return "Y";
-        case 90: return "Z";
-        case 91: return "LEFT BRACKET";
-        case 92: return "BACKSLASH";
-        case 93: return "RIGHT BRACKET";
-        case 96: return "GRAVE ACCENT";
-        case 256: return "ESCAPE";
-        case 257: return "ENTER";
-        case 258: return "TAB";
-        case 259: return "BACKSPACE";
-        case 260: return "INSERT";
-        case 261: return "DELETE";
-        case 262: return "RIGHT";
-        case 263: return "LEFT";
-        case 264: return "DOWN";
-        case 265: return "UP";
-        case 266: return "PAGE UP";
-        case 267: return "PAGE DOWN";
-        case 268: return "HOME";
-        case 269: return "END";
-        case 280: return "CAPS LOCK";
-        case 281: return "SCROLL LOCK";
-        case 282: return "NUM LOCK";
-        case 283: return "PRINT SCREEN";
-        case 284: return "PAUSE";
-        case 290: return "F1";
-        case 291: return "F2";
-        case 292: return "F3";
-        case 293: return "F4";
-        case 294: return "F5";
-        case 295: return "F6";
-        case 296: return "F7";
-        case 297: return "F8";
-        case 298: return "F9";
-        case 299: return "F10";
-        case 300: return "F11";
-        case 301: return "F12";
-        case 340: return "LEFT SHIFT";
-        case 341: return "LEFT CONTROL";
-        case 342: return "LEFT ALT";
-        case 344: return "RIGHT SHIFT";
-        default: return "UNKNOWN";
+        case 46: return "EQUAL";
+        case 47: return "LEFT BRACKET";
+        case 48: return "RIGHT BRACKET";
+        case 49: return "BACKSLASH";
+        case 51: return "SEMICOLON";
+        case 52: return "APOSTROPHE";
+        case 53: return "GRAVE";
+        case 54: return "COMMA";
+        case 55: return "PERIOD";
+        case 56: return "SLASH";
+        case 57: return "CAPS LOCK";
+        // --- Function keys ---
+        case 58: return "F1";
+        case 59: return "F2";
+        case 60: return "F3";
+        case 61: return "F4";
+        case 62: return "F5";
+        case 63: return "F6";
+        case 64: return "F7";
+        case 65: return "F8";
+        case 66: return "F9";
+        case 67: return "F10";
+        case 68: return "F11";
+        case 69: return "F12";
+        // --- Navigation ---
+        case 73: return "INSERT";
+        case 74: return "HOME";
+        case 75: return "PAGE UP";
+        case 76: return "DELETE";
+        case 77: return "END";
+        case 78: return "PAGE DOWN";
+        case 79: return "RIGHT";
+        case 80: return "LEFT";
+        case 81: return "DOWN";
+        case 82: return "UP";
+        // --- Numpad ---
+        case 83: return "NUM LOCK";
+        case 84: return "NUMPAD /";
+        case 85: return "NUMPAD *";
+        case 86: return "NUMPAD -";
+        case 87: return "NUMPAD +";
+        case 88: return "NUMPAD ENTER";
+        case 89: return "NUMPAD 1";
+        case 90: return "NUMPAD 2";
+        case 91: return "NUMPAD 3";
+        case 92: return "NUMPAD 4";
+        case 93: return "NUMPAD 5";
+        case 94: return "NUMPAD 6";
+        case 95: return "NUMPAD 7";
+        case 96: return "NUMPAD 8";
+        case 97: return "NUMPAD 9";
+        case 98: return "NUMPAD 0";
+        case 99: return "NUMPAD .";
+        // --- Modifier keys ---
+        case 224: return "LEFT CTRL";
+        case 225: return "LEFT SHIFT";
+        case 226: return "LEFT ALT";
+        case 228: return "RIGHT CTRL";
+        case 229: return "RIGHT SHIFT";
+        case 230: return "RIGHT ALT";
+        // --- Extra ---
+        case 72: return "PAUSE";
+        case 70: return "SCROLL LOCK";
+        case 71: return "PRINT SCREEN";
+        default: {
+            static char buf[16];
+            snprintf(buf, sizeof(buf), "[%d]", scancode);
+            return buf;
+        }
     }
 }
 
@@ -305,27 +337,58 @@ const char* PauseMenu::GetKeyName(int keycode) {
     }
 
     void PauseMenu::RenderKeybinds(FPSController& controller) {
+        // Section header
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.80f, 1.0f, 1.0f));
         ImGui::Text("Key Bindings Configuration");
-        ImGui::Dummy(ImVec2(0, 10));
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 8));
 
         KeyBindings& binds = controller.GetKeyBindings();
 
-        float labelWidth = 120.0f;
-        
-        auto RenderBind = [&](const char* label, int key) {
-            ImGui::Text(label); 
-            ImGui::SameLine(labelWidth);
-            ImGui::Button(GetKeyName(key), ImVec2(180, 0));
+        const float labelW = 110.0f;
+        const float keyBtnW = 190.0f;
+        const float rowH = 32.0f;
+
+        // Table-style header
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+        ImGui::Text("%-12s", "Action");
+        ImGui::SameLine(labelW);
+        ImGui::Text("Key");
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Key button style – muted blue
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.30f, 0.48f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.42f, 0.65f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.35f, 0.52f, 0.78f, 1.0f));
+
+        struct BindRow { const char* label; int key; };
+        BindRow rows[] = {
+            { "Forward",  binds.forward  },
+            { "Backward", binds.backward },
+            { "Left",     binds.left     },
+            { "Right",    binds.right    },
+            { "Jump",     binds.jump     },
+            { "Sprint",   binds.sprint   },
         };
 
-        RenderBind("Forward:", binds.forward);
-        RenderBind("Backward:", binds.backward);
-        RenderBind("Left:", binds.left);
-        RenderBind("Right:", binds.right);
-        RenderBind("Jump:", binds.jump);
-        RenderBind("Sprint:", binds.sprint);
+        for (auto& row : rows) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(row.label);
+            ImGui::SameLine(labelW);
+            // Non-interactive display button (click-to-rebind could be added later)
+            char btnId[64];
+            snprintf(btnId, sizeof(btnId), "%s##bind_%s", GetKeyName(row.key), row.label);
+            ImGui::Button(btnId, ImVec2(keyBtnW, rowH));
+            ImGui::Spacing();
+        }
 
-        ImGui::Dummy(ImVec2(0, 30));
+        ImGui::PopStyleColor(3);
+        ImGui::Dummy(ImVec2(0, 20));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 10));
 
         if (ImGui::Button("BACK", ImVec2(300, 40))) {
             m_CurrentState = MenuState::Options;
