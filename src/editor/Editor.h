@@ -145,6 +145,7 @@ private:
     void DrawConsolePanel();
     void DrawPerformanceMetrics(float deltaTime, float fps);
     void DrawDemoWindow();
+    void DrawTutorialPanel();
     void SpawnEntity(Scene* scene, const std::string& type, const std::string& path = "");
     void DrawModelDirectory(Scene* scene, const std::filesystem::path& directory);
 
@@ -170,6 +171,7 @@ private:
     bool m_ShowPerformance    = false;
     bool m_ShowDemoWindow     = false;
     bool m_ShowGameBuilder    = false;
+    bool m_ShowTutorial       = false;
 
     // ── Panel locking states (fixed/Unity-style layout) ──────────────────────
     bool m_HierarchyLocked    = true;
