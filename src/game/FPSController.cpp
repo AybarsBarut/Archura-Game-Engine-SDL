@@ -9,6 +9,7 @@
 #include <glm/gtx/quaternion.hpp>
 #include "../game/Weapon.h"
 #include "../game/Projectile.h"
+#include "../game/PhysicsSystem.h" // Added for physics raycast
 #include <algorithm>
 
 namespace Archura {
@@ -25,7 +26,7 @@ FPSController::FPSController(Camera* camera)
     m_Bindings.sprint = SDL_SCANCODE_LSHIFT;
 }
 
-void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem) {
+void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem, PhysicsSystem* physicsSystem) {
     // Mouse Look is now handled externally in Application::ProcessInput()
         
     HandleMovement(input, scene, deltaTime);
@@ -88,6 +89,59 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
 
                     AddRecoil(glm::vec3(rY, rX, 0.0f)); 
                 }
+            }
+        }
+    }
+
+    // --- OBJECT GRABBING LOGIC ---
+    if (physicsSystem && input->IsCursorLocked()) {
+        // We will use Right Mouse Button (SDL_BUTTON_RIGHT is usually 3) or E key for grabbing
+        bool grabInput = input->IsMouseButtonDown(3) || input->IsKeyDown(SDL_SCANCODE_E);
+        
+        if (grabInput) {
+            if (!m_IsGrabbing) {
+                // Try to grab
+                Entity* hitEntity = nullptr;
+                glm::vec3 hitPoint;
+                if (physicsSystem->Raycast(m_Camera->GetPosition(), m_Camera->GetFront(), 15.0f, &hitEntity, &hitPoint)) {
+                    // Check if entity is valid and has a transform
+                    if (hitEntity && hitEntity->HasComponent<Transform>() && hitEntity->GetName() != "Player" && hitEntity->GetName() != "Floor") {
+                        m_GrabbedEntityId = hitEntity->GetID();
+                        m_GrabDistance = glm::distance(m_Camera->GetPosition(), hitPoint);
+                        // Make it slightly closer than the actual hit point to avoid clipping
+                        if (m_GrabDistance < 2.0f) m_GrabDistance = 2.0f;
+                        m_IsGrabbing = true;
+                    }
+                }
+            } else {
+                // Currently grabbing, update position
+                Entity* grabbedEntity = scene->GetEntity(m_GrabbedEntityId);
+                if (grabbedEntity && grabbedEntity->HasComponent<Transform>()) {
+                    auto* transform = grabbedEntity->GetComponent<Transform>();
+                    
+                    // Calculate target position
+                    glm::vec3 targetPos = m_Camera->GetPosition() + m_Camera->GetFront() * m_GrabDistance;
+                    
+                    // If it has a rigidbody, zero out its velocity so it doesn't fall while grabbed
+                    if (grabbedEntity->HasComponent<RigidBody>()) {
+                        auto* rb = grabbedEntity->GetComponent<RigidBody>();
+                        rb->velocity = glm::vec3(0.0f); // Hold still
+                    }
+
+                    // Lerp position for smooth movement
+                    float grabSpeed = 15.0f;
+                    transform->position = transform->position + (targetPos - transform->position) * grabSpeed * deltaTime;
+                } else {
+                    // Entity might have been destroyed
+                    m_IsGrabbing = false;
+                    m_GrabbedEntityId = 0;
+                }
+            }
+        } else {
+            // Released button
+            if (m_IsGrabbing) {
+                m_IsGrabbing = false;
+                m_GrabbedEntityId = 0;
             }
         }
     }
@@ -187,10 +241,12 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
     if (glm::length(right) > 0.001f) right = glm::normalize(right);
     
     glm::vec3 wishDir = glm::vec3(0.0f);
-    if (input->IsKeyDown(m_Bindings.forward)) wishDir += forward;
-    if (input->IsKeyDown(m_Bindings.backward)) wishDir -= forward;
-    if (input->IsKeyDown(m_Bindings.left)) wishDir -= right;
-    if (input->IsKeyDown(m_Bindings.right)) wishDir += right;
+    if (input->IsCursorLocked()) {
+        if (input->IsKeyDown(m_Bindings.forward)) wishDir += forward;
+        if (input->IsKeyDown(m_Bindings.backward)) wishDir -= forward;
+        if (input->IsKeyDown(m_Bindings.left)) wishDir -= right;
+        if (input->IsKeyDown(m_Bindings.right)) wishDir += right;
+    }
     
     if (glm::length(wishDir) > 0.001f) wishDir = glm::normalize(wishDir);
     
@@ -202,7 +258,7 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
     // Eger ziplama basarili olursa, m_IsGrounded false olur ve surtunme uygulanmaz.
     // Boylece hiz korunur.
     
-    if (input->IsKeyDown(m_Bindings.jump)) {
+    if (input->IsCursorLocked() && input->IsKeyDown(m_Bindings.jump)) {
         if (m_IsGrounded) {
              m_Velocity.y = sqrt(m_JumpHeight * 2.0f * -m_Gravity); 
              m_IsGrounded = false;
@@ -225,8 +281,10 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
         if (input->IsKeyDown(m_Bindings.left)) flyDir -= m_Camera->GetRight();
         
         // Space / Ctrl ile dikey hareket (World Up/Down)
-        if (input->IsKeyDown(m_Bindings.jump)) flyDir += glm::vec3(0.0f, 1.0f, 0.0f);
-        if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) flyDir -= glm::vec3(0.0f, 1.0f, 0.0f);
+        if (input->IsCursorLocked()) {
+            if (input->IsKeyDown(m_Bindings.jump)) flyDir += glm::vec3(0.0f, 1.0f, 0.0f);
+            if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) flyDir -= glm::vec3(0.0f, 1.0f, 0.0f);
+        }
 
         if (glm::length(flyDir) > 0.001f) {
             flyDir = glm::normalize(flyDir);
@@ -280,11 +338,13 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
             flyParams.delta_time = deltaTime;
             
             // Allow vertical movement with Jump/Duck keys (Apply Acceleration directly vs Impulse)
-            if (input->IsKeyDown(m_Bindings.jump)) {
-                m_Velocity.y += flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f; 
-            }
-            if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) {
-                m_Velocity.y -= flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f;
+            if (input->IsCursorLocked()) {
+                if (input->IsKeyDown(m_Bindings.jump)) {
+                    m_Velocity.y += flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f; 
+                }
+                if (input->IsKeyDown(SDL_SCANCODE_LCTRL)) {
+                    m_Velocity.y -= flyParams.accelerate * deltaTime * flyParams.max_velocity * 0.5f;
+                }
             }
 
             // Cap Vertical Speed manually to avoid infinite buildup
