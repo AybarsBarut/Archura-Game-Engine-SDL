@@ -24,8 +24,8 @@ void DevConsole::Init() {
   // Playsound komutunu DeveloperConsole'a ekleyebiliriz veya burada ozel handle edebiliriz.
   // Simdilik DeveloperConsole ana sistem olacak.
 
-  Log("Archura DevConsole Initialized. Type /dev to enable developer mode.");
-  Log("Type 'help' for commands.");
+  Log("[Archura] Command palette ready.");
+  Log("[Tip] Try 'commands', 'render.stats', 'scene.list' or 'debug.cheats 1'.");
 }
 
 void DevConsole::Toggle() { m_IsOpen = !m_IsOpen; }
@@ -39,24 +39,52 @@ void DevConsole::Render() {
   if (!m_IsOpen)
     return;
 
-  ImGui::SetNextWindowSize(ImVec2(520, 600), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Developer Console", &m_IsOpen)) {
+  ImGui::SetNextWindowSize(ImVec2(720, 460), ImGuiCond_FirstUseEver);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+  if (!ImGui::Begin("Archura Command Palette", &m_IsOpen)) {
+    ImGui::PopStyleVar();
     ImGui::End();
     return;
+  }
+  ImGui::PopStyleVar();
+
+  ImGui::TextColored(ImVec4(0.56f, 0.78f, 1.0f, 1.0f), "ARCHURA");
+  ImGui::SameLine();
+  ImGui::TextDisabled("developer surface");
+  ImGui::SameLine(ImGui::GetWindowWidth() - 185.0f);
+  ImGui::TextDisabled(m_DevMode ? "Developer mode: on" : "Developer mode: off");
+  ImGui::Separator();
+
+  if (ImGui::SmallButton("Commands")) {
+      DeveloperConsole::GetInstance().ExecuteCommand("commands");
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Render Stats")) {
+      DeveloperConsole::GetInstance().ExecuteCommand("render.stats");
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Debug On")) {
+      DeveloperConsole::GetInstance().ExecuteCommand("debug.cheats 1");
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Clear")) {
+      m_Logs.clear();
   }
 
   // Output area
   const float footer_height_to_reserve =
-      ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
+      ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() * 2.0f;
   ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footer_height_to_reserve),
-                    false, ImGuiWindowFlags_HorizontalScrollbar);
+                    true, ImGuiWindowFlags_HorizontalScrollbar);
 
   for (const auto &log : m_Logs) {
     ImVec4 color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-    if (log.find("Error") != std::string::npos)
+    if (log.find("Error") != std::string::npos || log.find("[ERR]") != std::string::npos)
       color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
-    else if (log.find("ENABLED") != std::string::npos)
+    else if (log.find("ENABLED") != std::string::npos || log.find("ready") != std::string::npos)
       color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+    else if (log.rfind(">", 0) == 0)
+      color = ImVec4(0.56f, 0.78f, 1.0f, 1.0f);
 
     ImGui::PushStyleColor(ImGuiCol_Text, color);
     ImGui::TextUnformatted(log.c_str());
@@ -76,7 +104,11 @@ void DevConsole::Render() {
                                     ImGuiInputTextFlags_CallbackCompletion |
                                     ImGuiInputTextFlags_CallbackHistory;
 
-  if (ImGui::InputText("Input", m_InputBuf, IM_ARRAYSIZE(m_InputBuf),
+  ImGui::TextDisabled("Command");
+  ImGui::SameLine();
+  ImGui::TextDisabled("namespace style: render.stats, scene.open, config.save");
+  ImGui::SetNextItemWidth(-1);
+  if (ImGui::InputText("##CommandInput", m_InputBuf, IM_ARRAYSIZE(m_InputBuf),
                        input_flags)) {
     std::string cmd = m_InputBuf;
     if (!cmd.empty()) {
@@ -91,6 +123,25 @@ void DevConsole::Render() {
   ImGui::SetItemDefaultFocus();
   if (reclaim_focus)
     ImGui::SetKeyboardFocusHere(-1);
+
+  if (m_InputBuf[0] != '\0') {
+      std::string needle = m_InputBuf;
+      auto aliases = DeveloperConsole::GetInstance().GetAliasNames();
+      int shown = 0;
+      ImGui::TextDisabled("Matches:");
+      ImGui::SameLine();
+      for (const auto& name : aliases) {
+          if (name.find(needle) != std::string::npos) {
+              if (shown++ > 0) ImGui::SameLine();
+              ImGui::TextColored(ImVec4(0.56f, 0.78f, 1.0f, 1.0f), "%s", name.c_str());
+              if (shown >= 4) break;
+          }
+      }
+      if (shown == 0) {
+          ImGui::SameLine();
+          ImGui::TextDisabled("none");
+      }
+  }
 
   ImGui::End();
 }

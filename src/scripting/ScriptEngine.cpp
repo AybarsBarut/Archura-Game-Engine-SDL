@@ -5,6 +5,7 @@
 
 #include <mono/jit/jit.h>
 #include <mono/metadata/assembly.h>
+#include <mono/metadata/class.h>
 #include <mono/metadata/object.h>
 #include <fstream>
 #include <iostream>
@@ -25,23 +26,6 @@ namespace Archura {
         // Map Entity ID -> Script Instance
         std::unordered_map<uint32_t, MonoObject*> EntityScriptInstances;
     };
-    
-    // ... (Previous Helper Functions remain usually, but I need to be careful with replace_file_content ranges)
-    // To avoid replacing the whole file and losing helpers, I will target specific chunks or if I am confident I can just replace the top and bottom.
-    // The previous replace_file_content replaced the bottom. 
-    // I will replace the includes (top) and the bottom methods.
- 
-    // Since I cannot make multiple edits with replace_file_content, and I need to change includes AND structures AND methods, I should use multi_replace.
-    // However, I'm using replace_file_content here. 
-    // Better strategy: Use multi_replace to target the includes and the methods.
-    
-    // Wait, I am currently in a thoughts block. I should output the tool call.
-    // Reference: I need to update includes at lines 1-10 and methods at the end.
-    
-    // Actually, I'll allow myself to overwrite the top includes first.
-    // But I can't overwrite `ScriptEngineData` struct easily without overwriting the whole file or using multi_replace.
-    // Let's use multi_replace.
-
 
     static ScriptEngineData* s_Data = nullptr;
 
@@ -74,6 +58,10 @@ namespace Archura {
     static MonoAssembly* LoadMonoAssembly(const std::filesystem::path& assemblyPath) {
         uint32_t fileSize = 0;
         char* fileData = ReadBytes(assemblyPath, &fileSize);
+        if (!fileData || fileSize == 0) {
+            std::cout << "[ScriptEngine] Failed to read assembly: " << assemblyPath << std::endl;
+            return nullptr;
+        }
 
         // NOTE: We can't use this image for anything other than loading the assembly because this image doesn't have a reference to the assembly
         MonoImageOpenStatus status;
@@ -82,6 +70,7 @@ namespace Archura {
         if (status != MONO_IMAGE_OK) {
             // Log Error
             std::cout << "[ScriptEngine] Mono Image Load Error: " << mono_image_strerror(status) << std::endl;
+            delete[] fileData;
             return nullptr;
         }
 
@@ -92,6 +81,39 @@ namespace Archura {
         delete[] fileData;
 
         return assembly;
+    }
+
+    static void ReportMonoException(MonoObject* exception) {
+        if (!exception) return;
+        MonoString* exceptionString = mono_object_to_string(exception, nullptr);
+        char* message = mono_string_to_utf8(exceptionString);
+        std::cout << "[ScriptEngine] Exception: " << message << std::endl;
+        mono_free(message);
+    }
+
+    static bool InvokeNoArg(MonoObject* instance, MonoClass* monoClass, const char* methodName) {
+        MonoMethod* method = nullptr;
+        for (MonoClass* current = monoClass; current && !method; current = mono_class_get_parent(current)) {
+            method = mono_class_get_method_from_name(current, methodName, 0);
+        }
+        if (!method) return false;
+
+        MonoObject* exception = nullptr;
+        mono_runtime_invoke(method, instance, nullptr, &exception);
+        ReportMonoException(exception);
+        return exception == nullptr;
+    }
+
+    static void SetScriptInstanceEntityID(MonoObject* instance, MonoClass* /*monoClass*/, Entity entity) {
+        MonoClass* entityClass = mono_class_from_name(s_Data->CoreAssemblyImage, "Archura", "Entity");
+        MonoMethod* setId = entityClass ? mono_class_get_method_from_name(entityClass, "set_ID", 1) : nullptr;
+        if (!setId) return;
+
+        uint64_t entityId = entity.GetID();
+        void* args[1] = { &entityId };
+        MonoObject* exception = nullptr;
+        mono_runtime_invoke(setId, instance, args, &exception);
+        ReportMonoException(exception);
     }
 
     void ScriptEngine::Init() {
@@ -105,7 +127,11 @@ namespace Archura {
             return;
         }
 
-        LoadAssembly("Resources/Scripts/ScriptCore.dll");
+        std::filesystem::path coreAssembly = "Resources/Scripts/net472/ScriptCore.dll";
+        if (!std::filesystem::exists(coreAssembly)) {
+            coreAssembly = "Resources/Scripts/ScriptCore.dll";
+        }
+        LoadAssembly(coreAssembly);
         ScriptGlue::RegisterFunctions();
         std::cout << "ScriptEngine Initialized!" << std::endl;
     }
@@ -148,6 +174,16 @@ namespace Archura {
     }
 
     void ScriptEngine::LoadAssembly(const std::filesystem::path& filepath) {
+        if (!s_Data || !s_Data->RootDomain) {
+            std::cout << "[ScriptEngine] Cannot load assembly before Mono is initialized." << std::endl;
+            return;
+        }
+
+        if (!std::filesystem::exists(filepath)) {
+            std::cout << "[ScriptEngine] Assembly not found: " << filepath << std::endl;
+            return;
+        }
+
         s_Data->AppDomain = mono_domain_create_appdomain("ArchuraScriptRuntime", nullptr);
         mono_domain_set(s_Data->AppDomain, true);
 
@@ -168,6 +204,7 @@ namespace Archura {
     }
 
     void ScriptEngine::OnCreateEntity(Entity entity) {
+        if (!s_Data || !s_Data->CoreAssemblyImage) return;
         if (!entity.HasComponent<ScriptComponent>()) return;
         
         auto& sc = entity.GetComponent<ScriptComponent>()->className;
@@ -176,18 +213,16 @@ namespace Archura {
         if (ClassExists(sc)) {
              MonoClass* monoClass = mono_class_from_name(s_Data->CoreAssemblyImage, "Archura", sc.c_str());
              MonoObject* instance = InstantiateClass(monoClass);
+             SetScriptInstanceEntityID(instance, monoClass, entity);
              s_Data->EntityScriptInstances[entity.GetID()] = instance;
              
-             // Call OnCreate
-             MonoMethod* onCreateMethod = mono_class_get_method_from_name(monoClass, "OnCreate", 0);
-             if (onCreateMethod) {
-                 MonoObject* exception = nullptr;
-                 mono_runtime_invoke(onCreateMethod, instance, nullptr, &exception);
-             }
+             InvokeNoArg(instance, monoClass, "OnCreate");
+             InvokeNoArg(instance, monoClass, "OnStart");
         }
     }
     
     void ScriptEngine::OnUpdateEntity(Entity entity, float ts) {
+        if (!s_Data) return;
         if (s_Data->EntityScriptInstances.find(entity.GetID()) == s_Data->EntityScriptInstances.end()) {
             return;
         }
@@ -196,12 +231,16 @@ namespace Archura {
         MonoClass* monoClass = mono_object_get_class(instance);
         
         // Optimize: Cache this method
-        MonoMethod* onUpdateMethod = mono_class_get_method_from_name(monoClass, "OnUpdate", 1);
+        MonoMethod* onUpdateMethod = nullptr;
+        for (MonoClass* current = monoClass; current && !onUpdateMethod; current = mono_class_get_parent(current)) {
+            onUpdateMethod = mono_class_get_method_from_name(current, "OnUpdate", 1);
+        }
         if (onUpdateMethod) {
              void* args[1];
              args[0] = &ts;
              MonoObject* exception = nullptr;
              mono_runtime_invoke(onUpdateMethod, instance, args, &exception);
+             ReportMonoException(exception);
         }
     }
 
@@ -212,6 +251,7 @@ namespace Archura {
     }
 
     bool ScriptEngine::ClassExists(const std::string& fullClassName) {
+        if (!s_Data || !s_Data->CoreAssemblyImage) return false;
         // Currently assuming "Archura" namespace for everything or simpler lookup
         // Ideally parse fullClassName for namespace
         // For simplicity:

@@ -7,10 +7,12 @@
 #include "rendering/Camera.h"
 #include "game/RenderSystem.h"
 #include "game/AudioSource.h"
+#include "core/DeveloperConsole.h"
 // #include "input/Input.h" 
 
 #include <mono/metadata/object.h>
 #include <mono/metadata/reflection.h>
+#include <mono/jit/jit.h>
 #include <iostream>
 #include <glm/glm.hpp>
 
@@ -22,8 +24,7 @@ namespace Archura {
     static void NativeLog(MonoString* string, int parameter) {
         (void)parameter;
         char* cStr = mono_string_to_utf8(string);
-        // std::cout << "[Script Log] " << cStr << ", " << parameter << std::endl;
-        // Ideally use DevConsole
+        DeveloperConsole::GetInstance().Print(std::string("[Script] ") + cStr);
         mono_free(cStr);
     }
 
@@ -46,6 +47,70 @@ namespace Archura {
         if (scene) {
             scene->DestroyEntity((uint32_t)entityID);
         }
+    }
+
+    static bool Entity_Exists(uint64_t entityID) {
+        Scene* scene = Application::Get().GetScene();
+        return scene && scene->GetEntity((uint32_t)entityID) != nullptr;
+    }
+
+    static uint64_t Entity_FindByName(MonoString* nameStr) {
+        Scene* scene = Application::Get().GetScene();
+        if (!scene || !nameStr) return 0;
+
+        char* cStr = mono_string_to_utf8(nameStr);
+        std::string name(cStr);
+        mono_free(cStr);
+
+        for (const auto& entity : scene->GetEntities()) {
+            if (entity && entity->GetName() == name) {
+                return entity->GetID();
+            }
+        }
+        return 0;
+    }
+
+    static MonoString* Entity_GetName(uint64_t entityID) {
+        Scene* scene = Application::Get().GetScene();
+        Entity* entity = scene ? scene->GetEntity((uint32_t)entityID) : nullptr;
+        const std::string name = entity ? entity->GetName() : std::string();
+        return mono_string_new(mono_domain_get(), name.c_str());
+    }
+
+    static void Entity_SetName(uint64_t entityID, MonoString* nameStr) {
+        Scene* scene = Application::Get().GetScene();
+        Entity* entity = scene ? scene->GetEntity((uint32_t)entityID) : nullptr;
+        if (!entity || !nameStr) return;
+
+        char* cStr = mono_string_to_utf8(nameStr);
+        entity->SetName(cStr);
+        mono_free(cStr);
+    }
+
+    static bool Entity_HasComponent(uint64_t entityID, MonoString* componentNameStr) {
+        Scene* scene = Application::Get().GetScene();
+        Entity* entity = scene ? scene->GetEntity((uint32_t)entityID) : nullptr;
+        if (!entity || !componentNameStr) return false;
+
+        char* cStr = mono_string_to_utf8(componentNameStr);
+        std::string componentName(cStr);
+        mono_free(cStr);
+
+        if (componentName == "Transform" || componentName == "TransformComponent")
+            return entity->HasComponent<Transform>();
+        if (componentName == "RigidBody" || componentName == "Rigidbody")
+            return entity->HasComponent<RigidBody>();
+        if (componentName == "MeshRenderer")
+            return entity->HasComponent<MeshRenderer>();
+        if (componentName == "AudioSource")
+            return entity->HasComponent<AudioSource>();
+        if (componentName == "BoxCollider")
+            return entity->HasComponent<BoxCollider>();
+        if (componentName == "Light" || componentName == "LightComponent")
+            return entity->HasComponent<LightComponent>();
+        if (componentName == "Script" || componentName == "ScriptComponent")
+            return entity->HasComponent<ScriptComponent>();
+        return false;
     }
 
     #pragma endregion
@@ -254,6 +319,11 @@ namespace Archura {
         
         ARCHURA_ADD_INTERNAL_CALL(Entity_Create);
         ARCHURA_ADD_INTERNAL_CALL(Entity_Destroy);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_Exists);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_FindByName);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_GetName);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_SetName);
+        ARCHURA_ADD_INTERNAL_CALL(Entity_HasComponent);
 
         ARCHURA_ADD_INTERNAL_CALL(Transform_GetPosition);
         ARCHURA_ADD_INTERNAL_CALL(Transform_SetPosition);
