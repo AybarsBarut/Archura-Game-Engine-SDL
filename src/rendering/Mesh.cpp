@@ -208,10 +208,10 @@ Mesh* Mesh::CreatePlane(float width, float height, float uvScale) {
     float h = height * 0.5f;
     
     std::vector<Vertex> vertices = {
-        {{-w, 0, -h}, {0, 1, 0}, {0, 0}, {0.8f, 0.8f, 0.8f}},
-        {{ w, 0, -h}, {0, 1, 0}, {1 * uvScale, 0}, {0.8f, 0.8f, 0.8f}},
-        {{ w, 0,  h}, {0, 1, 0}, {1 * uvScale, 1 * uvScale}, {0.8f, 0.8f, 0.8f}},
-        {{-w, 0,  h}, {0, 1, 0}, {0, 1 * uvScale}, {0.8f, 0.8f, 0.8f}},
+        {{-w, 0,  h}, {0, 1, 0}, {0, 0}, {0.8f, 0.8f, 0.8f}},
+        {{ w, 0,  h}, {0, 1, 0}, {1 * uvScale, 0}, {0.8f, 0.8f, 0.8f}},
+        {{ w, 0, -h}, {0, 1, 0}, {1 * uvScale, 1 * uvScale}, {0.8f, 0.8f, 0.8f}},
+        {{-w, 0, -h}, {0, 1, 0}, {0, 1 * uvScale}, {0.8f, 0.8f, 0.8f}},
     };
     
     std::vector<unsigned int> indices = {
@@ -257,12 +257,12 @@ Mesh* Mesh::CreateSphere(float radius, int segments) {
             unsigned int next = current + sectors + 1;
             
             indices.push_back(current);
-            indices.push_back(next);
             indices.push_back(current + 1);
+            indices.push_back(next);
             
             indices.push_back(current + 1);
-            indices.push_back(next);
             indices.push_back(next + 1);
+            indices.push_back(next);
         }
     }
     
@@ -407,12 +407,12 @@ Mesh* Mesh::CreateCapsule(float radius, float height) {
             int next = current + verticesPerRing;
             
             indices.push_back(current);
-            indices.push_back(next);
             indices.push_back(current + 1);
+            indices.push_back(next);
             
             indices.push_back(current + 1);
-            indices.push_back(next);
             indices.push_back(next + 1);
+            indices.push_back(next);
         }
     }
 
@@ -564,21 +564,21 @@ Mesh* Mesh::CreateStairs(float width, float height, float depth, int steps) {
         // Front (Riser)
         glm::vec3 p4_riser = p4; p4_riser.y = yRiseBottom;
         glm::vec3 p5_riser = p5; p5_riser.y = yRiseBottom;
-        AddQuad(p4_riser, p5_riser, p6, p7, {0,0,1});
+        AddQuad(p5_riser, p4_riser, p7, p6, {0,0,-1});
         
         // Top
-        AddQuad(p7, p6, p2, p3, {0,1,0});
+        AddQuad(p6, p7, p3, p2, {0,1,0});
         
         // Sides
-        AddQuad(p5, p1, p2, p6, {1,0,0});  // Right
-        AddQuad(p0, p4, p7, p3, {-1,0,0}); // Left
+        AddQuad(p1, p5, p6, p2, {1,0,0});  // Right
+        AddQuad(p4, p0, p3, p7, {-1,0,0}); // Left
         
         // Bottom
         AddQuad(p0, p1, p5, p4, {0,-1,0});
         
         // Back (Only last)
         if (i == steps - 1) {
-            AddQuad(p1, p0, p3, p2, {0,0,-1});
+            AddQuad(p0, p1, p2, p3, {0,0,1});
         }
     }
 
@@ -610,7 +610,7 @@ Mesh* Mesh::CreateRamp(float width, float height, float depth) {
     // Egimli Yuzey (Rampa) - p4, p5, p2, p3
     // Normali hesapla
     glm::vec3 rampVec = glm::vec3(0, h, -2*d);
-    glm::vec3 rampNormal = glm::normalize(glm::cross(rampVec, glm::vec3(1,0,0))); // Basitce
+    glm::vec3 rampNormal = glm::normalize(glm::cross(glm::vec3(1,0,0), rampVec)); // Cikan yone dogru
 
     vertices.push_back({p4, rampNormal, {0,0}, {1,1,1}});
     vertices.push_back({p5, rampNormal, {1,0}, {1,1,1}});
@@ -624,10 +624,10 @@ Mesh* Mesh::CreateRamp(float width, float height, float depth) {
     vertices.push_back({p2, {0,0,-1}, {0,1}, {1,1,1}});
 
     // Alt Yuz
-    vertices.push_back({p0, {0,-1,0}, {0,0}, {1,1,1}});
-    vertices.push_back({p1, {0,-1,0}, {1,0}, {1,1,1}});
-    vertices.push_back({p5, {0,-1,0}, {1,1}, {1,1,1}});
-    vertices.push_back({p4, {0,-1,0}, {0,1}, {1,1,1}});
+    vertices.push_back({p4, {0,-1,0}, {0,0}, {1,1,1}});
+    vertices.push_back({p5, {0,-1,0}, {1,0}, {1,1,1}});
+    vertices.push_back({p1, {0,-1,0}, {1,1}, {1,1,1}});
+    vertices.push_back({p0, {0,-1,0}, {0,1}, {1,1,1}});
 
     // Yan Yuzler (Ucgen)
     // Sag - p5, p1, p2

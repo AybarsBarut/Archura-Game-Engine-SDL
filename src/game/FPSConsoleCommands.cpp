@@ -37,6 +37,61 @@ namespace Archura {
         RegisterCheatCommands();
         RegisterSystemCommands();
         RegisterBotCommands();
+
+        auto& console = DeveloperConsole::GetInstance();
+        console.RegisterAlias("render.stats", "r_stats");
+        console.RegisterAlias("render.reload_shaders", "r_reload_shaders");
+        console.RegisterAlias("render.reload_textures", "r_texture_reload");
+        console.RegisterAlias("render.dump_stats", "r_dump_statistics");
+        console.RegisterAlias("render.clear_cache", "r_clear_cache");
+        console.RegisterAlias("render.textures", "r_list_textures");
+
+        console.RegisterAlias("network.ping", "net_ping");
+        console.RegisterAlias("network.stats", "net_stats");
+        console.RegisterAlias("network.connect", "connect");
+        console.RegisterAlias("network.disconnect", "disconnect");
+        console.RegisterAlias("network.status", "status");
+        console.RegisterAlias("network.graph", "net_graph");
+
+        console.RegisterAlias("input.bind", "bind");
+        console.RegisterAlias("input.unbind", "unbind");
+        console.RegisterAlias("input.bindings", "bindlist");
+        console.RegisterAlias("input.clear_bindings", "unbindall");
+
+        console.RegisterAlias("scene.open", "map");
+        console.RegisterAlias("scene.list", "maplist");
+        console.RegisterAlias("game.mode", "game_mode");
+        console.RegisterAlias("physics.gravity", "gravity");
+        console.RegisterAlias("entity.teleport", "teleport");
+
+        console.RegisterAlias("audio.test", "snd_test");
+        console.RegisterAlias("audio.stats", "snd_stats");
+        console.RegisterAlias("audio.sounds", "snd_list_sounds");
+        console.RegisterAlias("audio.reload", "snd_reload");
+
+        console.RegisterAlias("player.god", "god");
+        console.RegisterAlias("player.noclip", "noclip");
+        console.RegisterAlias("player.notarget", "notarget");
+        console.RegisterAlias("player.give", "give");
+        console.RegisterAlias("debug.hitboxes", "sv_hitbox_debug");
+        console.RegisterAlias("debug.wireframe", "sv_wireframe");
+        console.RegisterAlias("debug.skeletons", "sv_skeleton_debug");
+        console.RegisterAlias("debug.bullet_trails", "sv_bullet_trails");
+        console.RegisterAlias("debug.trace_rays", "sv_trace_rays");
+
+        console.RegisterAlias("system.info", "sys_info");
+        console.RegisterAlias("system.benchmark", "sys_benchmark");
+        console.RegisterAlias("profile.start", "profile_start");
+        console.RegisterAlias("profile.stop", "profile_stop");
+        console.RegisterAlias("profile.results", "profile_results");
+        console.RegisterAlias("log.enable", "log_enable");
+        console.RegisterAlias("log.clear", "log_clear");
+
+        console.RegisterAlias("ai.add", "bot_add");
+        console.RegisterAlias("ai.remove", "bot_remove");
+        console.RegisterAlias("ai.clear", "bot_removeall");
+        console.RegisterAlias("ai.list", "bot_list");
+        console.RegisterAlias("ai.kick", "bot_kick");
     }
 
     void FPSConsoleCommands::RegisterRenderingCommands() {

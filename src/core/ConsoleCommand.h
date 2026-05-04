@@ -21,16 +21,22 @@ namespace Archura {
             const std::string& name,
             const std::string& description,
             CommandCallback callback,
-            bool requiresCheats = false
+            bool requiresCheats = false,
+            const std::string& category = "General",
+            const std::string& usage = ""
         )
             : m_name(name),
               m_description(description),
               m_callback(callback),
-              m_requiresCheats(requiresCheats)
+              m_requiresCheats(requiresCheats),
+              m_category(category),
+              m_usage(usage)
         {}
 
         const std::string& GetName() const { return m_name; }
         const std::string& GetDescription() const { return m_description; }
+        const std::string& GetCategory() const { return m_category; }
+        const std::string& GetUsage() const { return m_usage; }
         bool RequiresCheats() const { return m_requiresCheats; }
 
         void Execute(const std::vector<std::string>& args) {
@@ -44,6 +50,8 @@ namespace Archura {
         std::string m_description;
         CommandCallback m_callback;
         bool m_requiresCheats;
+        std::string m_category;
+        std::string m_usage;
     };
 
     /**

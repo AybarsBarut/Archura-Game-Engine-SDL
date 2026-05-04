@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <sstream>
 #include <fstream>
+#include <cctype>
+#include <map>
 
 
 namespace Archura {
@@ -12,15 +14,40 @@ namespace Archura {
         RegisterBuiltinVariables();
     }
 
+    std::string DeveloperConsole::NormalizeName(const std::string& name) const {
+        std::string normalized = name;
+        while (!normalized.empty() && (normalized.front() == '/' || normalized.front() == '\\')) {
+            normalized.erase(normalized.begin());
+        }
+        for (char& ch : normalized) {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        return normalized;
+    }
+
+    std::string DeveloperConsole::ResolveCommandName(const std::string& name) const {
+        const std::string normalized = NormalizeName(name);
+        auto aliasIt = m_aliases.find(normalized);
+        return aliasIt != m_aliases.end() ? aliasIt->second : normalized;
+    }
+
     void DeveloperConsole::RegisterCommand(const std::shared_ptr<ConsoleCommand>& command) {
         if (command) {
-            m_commands[command->GetName()] = command;
+            m_commands[NormalizeName(command->GetName())] = command;
+        }
+    }
+
+    void DeveloperConsole::RegisterAlias(const std::string& alias, const std::string& targetCommand) {
+        const std::string aliasName = NormalizeName(alias);
+        const std::string targetName = NormalizeName(targetCommand);
+        if (!aliasName.empty() && !targetName.empty()) {
+            m_aliases[aliasName] = targetName;
         }
     }
 
     void DeveloperConsole::RegisterVariable(const std::shared_ptr<ConsoleVariable>& variable) {
         if (variable) {
-            m_variables[variable->GetName()] = variable;
+            m_variables[NormalizeName(variable->GetName())] = variable;
         }
     }
 
@@ -30,6 +57,7 @@ namespace Archura {
         std::istringstream iss(commandLine);
         std::string command;
         iss >> command;
+        command = ResolveCommandName(command);
 
         std::vector<std::string> args;
         std::string arg;
@@ -48,19 +76,20 @@ namespace Archura {
     }
 
     void DeveloperConsole::ExecuteCommandWithArgs(const std::string& command, const std::vector<std::string>& args) {
+        const std::string resolvedCommand = ResolveCommandName(command);
         // Komut geçmişine ekle
-        std::string fullCommand = command;
+        std::string fullCommand = resolvedCommand;
         for (const auto& arg : args) {
             fullCommand += " " + arg;
         }
         AddToHistory(fullCommand);
 
         // Komutu bulup çalıştır
-        auto it = m_commands.find(command);
+        auto it = m_commands.find(resolvedCommand);
         if (it != m_commands.end()) {
             auto cmdPtr = it->second;
             if (cmdPtr->RequiresCheats() && !m_cheatsEnabled) {
-                Print("[Console] '" + command + "' requires sv_cheats 1");
+                Print("[Console] '" + resolvedCommand + "' requires debug.cheats 1");
                 return;
             }
             cmdPtr->Execute(args);
@@ -70,34 +99,35 @@ namespace Archura {
         // CVAR olarak deneyelim
         if (args.empty()) {
             // Sadece değişkeni oku
-            auto varIt = m_variables.find(command);
+            auto varIt = m_variables.find(NormalizeName(command));
             if (varIt != m_variables.end()) {
                 auto var = varIt->second;
-                Print(command + " = \"" + var->GetValue() + "\"");
+                Print(var->GetName() + " = \"" + var->GetValue() + "\"");
                 return;
             }
         }
         else if (args.size() == 1) {
             // Değişkene yeni değer ata
-            auto varIt = m_variables.find(command);
+            auto varIt = m_variables.find(NormalizeName(command));
             if (varIt != m_variables.end()) {
                 auto var = varIt->second;
                 if (var->RequiresCheats() && !m_cheatsEnabled) {
-                    Print("[Console] '" + command + "' requires sv_cheats 1");
+                    Print("[Console] '" + var->GetName() + "' requires debug.cheats 1");
                     return;
                 }
                 var->SetValue(args[0]);
-                Print(command + " = \"" + args[0] + "\"");
+                OnVariableChanged(var->GetName(), args[0]);
+                Print(var->GetName() + " = \"" + args[0] + "\"");
                 return;
             }
         }
 
         Print("[Console] Unknown command: " + command);
-        Print("[Console] Type 'help' for more information");
+        Print("[Console] Type 'commands' for the command palette");
     }
 
     std::shared_ptr<ConsoleVariable> DeveloperConsole::GetVariable(const std::string& name) const {
-        auto it = m_variables.find(name);
+        auto it = m_variables.find(NormalizeName(name));
         return (it != m_variables.end()) ? it->second : nullptr;
     }
 
@@ -105,6 +135,7 @@ namespace Archura {
         auto var = GetVariable(name);
         if (var) {
             var->SetValue(value);
+            OnVariableChanged(var->GetName(), value);
         }
     }
 
@@ -114,13 +145,22 @@ namespace Archura {
     }
 
     std::shared_ptr<ConsoleCommand> DeveloperConsole::GetCommand(const std::string& name) const {
-        auto it = m_commands.find(name);
+        auto it = m_commands.find(ResolveCommandName(name));
         return (it != m_commands.end()) ? it->second : nullptr;
     }
 
     std::vector<std::string> DeveloperConsole::GetCommandNames() const {
         std::vector<std::string> names;
         for (const auto& pair : m_commands) {
+            names.push_back(pair.first);
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
+    std::vector<std::string> DeveloperConsole::GetAliasNames() const {
+        std::vector<std::string> names;
+        for (const auto& pair : m_aliases) {
             names.push_back(pair.first);
         }
         std::sort(names.begin(), names.end());
@@ -136,16 +176,32 @@ namespace Archura {
         return names;
     }
 
+    void DeveloperConsole::OnVariableChanged(const std::string& name, const std::string& value) {
+        const std::string normalized = NormalizeName(name);
+        if (normalized == "debug.cheats" || normalized == "sv_cheats") {
+            SetCheatsEnabled(value == "1" || value == "true" || value == "on");
+            const char* mirrorName = normalized == "debug.cheats" ? "sv_cheats" : "debug.cheats";
+            auto mirror = GetVariable(mirrorName);
+            if (mirror && mirror->GetValue() != value) {
+                mirror->SetValue(value);
+            }
+        }
+    }
+
     void DeveloperConsole::PrintHelp(const std::string& commandName) const {
         std::stringstream ss;
-        ss << "\n=== Help ===\n";
-        ss << "Command: " << commandName << "\n";
+        ss << "\n=== Command Help ===\n";
+        ss << "Name: " << ResolveCommandName(commandName) << "\n";
 
         auto cmd = GetCommand(commandName);
         if (cmd) {
+            ss << "Category: " << cmd->GetCategory() << "\n";
             ss << "Description: " << cmd->GetDescription() << "\n";
+            if (!cmd->GetUsage().empty()) {
+                ss << "Usage: " << cmd->GetUsage() << "\n";
+            }
             if (cmd->RequiresCheats()) {
-                ss << "Note: Requires sv_cheats 1\n";
+                ss << "Note: Requires debug.cheats 1\n";
             }
         }
         else {
@@ -163,7 +219,7 @@ namespace Archura {
                 ss << "Current: " << var->GetValue() << "\n";
                 ss << "Description: " << var->GetDescription() << "\n";
                 if (var->RequiresCheats()) {
-                    ss << "Note: Requires sv_cheats 1\n";
+                    ss << "Note: Requires debug.cheats 1\n";
                 }
             }
             else {
@@ -176,25 +232,46 @@ namespace Archura {
 
     void DeveloperConsole::PrintAllCommands() const {
         std::stringstream ss;
-        ss << "\n=== Available Commands ===\n";
+        ss << "\n=== Archura Command Palette ===\n";
         auto names = GetCommandNames();
+        std::map<std::string, std::vector<std::shared_ptr<ConsoleCommand>>> byCategory;
         for (const auto& name : names) {
             auto cmd = GetCommand(name);
             if (cmd) {
-                ss << name << " - " << cmd->GetDescription();
+                byCategory[cmd->GetCategory()].push_back(cmd);
+            }
+        }
+
+        for (const auto& category : byCategory) {
+            ss << "\n[" << category.first << "]\n";
+            for (const auto& cmd : category.second) {
+                ss << "  " << cmd->GetName();
+                if (!cmd->GetUsage().empty()) {
+                    ss << "  " << cmd->GetUsage();
+                }
+                ss << "\n      " << cmd->GetDescription();
                 if (cmd->RequiresCheats()) {
-                     ss << " [CHEATS]";
+                    ss << " [debug.cheats]";
                 }
                 ss << "\n";
             }
         }
-        ss << "===========================\n";
+
+        if (!m_aliases.empty()) {
+            ss << "\n[Legacy aliases]\n";
+            auto aliases = GetAliasNames();
+            for (const auto& alias : aliases) {
+                ss << "  " << alias << " -> " << m_aliases.at(alias) << "\n";
+            }
+        }
+
+        ss << "===============================\n";
         Print(ss.str());
     }
 
     void DeveloperConsole::PrintAllVariables() const {
         std::stringstream ss;
-        ss << "\n=== Available Variables (CVARs) ===\n";
+        ss << "\n=== Runtime Variables ===\n";
         auto names = GetVariableNames();
         for (const auto& name : names) {
             auto var = GetVariable(name);
@@ -286,34 +363,38 @@ namespace Archura {
                     PrintHelp(args[0]);
                 }
             }
+            , false, "System", "help [command]"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "cmdlist",
-            "List all available commands",
+            "commands",
+            "Open the Archura command palette in text form",
             [this](const std::vector<std::string>& args) {
                 PrintAllCommands();
             }
+            , false, "System", "commands"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "cvarlist",
-            "List all available variables (CVARs)",
+            "vars",
+            "List runtime variables",
             [this](const std::vector<std::string>& args) {
                 PrintAllVariables();
             }
+            , false, "System", "vars"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "clear",
+            "console.clear",
             "Clear the console",
             [](const std::vector<std::string>& args) {
                 system("cls"); // Windows
             }
+            , false, "Console", "console.clear"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "echo",
+            "console.echo",
             "Echo text to console",
             [](const std::vector<std::string>& args) {
                 for (size_t i = 0; i < args.size(); ++i) {
@@ -322,24 +403,27 @@ namespace Archura {
                 }
                 std::cout << "\n";
             }
+            , false, "Console", "console.echo <text>"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "quit",
+            "app.quit",
             "Exit the game",
             [](const std::vector<std::string>& args) {
                 std::cout << "[Console] Quitting...\n";
                 exit(0);
             }
+            , false, "Application", "app.quit"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "exit",
+            "app.exit",
             "Exit the game",
             [](const std::vector<std::string>& args) {
                 std::cout << "[Console] Quitting...\n";
                 exit(0);
             }
+            , false, "Application", "app.exit"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
@@ -353,28 +437,31 @@ namespace Archura {
                 }
                 std::cout << "=======================\n\n";
             }
+            , false, "Console", "history"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "save_config",
+            "config.save",
             "Save current configuration to file",
             [this](const std::vector<std::string>& args) {
                 std::string filename = args.empty() ? "game.cfg" : args[0];
                 SaveConfig(filename);
             }
+            , false, "Config", "config.save [file]"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "load_config",
+            "config.load",
             "Load configuration from file",
             [this](const std::vector<std::string>& args) {
                 std::string filename = args.empty() ? "game.cfg" : args[0];
                 LoadConfig(filename);
             }
+            , false, "Config", "config.load [file]"
         ));
 
         RegisterCommand(std::make_shared<ConsoleCommand>(
-            "reset_config",
+            "config.reset",
             "Reset all variables to defaults",
             [this](const std::vector<std::string>& args) {
                 auto varNames = GetVariableNames();
@@ -386,7 +473,18 @@ namespace Archura {
                 }
                 std::cout << "[Console] All variables reset to default\n";
             }
+            , false, "Config", "config.reset"
         ));
+
+        RegisterAlias("cmdlist", "commands");
+        RegisterAlias("cvarlist", "vars");
+        RegisterAlias("clear", "console.clear");
+        RegisterAlias("echo", "console.echo");
+        RegisterAlias("quit", "app.quit");
+        RegisterAlias("exit", "app.quit");
+        RegisterAlias("save_config", "config.save");
+        RegisterAlias("load_config", "config.load");
+        RegisterAlias("reset_config", "config.reset");
     }
 
     void DeveloperConsole::RegisterBuiltinVariables() {
@@ -627,12 +725,20 @@ namespace Archura {
             "Display memory usage in MB"
         ));
 
-        // === Hile Ayarları (sv_) ===
+        // === Debug / developer overrides ===
+        RegisterVariable(std::make_shared<ConsoleVariable>(
+            "debug.cheats",
+            "0",
+            ConsoleVariable::Type::Bool,
+            "Enable developer-only commands"
+        ));
+
+        // Legacy Source-style names kept for existing configs and muscle memory.
         RegisterVariable(std::make_shared<ConsoleVariable>(
             "sv_cheats",
             "0",
             ConsoleVariable::Type::Bool,
-            "Enable cheat commands [ADMIN ONLY]"
+            "Legacy alias for debug.cheats"
         ));
 
         RegisterVariable(std::make_shared<ConsoleVariable>(

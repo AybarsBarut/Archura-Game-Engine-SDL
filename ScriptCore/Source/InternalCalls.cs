@@ -14,6 +14,21 @@ namespace Archura
 
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void Entity_Destroy(ulong entityID);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern bool Entity_Exists(ulong entityID);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern ulong Entity_FindByName(string name);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern string Entity_GetName(ulong entityID);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void Entity_SetName(ulong entityID, string name);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern bool Entity_HasComponent(ulong entityID, string componentName);
         #endregion
 
         #region Transform

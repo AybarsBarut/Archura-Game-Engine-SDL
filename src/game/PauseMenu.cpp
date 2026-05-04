@@ -145,7 +145,7 @@ const char* PauseMenu::GetKeyName(int scancode) {
         
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(io.DisplaySize);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.03f, 0.04f, 0.055f, 0.92f));
 
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | 
                                  ImGuiWindowFlags_NoMove | 
@@ -161,18 +161,29 @@ const char* PauseMenu::GetKeyName(int scancode) {
             float btnWidth = 300.0f;
 
             // Title
-            ImGui::SetWindowFontScale(3.0f);
-            const char* title = "ARCHURA PAUSED";
-            if (m_CurrentState == MenuState::Options) title = "OPTIONS";
-            if (m_CurrentState == MenuState::Keybinds) title = "CONTROLS";
+            ImGui::SetWindowFontScale(2.6f);
+            const char* title = "ARCHURA";
+            const char* subtitle = "Paused";
+            if (m_CurrentState == MenuState::Options) subtitle = "Options";
+            if (m_CurrentState == MenuState::Keybinds) subtitle = "Controls";
+            if (m_CurrentState == MenuState::SaveGame) subtitle = "Save Project";
+            if (m_CurrentState == MenuState::LoadGame) subtitle = "Load Project";
+            if (m_CurrentState == MenuState::Multiplayer) subtitle = "Multiplayer";
 
             float titleW = ImGui::CalcTextSize(title).x;
             ImGui::SetCursorPos(ImVec2(centerX - titleW * 0.5f, centerY - 250.0f));
-            ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.2f, 1.0f), title);
+            ImGui::TextColored(ImVec4(0.90f, 0.94f, 1.0f, 1.0f), title);
             ImGui::SetWindowFontScale(1.0f);
+            float subtitleW = ImGui::CalcTextSize(subtitle).x;
+            ImGui::SetCursorPos(ImVec2(centerX - subtitleW * 0.5f, centerY - 205.0f));
+            ImGui::TextColored(ImVec4(0.56f, 0.78f, 1.0f, 1.0f), "%s", subtitle);
 
             // Menu Content
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14.0f, 10.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.18f, 0.26f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.32f, 0.48f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.32f, 0.47f, 0.68f, 1.0f));
             
             // Layout Container - Calculate height approximate to center vertically
             float contentHeight = 400.0f; // Approximate
@@ -201,7 +212,8 @@ const char* PauseMenu::GetKeyName(int scancode) {
             }
 
             ImGui::EndGroup();
-            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
         }
         ImGui::End();
         ImGui::PopStyleColor();
@@ -212,39 +224,39 @@ const char* PauseMenu::GetKeyName(int scancode) {
         float btnHeight = 50.0f;
         float spacing = 15.0f;
 
-        if (ImGui::Button("OYUNA DEVAM (RESUME)", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Resume", ImVec2(btnWidth, btnHeight))) {
             isPaused = false;
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("PROJEYI KAYDET (Save Project)", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Save Project", ImVec2(btnWidth, btnHeight))) {
             m_CurrentState = MenuState::SaveGame;
             GameSaveManager::Get().RefreshProjects();
         }
 
         ImGui::Dummy(ImVec2(0, spacing / 2));
 
-        if (ImGui::Button("PROJEYI YUKLE (Load Project)", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Load Project", ImVec2(btnWidth, btnHeight))) {
             m_CurrentState = MenuState::LoadGame;
             GameSaveManager::Get().RefreshProjects();
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("MULTIPLAYER", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Multiplayer", ImVec2(btnWidth, btnHeight))) {
             m_CurrentState = MenuState::Multiplayer;
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("SECENEKLER (OPTIONS)", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Options", ImVec2(btnWidth, btnHeight))) {
             m_CurrentState = MenuState::Options;
         }
 
         ImGui::Dummy(ImVec2(0, spacing));
 
-        if (ImGui::Button("CIKIS (QUIT)", ImVec2(btnWidth, btnHeight))) {
+        if (ImGui::Button("Quit", ImVec2(btnWidth, btnHeight))) {
             Application::Get().Quit();
         }
     }

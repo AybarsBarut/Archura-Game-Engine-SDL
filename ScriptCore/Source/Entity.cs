@@ -8,6 +8,16 @@ namespace Archura
 
         protected Entity() { ID = 0; } // ID will be set by runtime
 
+        public bool IsValid => ID != 0 && InternalCalls.Entity_Exists(ID);
+
+        public string Name
+        {
+            get { return InternalCalls.Entity_GetName(ID); }
+            set { InternalCalls.Entity_SetName(ID, value); }
+        }
+
+        public TransformComponent Transform => GetComponent<TransformComponent>();
+
         public Vector3 Translation
         {
             get { InternalCalls.Transform_GetPosition(ID, out Vector3 result); return result; }
@@ -41,8 +51,17 @@ namespace Archura
             ID = 0; // Invalidate
         }
 
+        public static Entity Find(string name)
+        {
+            ulong id = InternalCalls.Entity_FindByName(name);
+            return id == 0 ? null : new Entity { ID = id };
+        }
+
         // Called when the entity is created
         public virtual void OnCreate() {}
+
+        // Unity-style lifecycle alias. Prefer this in new scripts.
+        public virtual void OnStart() {}
 
         // Called every frame
         public virtual void OnUpdate(float ts) {}
@@ -58,5 +77,24 @@ namespace Archura
             component.Entity = this;
             return component;
         }
+
+        public bool HasComponent<T>() where T : Component
+        {
+            string componentName = typeof(T).Name;
+            return InternalCalls.Entity_HasComponent(ID, componentName);
+        }
+    }
+
+    public class MonoBehaviour : Entity
+    {
+        public float DeltaTime { get; private set; }
+
+        public sealed override void OnUpdate(float ts)
+        {
+            DeltaTime = ts;
+            Update();
+        }
+
+        public virtual void Update() {}
     }
 }

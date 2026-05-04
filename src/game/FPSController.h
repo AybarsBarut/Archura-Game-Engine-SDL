@@ -25,7 +25,7 @@ public:
     FPSController(Camera* camera);
     ~FPSController() = default;
 
-    void Update(Input* input, class Scene* scene, float deltaTime, class ProjectileSystem* projectileSystem = nullptr);
+    void Update(Input* input, class Scene* scene, float deltaTime, class ProjectileSystem* projectileSystem = nullptr, class PhysicsSystem* physicsSystem = nullptr);
 
     // Ayarlar
     void SetWalkSpeed(float speed) { m_WalkSpeed = speed; }
@@ -124,6 +124,11 @@ private:
     // Bunnyhop / Air Control
     float m_MouseDeltaX = 0.0f; // Last frame's mouse X movement
     float m_MaxBunnyhopSpeed = 30.0f; // Soft cap for bunnyhop speed
+
+    // Object Grabbing (In-game dragging)
+    uint32_t m_GrabbedEntityId = 0; // 0 means nothing grabbed
+    float m_GrabDistance = 0.0f;
+    bool m_IsGrabbing = false;
 };
 
 } // namespace Archura

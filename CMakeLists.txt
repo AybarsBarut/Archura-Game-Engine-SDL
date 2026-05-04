@@ -15,6 +15,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(ARCHURA_BUILD_MEMORY_BENCHMARKS "Build allocator benchmark executable" OFF)
+option(ARCHURA_BUILD_ECS_BENCHMARKS "Build ECS storage benchmark executable" OFF)
+
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -145,6 +148,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/core/DeveloperConsole.cpp"
     "src/core/ResourceManager.cpp"
     "src/core/Logger.cpp"
+    "src/core/memory/MemoryTracker.cpp"
     "src/core/ProjectSerializer.cpp"
     "src/core/GameSaveManager.cpp"
     "src/rendering/*.cpp"
@@ -174,9 +178,11 @@ file(GLOB_RECURSE CLIENT_HEADERS
     "src/core/Window.h"
     "src/core/ImGuiLayer.h"
     "src/core/AudioSystem.h"
+    "src/core/memory/*.h"
     "src/rendering/*.h"
     "src/input/*.h"
     "src/scripting/*.h"
+    "src/ui/*.h"
     "src/game/FPSController.h"
     "src/game/RenderSystem.h"
     "src/game/ParticleSystem.h"
@@ -221,6 +227,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${MONO_INCLUDE_DIR}
 )
 
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    "$<$<CONFIG:Debug>:ARCHURA_DEBUG>"
+)
+
 # Linking
 target_link_libraries(${PROJECT_NAME} PRIVATE
     SDL2
@@ -233,6 +243,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     winmm
     "${MONO_LIB_DIR}/mono-2.0-sgen.lib"
 )
+
+set(ARCHURA_COPY_DIRECTORY_COMMAND copy_directory)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
+    set(ARCHURA_COPY_DIRECTORY_COMMAND copy_directory_if_different)
+endif()
 
 # Copy SDL2.dll to output directory
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -257,15 +272,24 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 
 # Copy Mono Class Libraries (mscorlib etc.)
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying Mono class libraries..."
+    COMMAND ${CMAKE_COMMAND} -E ${ARCHURA_COPY_DIRECTORY_COMMAND}
     "${MONO_DIR}/lib/mono"
     "$<TARGET_FILE_DIR:${PROJECT_NAME}>/mono/lib/mono"
 )
 
 # Asset Copying
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying assets..."
+    COMMAND ${CMAKE_COMMAND} -E ${ARCHURA_COPY_DIRECTORY_COMMAND}
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
+)
+
+# ScriptCore + managed resources
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying managed scripting resources..."
+    COMMAND ${CMAKE_COMMAND} -E ${ARCHURA_COPY_DIRECTORY_COMMAND}
+    ${CMAKE_SOURCE_DIR}/Resources $<TARGET_FILE_DIR:${PROJECT_NAME}>/Resources
 )
 
 # ============================================
@@ -288,8 +312,48 @@ target_link_libraries(ArchuraServer PRIVATE
     ws2_32
 )
 
-# Server doesn't need SDL, ImGui, GLAD, etc.
-# Headless mode - no graphics dependencies
+if(ARCHURA_BUILD_MEMORY_BENCHMARKS)
+    add_executable(ArchuraAllocatorBenchmark
+        benchmarks/AllocatorBenchmark.cpp
+        src/core/memory/MemoryTracker.cpp
+    )
+
+    target_include_directories(ArchuraAllocatorBenchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    target_compile_definitions(ArchuraAllocatorBenchmark PRIVATE
+        "$<$<CONFIG:Debug>:ARCHURA_DEBUG>"
+    )
+endif()
+
+if(ARCHURA_BUILD_ECS_BENCHMARKS)
+    add_executable(ArchuraECSStorageBenchmark
+        benchmarks/ECSStorageBenchmark.cpp
+        src/ecs/Component.cpp
+    )
+
+    target_include_directories(ArchuraECSStorageBenchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    )
+endif()
+
+# ============================================
+# LAUNCHER EXECUTABLE (ArchuraLauncher)
+# ============================================
+add_executable(ArchuraLauncher
+    src/launcher/Launcher.cpp
+)
+
+target_include_directories(ArchuraLauncher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# Launcher only needs standard OS libraries
+if(WIN32)
+    target_link_libraries(ArchuraLauncher PRIVATE User32 Shell32)
+endif()
 
 # Copy server config template
 add_custom_command(TARGET ArchuraServer POST_BUILD

@@ -28,6 +28,7 @@ namespace Archura {
 
         // Komut ve değişken kayıt
         void RegisterCommand(const std::shared_ptr<ConsoleCommand>& command);
+        void RegisterAlias(const std::string& alias, const std::string& targetCommand);
         void RegisterVariable(const std::shared_ptr<ConsoleVariable>& variable);
 
         // Komut yürütme
@@ -46,6 +47,7 @@ namespace Archura {
         // Komut bilgisi
         std::shared_ptr<ConsoleCommand> GetCommand(const std::string& name) const;
         std::vector<std::string> GetCommandNames() const;
+        std::vector<std::string> GetAliasNames() const;
         std::vector<std::string> GetVariableNames() const;
 
         // Konsol yardımı
@@ -73,8 +75,12 @@ namespace Archura {
         DeveloperConsole();
         void RegisterBuiltinCommands();
         void RegisterBuiltinVariables();
+        std::string NormalizeName(const std::string& name) const;
+        std::string ResolveCommandName(const std::string& name) const;
+        void OnVariableChanged(const std::string& name, const std::string& value);
 
         std::unordered_map<std::string, std::shared_ptr<ConsoleCommand>> m_commands;
+        std::unordered_map<std::string, std::string> m_aliases;
         std::unordered_map<std::string, std::shared_ptr<ConsoleVariable>> m_variables;
         std::vector<std::string> m_commandHistory;
         bool m_cheatsEnabled = false;

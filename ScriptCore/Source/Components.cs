@@ -5,6 +5,27 @@ namespace Archura
         public Entity Entity { get; internal set; }
     }
 
+    public class TransformComponent : Component
+    {
+        public Vector3 Position
+        {
+            get { InternalCalls.Transform_GetPosition(Entity.ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetPosition(Entity.ID, ref value); }
+        }
+
+        public Vector3 Rotation
+        {
+            get { InternalCalls.Transform_GetRotation(Entity.ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetRotation(Entity.ID, ref value); }
+        }
+
+        public Vector3 Scale
+        {
+            get { InternalCalls.Transform_GetScale(Entity.ID, out Vector3 result); return result; }
+            set { InternalCalls.Transform_SetScale(Entity.ID, ref value); }
+        }
+    }
+
     public class RigidBody : Component
     {
         public Vector3 Velocity
