@@ -106,7 +106,11 @@ public:
     bool WantCaptureMouse() const;
 
     // ── Entity selection ─────────────────────────────────────────────────────
-    void SetSelectedEntity(Entity* entity) { m_SelectedEntity = entity; }
+    void SetSelectedEntity(Entity* entity) { 
+        m_SelectedEntity = entity; 
+        m_SelectedEntities.clear();
+        if (entity) m_SelectedEntities.push_back(entity);
+    }
     void SetLookedAtEntity(Entity* entity) { m_LookedAtEntity = entity; }
     void SetSpawnPosition(const glm::vec3& pos) { m_SpawnPosition = pos; }
 
@@ -117,6 +121,8 @@ public:
 
 public: // ── Shared State (kept public for minimal refactor surface) ──────────
     Entity*   m_SelectedEntity = nullptr;
+    std::vector<Entity*> m_SelectedEntities;
+    Entity*   m_LastClickedEntity = nullptr;
     Entity*   m_LookedAtEntity = nullptr;
     glm::vec3 m_SpawnPosition  = glm::vec3(0.0f);
     Window*   m_Window         = nullptr;
@@ -128,6 +134,8 @@ public: // ── Shared State (kept public for minimal refactor surface) ──
     // Project browser
     std::filesystem::path m_BaseProjectDir;
     std::filesystem::path m_CurrentProjectDir;
+    std::vector<std::filesystem::path> m_SelectedFiles;
+    std::filesystem::path m_LastClickedFile;
 
     // Stream redirect
     std::streambuf*                m_OldCoutBuf = nullptr;
