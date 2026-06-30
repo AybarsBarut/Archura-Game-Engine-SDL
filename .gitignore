@@ -5,6 +5,7 @@ bin/
 *.opendb
 .vs/
 .vscode/
+imgui.ini
 *.log
 obj/
 *_log.txt
@@ -216,3 +217,16 @@ builds/debug/*.meta
 builds/release/*.exe
 builds/release/*.meta
 builds/release/*.dll
+
+!README.md
+build_latest/
+build_latest_release/
+build_memory/
+build_memory_msvc/
+build_memory_msvc_release/
+build_mingw/
+build_output.txt
+compile_commands.json
+.cache/
+.clangd
+

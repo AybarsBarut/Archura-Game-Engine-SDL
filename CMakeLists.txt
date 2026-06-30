@@ -17,6 +17,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ARCHURA_BUILD_MEMORY_BENCHMARKS "Build allocator benchmark executable" OFF)
 option(ARCHURA_BUILD_ECS_BENCHMARKS "Build ECS storage benchmark executable" OFF)
+option(ARCHURA_DEBUG_PHYSICS "Build the F3 physics debug wireframe overlay" ON)
+option(ARCHURA_OPENAL "Build OpenAL Soft spatial audio support" OFF)
 
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
 if(MSVC)
@@ -202,6 +204,26 @@ file(GLOB_RECURSE CLIENT_HEADERS
     "src/editor/*.h"
 )
 
+if(ARCHURA_DEBUG_PHYSICS)
+    list(APPEND CLIENT_SOURCES
+        "src/systems/DebugPhysicsSystem.cpp"
+    )
+    list(APPEND CLIENT_HEADERS
+        "src/systems/DebugPhysicsSystem.h"
+    )
+endif()
+
+if(ARCHURA_OPENAL)
+    find_package(OpenAL REQUIRED)
+    list(APPEND CLIENT_SOURCES
+        "src/audio/OpenALAudioSystem.cpp"
+    )
+    list(APPEND CLIENT_HEADERS
+        "src/audio/OpenALAudioSystem.h"
+        "src/ecs/components/AudioSourceComponent.h"
+    )
+endif()
+
 # ============================================
 # CLIENT EXECUTABLE (ArchuraEngine)
 # ============================================
@@ -222,6 +244,7 @@ set(MONO_LIB_DIR "${MONO_DIR}/lib")
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/dr_wav
     ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
     ${SDL2_INCLUDE_DIR}
     ${MONO_INCLUDE_DIR}
@@ -229,6 +252,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     "$<$<CONFIG:Debug>:ARCHURA_DEBUG>"
+    "$<$<BOOL:${ARCHURA_DEBUG_PHYSICS}>:ARCHURA_DEBUG_PHYSICS>"
+    "$<$<BOOL:${ARCHURA_OPENAL}>:ARCHURA_OPENAL>"
 )
 
 # Linking
@@ -243,6 +268,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     winmm
     "${MONO_LIB_DIR}/mono-2.0-sgen.lib"
 )
+
+if(ARCHURA_OPENAL)
+    if(TARGET OpenAL::OpenAL)
+        target_link_libraries(${PROJECT_NAME} PRIVATE OpenAL::OpenAL)
+    else()
+        target_include_directories(${PROJECT_NAME} PRIVATE ${OPENAL_INCLUDE_DIR})
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${OPENAL_LIBRARY})
+    endif()
+endif()
 
 set(ARCHURA_COPY_DIRECTORY_COMMAND copy_directory)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
