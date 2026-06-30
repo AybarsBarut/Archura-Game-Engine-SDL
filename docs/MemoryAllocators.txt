@@ -1,0 +1,45 @@
+Archura Memory Allocators
+=========================
+
+Bu modul yeni kodu kademeli olarak ozel allocator'lara tasimak icin eklendi.
+Mevcut new/delete kullanimi korunur; entegrasyon noktalarini parcali yapmak daha
+guvenli.
+
+Allocator Secimi
+----------------
+
+- LinearAllocator: frame icinde uretilen gecici render komutlari, debug draw
+  vertexleri ve tek seferde sifirlanabilen scratch veri.
+- PoolAllocator<T, N>: Particle, Projectile, kisa omurlu event objeleri ve sabit
+  boyutlu ECS batch verisi.
+- StackAllocator: nested job/coroutine scratch verisi. ScopedMarker ile scope
+  bitince otomatik rollback yapar.
+- PoolStdAllocator<T, BlockSize, BlockCount>: std::vector veya std::unordered_map
+  icin fixed-block pool wrapper. BlockSize, container'in tek allocation istegini
+  karsilayacak kadar buyuk secilmeli.
+
+Entegrasyon Onerisi
+-------------------
+
+1. Frame basinda bir LinearAllocator resetlenir ve render command staging bu
+   allocator'a tasinir.
+2. ProjectileSystem ve CPU particle path'i PoolAllocator<T, N> ile sabit
+   kapasiteli havuza tasinir.
+3. Editor/ImGui tarafinda debug-only MemoryTracker paneli izlenir.
+4. Hot path'lerde allocation sayisi dusuruldukten sonra ResourceManager gibi
+   uzun omurlu sistemler icin daha dar domain allocator'lari eklenir.
+
+Debug build'de ARCHURA_DEBUG acikken allocator istatistikleri Performance
+panelinde gorunur. Release build'de tracker cagrilari derleme zamaninda no-op'a
+doner.
+
+Benchmark
+---------
+
+Opsiyonel benchmark hedefi:
+
+cmake -S . -B build -DARCHURA_BUILD_MEMORY_BENCHMARKS=ON
+cmake --build build --target ArchuraAllocatorBenchmark
+
+Benchmark 1M ParticleLike allocation/free dongusunde standart new/delete ile
+PoolAllocator yolunu karsilastirir.
