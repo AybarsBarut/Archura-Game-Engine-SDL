@@ -1,6 +1,6 @@
 @echo off
 echo Publishing Release...
-set BUILD_DIR=build\bin\Release\Release
+set BUILD_DIR=build\bin\Release
 set DIST_DIR=bin\Release_Dist
 
 if not exist "%BUILD_DIR%\ArchuraEngine.exe" (
@@ -21,7 +21,6 @@ copy "%BUILD_DIR%\ArchuraEngine.exe" "%DIST_DIR%\"
 if exist "%BUILD_DIR%\SDL2.dll" copy "%BUILD_DIR%\SDL2.dll" "%DIST_DIR%\"
 if exist "%BUILD_DIR%\imgui.ini" copy "%BUILD_DIR%\imgui.ini" "%DIST_DIR%\"
 
-echo Copying assets...
 echo Copying assets...
 xcopy "assets" "%DIST_DIR%\assets\" /E /I /Y
 

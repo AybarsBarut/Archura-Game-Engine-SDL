@@ -20,8 +20,25 @@ set STAMP=v%VERSION%_%BUILD_DATE%_%BUILD_TIME%
 set ARCHIVE_DIR=builds\release
 if not exist "%ARCHIVE_DIR%" mkdir "%ARCHIVE_DIR%"
 
+where cl >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
+        call "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+    ) else if exist "%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
+        call "%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
+    ) else if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
+        call "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul
+    ) else if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
+        call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+    )
+)
+
 echo  [1/3] CMake yapilandiriliyor...
-cmake -S . -B build
+cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+if %ERRORLEVEL% NEQ 0 (
+    echo  [INFO] CMake cache yenileniyor...
+    cmake --fresh -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+)
 if %ERRORLEVEL% NEQ 0 (
     echo  [HATA] CMake yapilandirma basarisiz!
     pause

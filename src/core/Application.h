@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Window.h"
+#include <cstdint>
 #include <memory>
 
 namespace Archura {
@@ -25,7 +26,7 @@ namespace Archura {
 
     public:
         // Console Command Helpers
-        void SetFPSLimit(float limit) { m_FPSLimit = limit; }
+        void SetFPSLimit(float limit);
         void SetSensitivity(float sens);
         void SetDevMode(bool enabled);
         bool IsDevMode() const { return m_DevModeActive; }
@@ -55,7 +56,7 @@ namespace Archura {
         double m_LastFPSUpdateTime = 0.0;
         int m_FrameCount = 0;
         float m_CurrentFPS = 0.0f;
-        float m_FPSLimit = 0.0f; 
+        float m_FPSLimit = 144.0f;
 
         // Game State (Moved from local Run scope)
         std::unique_ptr<class Scene> m_Scene; // Scene is now a member
@@ -69,6 +70,12 @@ namespace Archura {
         std::unique_ptr<class Editor> m_Editor;
         std::unique_ptr<class PauseMenu> m_PauseMenu;
         std::unique_ptr<class Camera> m_Camera;
+#ifdef ARCHURA_DEBUG_PHYSICS
+        std::unique_ptr<class DebugPhysicsSystem> m_DebugPhysicsSystem;
+#endif
+#ifdef ARCHURA_OPENAL
+        std::unique_ptr<class OpenALAudioSystem> m_OpenALAudioSystem;
+#endif
         
         // Cached pointers to engine subsystems
         class Window* m_EngineWindow = nullptr;
@@ -85,6 +92,7 @@ namespace Archura {
         void ProcessInput();           // Input processing (Once per frame)
         void UpdateGameLogic(float dt);    // Game logic (128 Hz fixed)
         void RenderFrame(float alpha);     // Rendering (variable Hz)
+        void LimitFrameRate(float frameStartTime);
     };
 
 }
