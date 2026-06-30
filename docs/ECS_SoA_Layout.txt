@@ -1,0 +1,55 @@
+Archura ECS SoA Layout
+======================
+
+Bu adim mevcut Entity::GetComponent<T>() kullanimini kirmadan, yuksek frekansli
+system'lerin kullanabilecegi SoA storage katmanini ekler.
+
+Eklenen Parcalar
+----------------
+
+- SparseSet: EntityID -> dense component index mapping. Lookup O(1), remove
+  swap-and-pop, ComponentTicket generation counter ile stale handle kontrolu.
+- ComponentStorage<Transform>: position/rotation/scale icin ayri dense float
+  array'leri tutar.
+- ComponentStorage<RigidBody>: velocity/force/mass/drag/gravity/kinematic icin
+  ayri dense array'ler tutar.
+- TransformSoASystem: sahnedeki Transform/RigidBody component'lerini SoA cache'e
+  alir, rigid body velocity update'ini 4-wide SSE batch ile yapar ve sonucu
+  mevcut scene component'lerine geri yazar.
+
+Eski API
+--------
+
+auto* transform = entity->GetComponent<Transform>();
+transform->position += velocity * dt;
+
+Yeni API
+--------
+
+ComponentStorage<Transform> transforms;
+transforms.Add(entityId, *transform);
+transforms.ForEachBatch4([](TransformBatch4 batch) {
+  for (size_t lane = 0; lane < batch.count; ++lane) {
+    batch.positionX[lane] += 1.0f;
+  }
+});
+
+Migration Notu
+--------------
+
+1. RenderSystem ve PhysicsSystem once Scene uzerinden calismaya devam eder.
+2. Yuksek frekansli update path'leri TransformSoASystem veya dogrudan
+   ComponentStorage view'lari uzerinden batch islenir.
+3. Tam geciste Scene entity olusturma/silme olaylari storage'a Add/Remove
+   olarak yansitilir; o zamana kadar RebuildFromScene ile guvenli sync yapilir.
+4. Remove swap-and-pop yaptigi icin disarida dense index saklanmaz; gerekiyorsa
+   ComponentTicket kullanilir.
+
+Benchmark
+---------
+
+cmake -S . -B build -DARCHURA_BUILD_ECS_BENCHMARKS=ON
+cmake --build build --target ArchuraECSStorageBenchmark
+
+Benchmark 250K transform icin AoS struct update ile SoA batch update yolunu
+karsilastirir.

@@ -46,6 +46,14 @@
 #include "game/ScriptSystem.h"
 #include "game/Weapon.h"
 
+#ifdef ARCHURA_DEBUG_PHYSICS
+#include "systems/DebugPhysicsSystem.h"
+#endif
+
+#ifdef ARCHURA_OPENAL
+#include "audio/OpenALAudioSystem.h"
+#endif
+
 #include "input/Input.h"
 #include "network/NetworkManager.h"
 
@@ -58,6 +66,7 @@
 #include "../../external/imgui/backends/imgui_impl_sdl2.h"
 
 #include <cstdio>
+#include <cmath>
 #include <iostream>
 #include <string>
 
@@ -83,6 +92,21 @@ void Application::SetSensitivity(float sens) {
   if (m_FPSController) {
     m_FPSController->SetMouseSensitivity(sens);
     std::cout << "Sensitivity set to " << sens << std::endl;
+  }
+}
+
+void Application::SetFPSLimit(float limit) {
+  if (!std::isfinite(limit) || limit < 0.0f) {
+    std::cout << "[FPS] Invalid limit. Use 0 to disable or a positive value."
+              << std::endl;
+    return;
+  }
+
+  m_FPSLimit = limit;
+  if (m_FPSLimit == 0.0f) {
+    std::cout << "[FPS] FPS limit disabled" << std::endl;
+  } else {
+    std::cout << "[FPS] FPS limit set to " << m_FPSLimit << std::endl;
   }
 }
 
@@ -314,6 +338,14 @@ void Application::Run() {
 
   LogStartup("FPSController created");
 
+#ifdef ARCHURA_OPENAL
+  LogStartup("Initializing OpenALAudioSystem");
+  m_OpenALAudioSystem = std::make_unique<OpenALAudioSystem>();
+  m_OpenALAudioSystem->Init(m_Scene.get());
+  m_OpenALAudioSystem->SetListenerCamera(m_Camera.get());
+  LogStartup("OpenALAudioSystem initialized");
+#endif
+
   LogStartup("Initializing RenderSystem");
 
   m_RenderSystem = std::make_unique<RenderSystem>(m_Camera.get());
@@ -359,6 +391,12 @@ void Application::Run() {
 
   m_PhysicsSystem = std::make_unique<PhysicsSystem>();
   m_PhysicsSystem->Init(m_Scene.get());
+#ifdef ARCHURA_DEBUG_PHYSICS
+  m_DebugPhysicsSystem = std::make_unique<DebugPhysicsSystem>();
+  m_DebugPhysicsSystem->Init(m_Scene.get());
+  m_DebugPhysicsSystem->SetDependencies(m_FPSController.get(),
+                                        m_PhysicsSystem.get());
+#endif
   m_ScriptSystem = std::make_unique<ScriptSystem>();
   m_ScriptSystem->Init(m_Scene.get());
   m_ParticleSystem = std::make_unique<ParticleSystem>();
@@ -460,6 +498,7 @@ void Application::Run() {
 
   // Initialize timing for fixed timestep
   m_LastFrameTime = SDL_GetTicks() / 1000.0f;
+  m_LastFPSUpdateTime = m_LastFrameTime;
   m_Accumulator = 0.0f;
   m_TickCount = 0;
 
@@ -468,9 +507,9 @@ void Application::Run() {
   try {
     while (!m_EngineWindow->ShouldClose() && m_Running) {
       // Calculate frame time
-      float currentTime = SDL_GetTicks() / 1000.0f;
-      float frameTime = currentTime - m_LastFrameTime;
-      m_LastFrameTime = currentTime;
+      float frameStartTime = SDL_GetTicks() / 1000.0f;
+      float frameTime = frameStartTime - m_LastFrameTime;
+      m_LastFrameTime = frameStartTime;
 
       // Cap frame time to prevent spiral of death
       if (frameTime > 0.25f) {
@@ -502,7 +541,10 @@ void Application::Run() {
       // Render with interpolation
       RenderFrame(alpha);
 
+      LimitFrameRate(frameStartTime);
+
       // FPS Counter (every second)
+      float currentTime = SDL_GetTicks() / 1000.0f;
       m_FrameCount++;
       if (currentTime - m_LastFPSUpdateTime >= 1.0f) {
         m_CurrentFPS = static_cast<float>(m_FrameCount /
@@ -559,6 +601,11 @@ void Application::ProcessInput() {
   if (m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) {
     DevConsole::Get().Toggle();
   }
+#ifdef ARCHURA_DEBUG_PHYSICS
+  if (m_Input->IsKeyJustPressed(SDL_SCANCODE_F3) && m_DebugPhysicsSystem) {
+    m_DebugPhysicsSystem->Toggle();
+  }
+#endif
 
   // 3. Mouse / Camera look routing
   const bool inEditMode =
@@ -597,11 +644,22 @@ void Application::UpdateGameLogic(float dt) {
   if (!m_IsPaused) {
     m_FPSController->Update(m_Input, m_Scene.get(), dt,
                             m_ProjectileSystem.get(), m_PhysicsSystem.get());
+#ifdef ARCHURA_DEBUG_PHYSICS
+    if (m_DebugPhysicsSystem) {
+      m_DebugPhysicsSystem->Update(dt);
+    }
+#endif
     m_ProjectileSystem->Update(dt);
     m_PhysicsSystem->Update(dt);
     m_ScriptSystem->Update(dt);
     m_ParticleSystem->Update(dt);
+#ifdef ARCHURA_OPENAL
+    if (m_OpenALAudioSystem) {
+      m_OpenALAudioSystem->Update(dt);
+    }
+#else
     AudioSystem::Get().Update(m_Scene.get(), m_Camera.get());
+#endif
   }
 }
 
@@ -613,18 +671,27 @@ void Application::RenderFrame(float /*alpha*/) {
   // so the 3D viewport shows the fly-cam perspective, not the game camera.
   const bool editorEditMode =
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
+  glm::mat4 activeView = m_Camera->GetViewMatrix();
+  glm::mat4 activeProjection =
+      m_Camera->GetProjectionMatrix(m_Window->GetAspectRatio());
   if (editorEditMode) {
     EditorCamera *ec = m_Editor->GetEditorCamera();
     const float aspect = (m_Window && m_Window->GetHeight() > 0)
                              ? m_Window->GetAspectRatio()
                              : 1.777f;
-    m_RenderSystem->SetViewOverride(ec->GetViewMatrix(),
-                                    ec->GetProjectionMatrix(aspect));
+    activeView = ec->GetViewMatrix();
+    activeProjection = ec->GetProjectionMatrix(aspect);
+    m_RenderSystem->SetViewOverride(activeView, activeProjection);
   } else {
     m_RenderSystem->ClearViewOverride();
   }
 
   m_RenderSystem->Update(TICK_INTERVAL);
+#ifdef ARCHURA_DEBUG_PHYSICS
+  if (m_DebugPhysicsSystem) {
+    m_DebugPhysicsSystem->Render(activeView, activeProjection);
+  }
+#endif
 
   if (m_DevModeActive) {
     m_Editor->BeginDockSpace();
@@ -639,6 +706,12 @@ void Application::RenderFrame(float /*alpha*/) {
     }
   }
 
+#ifdef ARCHURA_DEBUG_PHYSICS
+  if (m_DebugPhysicsSystem) {
+    m_DebugPhysicsSystem->DrawOverlay();
+  }
+#endif
+
   DevConsole::Get().Render();
   m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow,
                       m_Scene.get());
@@ -648,6 +721,20 @@ void Application::RenderFrame(float /*alpha*/) {
 
   m_EngineWindow->Update();
   m_Input->EndFrame();
+}
+
+void Application::LimitFrameRate(float frameStartTime) {
+  if (m_FPSLimit <= 0.0f) {
+    return;
+  }
+
+  const float targetFrameTime = 1.0f / m_FPSLimit;
+  const float frameElapsed = SDL_GetTicks() / 1000.0f - frameStartTime;
+  const float remaining = targetFrameTime - frameElapsed;
+
+  if (remaining > 0.001f) {
+    SDL_Delay(static_cast<Uint32>(remaining * 1000.0f));
+  }
 }
 
 } // namespace Archura

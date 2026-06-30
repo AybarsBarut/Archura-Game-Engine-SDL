@@ -1,0 +1,68 @@
+Archura UI Framework Direction
+Research date: 2026-05-04
+
+Goal
+----
+Split UI into two surfaces:
+
+1. Developer/editor UI
+   Keep Dear ImGui short-term because the editor is already built on it and the cost
+   of replacing every inspector/tool panel is not worth paying before the runtime UI
+   path is stable.
+
+2. Player/runtime UI
+   Move toward a retained-mode UI layer. Runtime menus, HUD, inventory, dialogue and
+   settings screens should not be authored as raw immediate-mode calls.
+
+Recommended Direction
+---------------------
+Use RmlUi for runtime/player-facing UI.
+
+Why:
+- MIT licensed.
+- C++17 compatible.
+- HTML/CSS-like authoring model, which is much better for player-facing menus than
+  immediate-mode debug code.
+- Ships renderer/platform abstractions and has SDL + OpenGL backend examples.
+- Supports data binding, events, templates, localization, animation, transforms and
+  controller-friendly navigation.
+
+Keep Dear ImGui for:
+- Editor panels.
+- Debug overlays.
+- Profiling and developer-only tools.
+
+Do not replace Dear ImGui with Nuklear:
+- Nuklear is MIT/public-domain and very small, but it is still immediate-mode.
+- It would reduce dependency size, not solve the player UI authoring problem.
+
+Avoid NoesisGUI for now:
+- It is polished and XAML-style, but it is not open-source/free-to-use for this engine.
+- Current pricing starts with a paid indie license, so it does not match the free/open
+  requirement.
+
+Implementation Plan
+-------------------
+Phase 1:
+- Add a small RuntimeUI abstraction: IRuntimeUIBackend, UIContext, UIDocumentHandle.
+- Keep PauseMenu and HUD on current renderer/ImGui while the abstraction is introduced.
+
+Phase 2:
+- Integrate RmlUi under external/RmlUi or via FetchContent.
+- Implement SDL input forwarding and OpenGL draw submission.
+- Load assets/ui/*.rml and assets/ui/*.rcss.
+
+Phase 3:
+- Move player-facing screens first: pause menu, options, save/load, multiplayer.
+- Keep editor panels on Dear ImGui until a full editor redesign is scheduled.
+
+Fallback
+--------
+If RmlUi integration becomes blocked, build a small retained-mode in-house layer:
+- Document tree with nodes: Panel, Text, Button, Slider, Input, Image.
+- Flex-style layout subset.
+- Skin/theme assets in JSON or simple CSS-like text.
+- C# bindings for showing/hiding documents and setting bound values.
+
+This fallback should not start until RmlUi has been attempted, because writing a
+complete UI system will take longer than integrating a mature MIT-licensed one.
