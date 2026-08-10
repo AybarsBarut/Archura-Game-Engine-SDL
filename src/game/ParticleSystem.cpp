@@ -2,6 +2,7 @@
 #include "Particle.h"
 #include "../ecs/Entity.h"
 #include "../rendering/Mesh.h"
+#include "../core/ResourceManager.h"
 #include <random>
 
 namespace Archura {
@@ -77,8 +78,12 @@ void ParticleSystem::EmitBurst(Scene* scene, const glm::vec3& position, const gl
 
         auto* mr = p->AddComponent<MeshRenderer>();
         // Using Cube for now as "pixel" particle
-        static Mesh* particleMesh = Mesh::CreateCube(1.0f); 
-        mr->mesh = particleMesh;
+        auto particleMesh = ResourceManager::Get().GetMeshShared("__particle_cube");
+        if (!particleMesh) {
+            particleMesh = ResourceManager::Get().AddMesh(
+                "__particle_cube", Mesh::CreateCubeShared(1.0f));
+        }
+        mr->SetMeshAsset(std::move(particleMesh));
         mr->color = glm::vec3(color);
     }
 }

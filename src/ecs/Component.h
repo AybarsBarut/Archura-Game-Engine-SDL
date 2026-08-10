@@ -7,6 +7,7 @@
 #include <typeindex>
 #include <glm/glm.hpp>
 #include <string> // Added for std::string in ScriptComponent
+#include <utility>
 
 namespace Archura {
 
@@ -36,10 +37,36 @@ struct Transform : public Component {
  * @brief Mesh Renderer component
  */
 struct MeshRenderer : public Component {
+    // Strong asset handles keep renderer resources alive across entity copies,
+    // editor clipboard operations and cache replacement. The raw members remain
+    // as compatibility observers for legacy/script-facing code; new native code
+    // must use the Set*Asset helpers.
+    std::shared_ptr<class Mesh> meshAsset;
+    std::shared_ptr<class Shader> shaderAsset;
+    std::shared_ptr<class Texture> textureAsset;
     class Mesh* mesh = nullptr;
     class Shader* shader = nullptr;
     class Texture* texture = nullptr; // Skin/Texture
     glm::vec3 color = glm::vec3(1.0f);
+
+    void SetMeshAsset(std::shared_ptr<Mesh> asset) noexcept {
+        meshAsset = std::move(asset);
+        mesh = meshAsset.get();
+    }
+    void SetShaderAsset(std::shared_ptr<Shader> asset) noexcept {
+        shaderAsset = std::move(asset);
+        shader = shaderAsset.get();
+    }
+    void SetTextureAsset(std::shared_ptr<Texture> asset) noexcept {
+        textureAsset = std::move(asset);
+        texture = textureAsset.get();
+    }
+    void ClearMeshAsset() noexcept { meshAsset.reset(); mesh = nullptr; }
+    void ClearShaderAsset() noexcept { shaderAsset.reset(); shader = nullptr; }
+    void ClearTextureAsset() noexcept { textureAsset.reset(); texture = nullptr; }
+    Mesh* GetMesh() const noexcept { return meshAsset ? meshAsset.get() : mesh; }
+    Shader* GetShader() const noexcept { return shaderAsset ? shaderAsset.get() : shader; }
+    Texture* GetTexture() const noexcept { return textureAsset ? textureAsset.get() : texture; }
 };
 
 /**
@@ -68,8 +95,16 @@ struct RigidBody : public Component {
     glm::vec3 force = glm::vec3(0.0f);
     float mass = 1.0f;
     float drag = 0.1f;
+    float restitution = 0.0f;
+    float friction = 0.6f;
     bool useGravity = true;
-    bool isKinematic = false; // If true, physics doesn't move it (user does)
+    // No RigidBody means static. Kinematic bodies are moved by gameplay and
+    // have infinite mass in the solver. A non-kinematic body with mass > 0 is
+    // dynamic; non-positive/invalid mass is treated as static defensively.
+    bool isKinematic = false;
+    // Enables adaptive motion substeps. This is bounded CCD mitigation for
+    // linear AABB motion, not a general-purpose continuous convex solver.
+    bool continuous = false;
 };
 
 /**

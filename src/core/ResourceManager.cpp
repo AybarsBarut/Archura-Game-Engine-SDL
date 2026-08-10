@@ -19,23 +19,27 @@ Shader* ResourceManager::LoadShader(const std::string& name, const std::string& 
     auto it = m_Shaders.find(name);
     if (it != m_Shaders.end()) {
         // std::cout << "Shader '" << name << "' already loaded, returning cached version." << std::endl;
-        return it->second;
+        return it->second.get();
     }
 
     // Yeni shader yukle
-    Shader* shader = new Shader();
+    auto shader = std::make_shared<Shader>();
     if (shader->LoadFromFile(vertPath, fragPath)) {
         m_Shaders[name] = shader;
         // std::cout << "Loaded shader: " << name << std::endl;
-        return shader;
+        return shader.get();
     }
 
-    delete shader;
     std::cerr << "Failed to load shader: " << name << std::endl;
     return nullptr;
 }
 
 Shader* ResourceManager::GetShader(const std::string& name) {
+    auto it = m_Shaders.find(name);
+    return (it != m_Shaders.end()) ? it->second.get() : nullptr;
+}
+
+std::shared_ptr<Shader> ResourceManager::GetShaderShared(const std::string& name) {
     auto it = m_Shaders.find(name);
     return (it != m_Shaders.end()) ? it->second : nullptr;
 }
@@ -45,20 +49,24 @@ Shader* ResourceManager::GetShader(const std::string& name) {
 Texture* ResourceManager::LoadTexture(const std::string& name, const std::string& path, bool generateMipmaps) {
     auto it = m_Textures.find(name);
     if (it != m_Textures.end()) {
-        return it->second;
+        return it->second.get();
     }
 
-    Texture* texture = new Texture();
+    auto texture = std::make_shared<Texture>();
     if (texture->LoadFromFile(path, generateMipmaps)) {
         m_Textures[name] = texture;
-        return texture;
+        return texture.get();
     }
 
-    delete texture;
     return nullptr;
 }
 
 Texture* ResourceManager::GetTexture(const std::string& name) {
+    auto it = m_Textures.find(name);
+    return (it != m_Textures.end()) ? it->second.get() : nullptr;
+}
+
+std::shared_ptr<Texture> ResourceManager::GetTextureShared(const std::string& name) {
     auto it = m_Textures.find(name);
     return (it != m_Textures.end()) ? it->second : nullptr;
 }
@@ -66,19 +74,31 @@ Texture* ResourceManager::GetTexture(const std::string& name) {
 // ==================== Model Yonetimi ====================
 
 Mesh* ResourceManager::AddMesh(const std::string& name, Mesh* mesh) {
+    return AddMesh(name, std::shared_ptr<Mesh>(mesh)).get();
+}
+
+std::shared_ptr<Mesh> ResourceManager::AddMesh(const std::string& name,
+                                               std::shared_ptr<Mesh> mesh) {
     if (!mesh) return nullptr;
 
     auto it = m_Meshes.find(name);
     if (it != m_Meshes.end()) {
-        // std::cout << "Mesh '" << name << "' already exists, replacing." << std::endl;
-        delete it->second;
+        // Add is intentionally stable: legacy GetMesh() observers remain valid
+        // until Clear(). Explicit hot replacement must use versioned names or a
+        // future generational handle API.
+        return it->second;
     }
 
-    m_Meshes[name] = mesh;
+    m_Meshes.emplace(name, mesh);
     return mesh;
 }
 
 Mesh* ResourceManager::GetMesh(const std::string& name) {
+    auto it = m_Meshes.find(name);
+    return (it != m_Meshes.end()) ? it->second.get() : nullptr;
+}
+
+std::shared_ptr<Mesh> ResourceManager::GetMeshShared(const std::string& name) {
     auto it = m_Meshes.find(name);
     return (it != m_Meshes.end()) ? it->second : nullptr;
 }
@@ -113,23 +133,14 @@ void ResourceManager::Clear() {
 }
 
 void ResourceManager::ClearShaders() {
-    for (auto& pair : m_Shaders) {
-        delete pair.second;
-    }
     m_Shaders.clear();
 }
 
 void ResourceManager::ClearTextures() {
-    for (auto& pair : m_Textures) {
-        delete pair.second;
-    }
     m_Textures.clear();
 }
 
 void ResourceManager::ClearMeshes() {
-    for (auto& pair : m_Meshes) {
-        delete pair.second;
-    }
     m_Meshes.clear();
 }
 

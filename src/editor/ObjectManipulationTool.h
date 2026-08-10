@@ -34,7 +34,7 @@ public:
     };
 
     struct HistoryState {
-        Mesh* targetMesh;
+        std::shared_ptr<Mesh> targetMesh;
         std::vector<Vertex> vertices;
     };
 
@@ -73,7 +73,7 @@ private:
                                           // allow the user to "Commit" or "Reset".
 
     // Undo/Redo
-    void PushHistory(Mesh* mesh);
+    void PushHistory(const std::shared_ptr<Mesh>& mesh);
     void Undo();
 
 private:
@@ -95,7 +95,7 @@ private:
     
     // Internal State
     bool m_IsPainting = false;
-    Mesh* m_CurrentMesh = nullptr;
+    std::shared_ptr<Mesh> m_CurrentMesh;
     std::vector<Vertex> m_BaseMeshState; // State when deformation started (for slider-based non-destructive editing)
     bool m_IsDeforming = false; // Is dragging a slider?
 };

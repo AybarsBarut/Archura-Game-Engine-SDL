@@ -47,7 +47,7 @@ private:
     Entity* m_IsolationTarget = nullptr;
     Camera* m_Camera;
     std::unique_ptr<Shader> m_DefaultShader;
-    class Mesh* m_DebugMesh = nullptr;
+    std::shared_ptr<class Mesh> m_DebugMesh;
 
     // Editor camera view override (set per-frame when EditorCamera is active)
     glm::mat4 m_ViewOverride     = glm::mat4(1.0f);
@@ -59,7 +59,8 @@ private:
     // Dynamic lighting handling in Update()
 
     // Shadows
-    void InitShadowMap();
+    bool InitShadowMap();
+    void ReleaseGPUResources() noexcept;
     unsigned int m_DepthMapFBO = 0;
     unsigned int m_DepthMapTexture = 0;
     const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
@@ -67,6 +68,7 @@ private:
     glm::mat4 m_LightSpaceMatrix;
 
     std::unique_ptr<class Skybox> m_Skybox;
+    bool m_Initialized = false;
 };
 
 } // namespace Archura

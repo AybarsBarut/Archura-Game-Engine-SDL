@@ -10,17 +10,17 @@ namespace Archura {
 
 class Scene;
 class Entity;
+class PhysicsSystem;
 
 class ProjectileSystem : public System {
 public:
     ProjectileSystem();
     ~ProjectileSystem() = default;
 
-    void Init(Scene* scene);
+    void Init(Scene* scene, PhysicsSystem* physicsSystem);
     void Update(float deltaTime) override;
 
     void UpdateProjectile(Entity* entity, Projectile* proj, float deltaTime);
-    bool CheckCollision(Entity* projectile, Scene* scene);
     void SpawnDecal(Scene* scene, const glm::vec3& position, const glm::vec3& normal, SurfaceType surfaceType);
     
     Entity* SpawnProjectile(Scene* scene, const glm::vec3& position, const glm::vec3& direction, 
@@ -28,7 +28,8 @@ public:
 
 private:
     Scene* m_Scene;
-    std::vector<Entity*> m_ProjectilesToDestroy;
+    PhysicsSystem* m_PhysicsSystem = nullptr;
+    std::vector<EntityHandle> m_ProjectilesToDestroy;
 };
 
 } // namespace Archura

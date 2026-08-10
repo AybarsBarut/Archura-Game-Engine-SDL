@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ecs/Component.h"
+#include "../ecs/Entity.h"
 #include <glm/glm.hpp>
 #include <glm/glm.hpp>
 #include <vector>
@@ -33,7 +33,7 @@ struct Projectile : public Component {
     float fuseTimer = 5.0f;
     float explosionRadius = 5.0f;
     
-    Entity* owner = nullptr;  // Projectile'i atan entity (self-hit onlemek icin)
+    EntityHandle owner{}; // generation-safe self-hit exclusion
 };
 
 

@@ -1,4 +1,7 @@
 #include "network/ServerConfig.h"
+#include "network/NetworkManager.h"
+#include <algorithm>
+#include <csignal>
 #include <iostream>
 #include <cstdio>
 #include <thread>
@@ -11,17 +14,15 @@
  * Runs game logic at 128 tickrate and sends snapshots to clients
  */
 
-namespace Archura {
-    // Forward declarations
-    class ServerGameState;
-    class NetworkManager;
-}
-
 using namespace Archura;
 
 // Global server state
-static bool g_ServerRunning = true;
+static volatile std::sig_atomic_t g_ServerRunning = 1;
 static ServerConfig g_Config;
+
+void HandleTerminationSignal(int) noexcept {
+    g_ServerRunning = 0;
+}
 
 void PrintBanner() {
     std::cout << "========================================\n";
@@ -42,6 +43,8 @@ void PrintServerInfo() {
 }
 
 void ServerTick(float deltaTime) {
+    (void)deltaTime;
+    NetworkManager::Get().UpdateServer();
     // TODO: Implement server game logic
     // - Process client inputs
     // - Update physics
@@ -54,18 +57,19 @@ void RunServerLoop() {
     const float tickInterval = g_Config.GetTickInterval();
     const int maxTicksPerFrame = 5; // Prevent spiral of death
     
-    auto lastTime = std::chrono::high_resolution_clock::now();
+    auto lastTime = std::chrono::steady_clock::now();
     float accumulator = 0.0f;
     
     int tickCount = 0;
-    auto lastSecond = std::chrono::high_resolution_clock::now();
+    auto lastSecond = std::chrono::steady_clock::now();
     
     std::cout << "Server started! Tick interval: " << (tickInterval * 1000.0f) << "ms\n";
     std::cout << "Press Ctrl+C to stop server\n\n";
     
-    while (g_ServerRunning) {
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float frameTime = std::chrono::duration<float>(currentTime - lastTime).count();
+    while (g_ServerRunning != 0) {
+        auto currentTime = std::chrono::steady_clock::now();
+        float frameTime = std::min(0.25f,
+            std::chrono::duration<float>(currentTime - lastTime).count());
         lastTime = currentTime;
         
         accumulator += frameTime;
@@ -92,7 +96,7 @@ void RunServerLoop() {
         // Sleep to prevent CPU spinning
         // Calculate remaining time in this frame
         auto sleepTime = tickInterval - std::chrono::duration<float>(
-            std::chrono::high_resolution_clock::now() - currentTime).count();
+            std::chrono::steady_clock::now() - currentTime).count();
         
         if (sleepTime > 0.0f) {
             std::this_thread::sleep_for(
@@ -105,6 +109,8 @@ void RunServerLoop() {
 }
 
 int main(int argc, char** argv) {
+    std::signal(SIGINT, HandleTerminationSignal);
+    std::signal(SIGTERM, HandleTerminationSignal);
     PrintBanner();
     
     // Parse command line arguments
@@ -129,13 +135,20 @@ int main(int argc, char** argv) {
     // TODO: Load map
     std::cout << "Loading map: " << g_Config.map << "\n";
     
-    // TODO: Start network listener
     std::cout << "Starting network listener on port " << g_Config.port << "...\n";
+    NetworkLimits limits;
+    limits.maxClients = static_cast<std::size_t>(g_Config.maxPlayers);
+    auto& network = NetworkManager::Get();
+    if (!network.SetLimits(limits) || !network.StartServer(g_Config.port)) {
+        std::cerr << "Failed to start network listener: " << network.GetLastError() << '\n';
+        network.Shutdown();
+        return 2;
+    }
     
     // Run server loop
     RunServerLoop();
     
-    // TODO: Cleanup
+    network.Shutdown();
     std::cout << "Cleanup complete.\n";
     
     return 0;

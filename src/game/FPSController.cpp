@@ -29,7 +29,7 @@ FPSController::FPSController(Camera* camera)
 void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem, PhysicsSystem* physicsSystem) {
     // Mouse Look is now handled externally in Application::ProcessInput()
         
-    HandleMovement(input, scene, deltaTime);
+    HandleMovement(input, deltaTime, physicsSystem);
 
     // --- STRAFE TILT (Kamera Yatma) --- DISABLED for better FPS experience
     /*
@@ -106,7 +106,7 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
                 if (physicsSystem->Raycast(m_Camera->GetPosition(), m_Camera->GetFront(), 15.0f, &hitEntity, &hitPoint)) {
                     // Check if entity is valid and has a transform
                     if (hitEntity && hitEntity->HasComponent<Transform>() && hitEntity->GetName() != "Player" && hitEntity->GetName() != "Floor") {
-                        m_GrabbedEntityId = hitEntity->GetID();
+                        m_GrabbedEntity = hitEntity->GetHandle();
                         m_GrabDistance = glm::distance(m_Camera->GetPosition(), hitPoint);
                         // Make it slightly closer than the actual hit point to avoid clipping
                         if (m_GrabDistance < 2.0f) m_GrabDistance = 2.0f;
@@ -115,7 +115,7 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
                 }
             } else {
                 // Currently grabbing, update position
-                Entity* grabbedEntity = scene->GetEntity(m_GrabbedEntityId);
+                Entity* grabbedEntity = scene->GetEntity(m_GrabbedEntity);
                 if (grabbedEntity && grabbedEntity->HasComponent<Transform>()) {
                     auto* transform = grabbedEntity->GetComponent<Transform>();
                     
@@ -134,14 +134,14 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
                 } else {
                     // Entity might have been destroyed
                     m_IsGrabbing = false;
-                    m_GrabbedEntityId = 0;
+                    m_GrabbedEntity = {};
                 }
             }
         } else {
             // Released button
             if (m_IsGrabbing) {
                 m_IsGrabbing = false;
-                m_GrabbedEntityId = 0;
+                m_GrabbedEntity = {};
             }
         }
     }
@@ -224,7 +224,8 @@ void FPSController::AirAccelerate(const glm::vec3& wishDir, const MoveParams& pa
     m_Velocity.z += accelSpeed * wishDir.z;
 }
 
-void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) {
+void FPSController::HandleMovement(Input* input, float deltaTime,
+                                   PhysicsSystem* physicsSystem) {
     // 1. Durum Kontrolu (Grounded?)
     // Basit raycast kontrolu Update sonunda yapiliyor, burada flag kullaniyoruz.
     
@@ -393,204 +394,30 @@ void FPSController::HandleMovement(Input* input, Scene* scene, float deltaTime) 
         }
     }
     
-    // 4. Pozisyon Entegrasyonu ve Carpisma
-    glm::vec3 currentPos = m_Camera->GetPosition();
-    glm::vec3 targetPos = currentPos + m_Velocity * deltaTime;
-    
-    // X Hareketi (Slide)
-    glm::vec3 nextPosX = currentPos;
-    nextPosX.x = targetPos.x;
-    if (CheckCollision(nextPosX, scene, nullptr, 0.3f)) {
-        m_Velocity.x = 0.0f; // Duvara carpti, hizi kes (Slide daha karmasik ama simdilik durdurma)
-        targetPos.x = currentPos.x;
-    }
-    
-    // Z Hareketi (Slide)
-    glm::vec3 nextPosZ = currentPos;
-    nextPosZ.z = targetPos.z;
-    // Y ekseni degismedi, hedef X degisti (targetPos.x yukarida guncellendi veya iptal oldu)
-    nextPosZ.x = targetPos.x; 
-    
-    if (CheckCollision(nextPosZ, scene, nullptr, 0.3f)) {
-         m_Velocity.z = 0.0f;
-         targetPos.z = currentPos.z;
-    }
-    
-    // Y Hareketi (Ground / Ceiling)
-    glm::vec3 nextPosY = targetPos;
-    // X ve Z guncellendi
-    
-    float objectTopY = 0.0f;
-    bool hitY = CheckCollision(nextPosY, scene, &objectTopY, 0.0f);
-    
-    // Yere yakinlik kontrolu (Yer tespiti)
-    float playerEyeHeight = 1.8f;
-    
-    if (hitY) {
-        // Düşüyorsak ve bir şeye çarptıysak, bu zemindir. Tolerans kontrolünü kaldırdık.
-        if (m_Velocity.y <= 0.0f) {
-             // Landed
-             targetPos.y = objectTopY + playerEyeHeight + 0.001f;
-             m_Velocity.y = -2.0f; // Stick to ground
-             m_IsGrounded = true;
-        } else if (m_Velocity.y > 0.0f) {
-             // Head bump
-             m_Velocity.y = 0.0f;
-             // targetPos.y ayni kalsin veya asagi itilsin? 
-             // Simdilik carpisma oncesi pozisyona cekelim Y'yi
-             targetPos.y = currentPos.y; 
-        }
+    // PhysicsSystem is the single collision authority. The camera position is
+    // eye height, while the character sweep consumes its AABB center.
+    constexpr float playerRadius = 0.3f;
+    constexpr float playerHeight = 1.8f;
+    const glm::vec3 eyePosition = m_Camera->GetPosition();
+    const glm::vec3 center = eyePosition - glm::vec3(0.0f, playerHeight * 0.5f, 0.0f);
+    if (physicsSystem) {
+        const auto move = physicsSystem->MoveKinematicAABB(
+            center, glm::vec3(playerRadius, playerHeight * 0.5f, playerRadius),
+            m_Velocity, deltaTime);
+        m_Velocity = move.velocity;
+        m_IsGrounded = move.grounded;
+        m_Camera->SetPosition(move.position + glm::vec3(0.0f, playerHeight * 0.5f, 0.0f));
     } else {
-        // Havada (En azindan su anlik carpmadi)
-        // Ama onceki karede yerdeydik, simdi boslukta miyiz?
-        // Eger asagi dogru hizimiz varsa ve yere cok yakinsak 'snap' yapabiliriz (Merdiven inisi vb)
-        // Simdilik basit: Carpmadiysa havadadir.
-        
-        // Yere cok yakin mi kontrol et (Eger IsGrounded idiysek ve bosluga dusmediysek)
-        // Bu kisim karmasik, o yuzden simple logic:
-        // Eger hitY yoksa ve Y hizi asagi dogruysa veya 0 ise -> falling
-        if (m_IsGrounded && m_Velocity.y <= 0.0f) {
-             // Yoklama atis (cast down)
-             glm::vec3 checkPos = targetPos;
-             checkPos.y -= 0.5f; 
-             float gHeight = 0.0f;
-             if (CheckCollision(checkPos, scene, &gHeight, 0.0f)) {
-                 // Hala zemindeyiz (egim veya kucuk cukur)
-                 if (targetPos.y - playerEyeHeight <= gHeight + 0.5f) {
-                      targetPos.y = gHeight + playerEyeHeight + 0.001f;
-                      m_Velocity.y = -2.0f;
-                 } else {
-                      m_IsGrounded = false;
-                 }
-             } else {
-                 m_IsGrounded = false;
-             }
-        } else {
-             m_IsGrounded = false;
-        }
-        
+        // Explicit no-physics fallback for tools/tests that do not own a world.
+        m_Camera->SetPosition(eyePosition + m_Velocity * deltaTime);
+        m_IsGrounded = false;
     }
-    
-    // Kamerayi Guncelle
-    m_Camera->SetPosition(targetPos);
 
     // FOV kontrolu (fare tekerlegi) (Eski koddan)
     float scrollDelta = input->GetMouseScrollDelta();
     if (scrollDelta != 0.0f) {
         m_Camera->ProcessMouseScroll(scrollDelta);
     }
-}
-
-bool FPSController::CheckCollision(const glm::vec3& position, Scene* scene, float* outGroundHeight, float stepHeight) {
-    // Oyuncu sinirlayici kutusu (Silindir gibi dusunelim ama AABB kontrolu yapiyoruz)
-    float playerRadius = 0.3f; 
-    float playerHeight = 1.8f; 
-    
-    // Ayaklarin pozisyonu
-    glm::vec3 feetPos = position;
-    feetPos.y -= playerHeight;
-
-    // Sahnedeki tum varliklari kontrol et
-    for (auto& entity : scene->GetEntities()) {
-        auto* collider = entity->GetComponent<BoxCollider>();
-        auto* transform = entity->GetComponent<Transform>();
-        
-        if (collider && transform) {
-            if (collider->isTrigger) continue;
-
-            // Model Matrisini Olustur (T * R * S)
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, transform->position);
-            model = glm::rotate(model, glm::radians(transform->rotation.x), glm::vec3(1, 0, 0));
-            model = glm::rotate(model, glm::radians(transform->rotation.y), glm::vec3(0, 1, 0));
-            model = glm::rotate(model, glm::radians(transform->rotation.z), glm::vec3(0, 0, 1));
-            // Scale'i burada uygulamiyoruz, cunku BoxCollider size'i scale ile carpiyoruz
-            // VEYA: Scale'i matrise ekleyip, box size'i local (1,1,1) gibi dusunebiliriz.
-            // Mevcut yapida boxSize = collider->size * transform->scale yapiyorduk.
-            // OBB icin: Inverse Transform yaparken Scale'i de tersine cevirmek gerekir.
-            // Ancak Scale islemi AABB boyutunu degistirir, rotasyon ise eksenleri.
-            // En temizi: Rotasyon ve Pozisyonu matrise koyalim. Scale'i AABB boyutuna yedirelim.
-            
-            glm::mat4 invModel = glm::inverse(model);
-
-            // OBB kontrolü için yardımcı lambda
-            auto CheckOBB = [&](const glm::vec3& localCenter, const glm::vec3& localSize) -> bool {
-                // Kutu Boyutu (Scale dahil)
-                glm::vec3 boxHalfSize = localSize * transform->scale * 0.5f;
-                
-                glm::vec3 expandedMin = localCenter - boxHalfSize;
-                glm::vec3 expandedMax = localCenter + boxHalfSize;
-                
-                // Oyuncu Yaricapi (X ve Z)
-                expandedMin.x -= playerRadius; expandedMax.x += playerRadius;
-                expandedMin.z -= playerRadius; expandedMax.z += playerRadius;
-                
-                // Oyuncuyu tek bir nokta yerine, boyu boyunca birkac noktada test etmeliyiz.
-                // Boylece egik duvarlara kafa veya ayak carpmasini yakalayabiliriz.
-                // stepHeight: Bu yuksekligin altindaki engelleri yoksay (ayaklar girebilir)
-                
-                float checkStart = stepHeight - 0.1f; // Ayagin biraz altindan basla (Stabil zemin temasi icin)
-                float checkEnd = playerHeight - 0.1f; // Kafanin biraz altina kadar
-                
-                // 3 Nokta kontrolu: Alt, Orta, Ust
-                std::vector<float> checkHeights;
-                checkHeights.push_back(checkStart);
-                if (checkEnd > checkStart) {
-                    checkHeights.push_back((checkStart + checkEnd) * 0.5f);
-                    checkHeights.push_back(checkEnd);
-                }
-
-                for (float h : checkHeights) {
-                    glm::vec4 testPos4 = invModel * glm::vec4(feetPos + glm::vec3(0, h, 0), 1.0f);
-                    glm::vec3 testPos = glm::vec3(testPos4);
-                    
-                    bool overlapX = testPos.x >= expandedMin.x && testPos.x <= expandedMax.x;
-                    bool overlapY = testPos.y >= expandedMin.y && testPos.y <= expandedMax.y;
-                    bool overlapZ = testPos.z >= expandedMin.z && testPos.z <= expandedMax.z;
-                    
-                    if (overlapX && overlapY && overlapZ) {
-                        // Zemin tespiti (outGroundHeight) - Sadece en alt nokta icin mantikli olabilir
-                        // veya herhangi bir carpisma durumunda en yuksek noktayi bulmaya calisabiliriz.
-                        if (outGroundHeight) {
-                            float boxTopLocal = localCenter.y + boxHalfSize.y;
-                            // Eger oyuncu kutunun ustundeyse veya icindeyse (Tolerans artirildi: 0.1 -> 10.0)
-                            // Bu sayede hizli dususlerde (tunneling) zemin yuksekligi dogru algilanir.
-                            if (testPos.y >= boxTopLocal - 10.0f) { 
-                                glm::vec3 topPointLocal = testPos; 
-                                topPointLocal.y = boxTopLocal;
-                                glm::vec4 topPointWorld = model * glm::vec4(topPointLocal, 1.0f);
-                                
-                                if (topPointWorld.y > *outGroundHeight) {
-                                    *outGroundHeight = topPointWorld.y;
-                                }
-                            }
-                        }
-                        return true;
-                    }
-                }
-                return false;
-            };
-
-            bool hit = false;
-            
-            // Ana kutuyu kontrol et
-            if (glm::length(collider->size) > 0.01f) {
-                if (CheckOBB(collider->center, collider->size)) hit = true;
-            }
-
-            // Alt kutuları kontrol et - KALDIRILDI (BoxCollider alt kutuları desteklemez)
-            /*
-            for (const auto& box : collider->subBoxes) {
-                if (CheckOBB(box.center, box.size)) hit = true;
-            }
-            */
-
-            if (hit && !outGroundHeight) return true; 
-            if (hit && outGroundHeight) return true;
-        }
-    }
-    
-    return false;
 }
 
 void FPSController::HandleMouseLook(Input* input, float deltaTime) {

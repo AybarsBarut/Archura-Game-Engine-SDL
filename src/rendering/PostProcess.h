@@ -34,6 +34,11 @@ public:
     PostProcess() = default;
     ~PostProcess();
 
+    PostProcess(const PostProcess&) = delete;
+    PostProcess& operator=(const PostProcess&) = delete;
+    PostProcess(PostProcess&&) = delete;
+    PostProcess& operator=(PostProcess&&) = delete;
+
     /// Ekran boyutland. Init'ten once window boyutunu bilmek gerekiyor.
     bool Init(int width, int height);
 
@@ -57,7 +62,7 @@ public:
     int   bloomPasses     = 5;     // Daha fazla = daha yaygin bloom (daha pahali)
 
 private:
-    void CreateFBOs(int w, int h);
+    bool CreateFBOs(int w, int h);
     void DeleteFBOs();
     void SetupQuad();
 

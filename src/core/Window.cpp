@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <glad/glad.h>
 #include <iostream>
+#include <algorithm>
 
 namespace Archura {
 
@@ -53,6 +54,13 @@ void Window::Init(const WindowProps &props) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+  SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+  SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+#ifdef ARCHURA_DEBUG
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+#endif
 
   // MSAA 4x
   SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
@@ -96,7 +104,11 @@ void Window::Init(const WindowProps &props) {
 
   LogStartup("OpenGL context created successfully");
 
-  SDL_GL_MakeCurrent(m_Window, m_Context);
+  if (SDL_GL_MakeCurrent(m_Window, m_Context) != 0) {
+    std::cerr << "Failed to make OpenGL context current: " << SDL_GetError() << "\n";
+    LogStartup("OpenGL make-current FAILED");
+    return;
+  }
 
   // Initialzie GLAD
   LogStartup("Initializing GLAD");
@@ -136,15 +148,18 @@ void Window::Init(const WindowProps &props) {
   glCullFace(GL_BACK);
   glFrontFace(GL_CCW);
 
-  glViewport(0, 0, m_Width, m_Height);
+  RefreshDrawableSize();
 
   m_LastFrameTime = (float)SDL_GetTicks() / 1000.0f;
+  m_Initialized = true;
 
   LogStartup("Init completed successfully");
 }
 
 void Window::Shutdown() {
+  m_Initialized = false;
   if (m_Context) {
+    if (m_Window) SDL_GL_MakeCurrent(m_Window, m_Context);
     SDL_GL_DeleteContext(m_Context);
     m_Context = nullptr;
   }
@@ -165,6 +180,8 @@ void Window::Shutdown() {
 
 void Window::Update() {
   // Polling is done in Application Loop now!
+  if (!IsValid()) return;
+  RefreshDrawableSize();
   SDL_GL_SwapWindow(m_Window);
   UpdateDeltaTime();
 }
@@ -188,27 +205,34 @@ void Window::UpdateDeltaTime() {
 bool Window::ShouldClose() const { return m_ShouldClose; }
 
 void Window::SetVSync(bool enabled) {
-  m_VSync = enabled;
+  if (!m_Context) return;
   // SDL: 0 immediate, 1 vsync, -1 adaptive
-  SDL_GL_SetSwapInterval(enabled ? 1 : 0);
+  if (SDL_GL_SetSwapInterval(enabled ? 1 : 0) != 0) {
+    std::cerr << "Failed to set swap interval: " << SDL_GetError() << "\n";
+    return;
+  }
+  m_VSync = enabled;
 }
 
 void Window::SetFullscreen(bool enabled) {
   if (m_Fullscreen == enabled)
     return;
 
+  if (!m_Window) return;
+  const Uint32 mode = enabled ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+  if (SDL_SetWindowFullscreen(m_Window, mode) != 0) {
+    std::cerr << "Failed to change fullscreen mode: " << SDL_GetError() << "\n";
+    return;
+  }
   m_Fullscreen = enabled;
   if (enabled) {
     // Use WINDOW_FULLSCREEN_DESKTOP for borderless fullscreen (more stable
     // usually)
-    SDL_SetWindowFullscreen(m_Window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-
     int w, h;
     SDL_GetWindowSize(m_Window, &w, &h);
     m_Width = w;
     m_Height = h;
   } else {
-    SDL_SetWindowFullscreen(m_Window, 0);
     SDL_SetWindowSize(m_Window, 1280, 720);
     SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED,
                           SDL_WINDOWPOS_CENTERED);
@@ -216,16 +240,33 @@ void Window::SetFullscreen(bool enabled) {
     m_Width = 1280;
     m_Height = 720;
   }
-  glViewport(0, 0, m_Width, m_Height);
+  RefreshDrawableSize();
 }
 
 void Window::SetResolution(unsigned int width, unsigned int height) {
-  if (m_Fullscreen)
+  if (m_Fullscreen || !m_Window || width == 0 || height == 0)
     return;
   m_Width = width;
   m_Height = height;
   SDL_SetWindowSize(m_Window, width, height);
-  glViewport(0, 0, width, height);
+  RefreshDrawableSize();
+}
+
+void Window::RefreshDrawableSize() {
+  if (!m_Window || !m_Context) return;
+  int logicalWidth = 0;
+  int logicalHeight = 0;
+  int drawableWidth = 0;
+  int drawableHeight = 0;
+  SDL_GetWindowSize(m_Window, &logicalWidth, &logicalHeight);
+  SDL_GL_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+  m_Width = static_cast<unsigned int>(std::max(logicalWidth, 0));
+  m_Height = static_cast<unsigned int>(std::max(logicalHeight, 0));
+  m_FramebufferWidth = static_cast<unsigned int>(std::max(drawableWidth, 0));
+  m_FramebufferHeight = static_cast<unsigned int>(std::max(drawableHeight, 0));
+  if (drawableWidth > 0 && drawableHeight > 0) {
+    glViewport(0, 0, drawableWidth, drawableHeight);
+  }
 }
 
 } // namespace Archura

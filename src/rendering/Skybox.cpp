@@ -1,4 +1,6 @@
 #include "Skybox.h"
+#include "RenderThread.h"
+#include "../core/Logger.h"
 #include <glad/glad.h>
 #include <vector>
 #include <iostream>
@@ -10,11 +12,18 @@ namespace Archura {
 Skybox::Skybox() {}
 
 Skybox::~Skybox() {
+    if ((m_VAO || m_VBO || m_TextureID) && !RenderThread::IsCurrent()) {
+        ARCH_LOG_ERROR("Skybox destruction attempted outside the render thread; GPU deletion skipped");
+        m_VAO = m_VBO = m_TextureID = 0;
+        return;
+    }
     if (m_VAO != 0) glDeleteVertexArrays(1, &m_VAO);
     if (m_VBO != 0) glDeleteBuffers(1, &m_VBO);
+    if (m_TextureID != 0) glDeleteTextures(1, &m_TextureID);
 }
 
-void Skybox::Init() {
+bool Skybox::Init() {
+    if (!RenderThread::IsCurrent()) return false;
     float skyboxVertices[] = {
         // positions          
         -1.0f,  1.0f, -1.0f,
@@ -107,36 +116,51 @@ void Skybox::Init() {
     m_Shader = std::make_unique<Shader>();
     if (!m_Shader->LoadFromSource(vertexShaderSource, fragmentShaderSource)) {
          std::cerr << "Skybox Shader Failed!\n";
+         return false;
     }
+    return m_VAO != 0 && m_VBO != 0;
 }
 
-void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
-    if (m_TextureID != 0) {
-        glDeleteTextures(1, &m_TextureID);
-        m_TextureID = 0;
+bool Skybox::LoadCubemap(const std::vector<std::string>& faces) {
+    if (!RenderThread::IsCurrent() || faces.size() != 6 || !m_Shader) {
+        ARCH_LOG_ERROR("Skybox cubemap requires exactly six faces on the render thread");
+        return false;
     }
 
-    glGenTextures(1, &m_TextureID);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_TextureID);
+    GLint previousActiveTexture = GL_TEXTURE0;
+    GLint previousCubemap = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP, &previousCubemap);
 
-    int width, height, nrChannels;
-    stbi_set_flip_vertically_on_load(false); // Cubemaps should not be flipped usually
+    unsigned int newTexture = 0;
+    glGenTextures(1, &newTexture);
+    if (!newTexture) return false;
+    glBindTexture(GL_TEXTURE_CUBE_MAP, newTexture);
+
+    int expectedWidth = 0;
+    int expectedHeight = 0;
+    stbi_set_flip_vertically_on_load_thread(0);
     
     std::cout << "Skybox: Loading 6 faces..." << std::endl;
-    m_TextureLoaded = true; // Assume true until fail
+    bool loaded = true;
 
     for (unsigned int i = 0; i < faces.size(); i++)
     {
+        int width = 0, height = 0, nrChannels = 0;
         unsigned char *data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
-        if (data)
+        if (data && width > 0 && height > 0 && nrChannels >= 1 && nrChannels <= 4 &&
+            (i == 0 || (width == expectedWidth && height == expectedHeight)))
         {
-            GLenum format = GL_RGB;
-            if (nrChannels == 1) format = GL_RED;
-            else if (nrChannels == 3) format = GL_RGB;
-            else if (nrChannels == 4) format = GL_RGBA;
+            if (i == 0) { expectedWidth = width; expectedHeight = height; }
+            GLenum format = GL_RED;
+            GLenum internalFormat = GL_R8;
+            if (nrChannels == 2) { format = GL_RG; internalFormat = GL_RG8; }
+            else if (nrChannels == 3) { format = GL_RGB; internalFormat = GL_SRGB8; }
+            else if (nrChannels == 4) { format = GL_RGBA; internalFormat = GL_SRGB8_ALPHA8; }
 
             glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
-                         0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data
+                         0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, data
             );
             stbi_image_free(data);
         }
@@ -150,7 +174,8 @@ void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
             } catch(...) {}
             std::cout << "        Reason: " << stbi_failure_reason() << std::endl;
             stbi_image_free(data);
-            m_TextureLoaded = false;
+            loaded = false;
+            break;
         }
     }
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -159,14 +184,38 @@ void Skybox::LoadCubemap(const std::vector<std::string>& faces) {
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
+    glBindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(previousCubemap));
+    glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+    if (!loaded) {
+        glDeleteTextures(1, &newTexture);
+        return false;
+    }
+
+    const unsigned int oldTexture = m_TextureID;
+    m_TextureID = newTexture;
+    m_TextureLoaded = true;
+    if (oldTexture) glDeleteTextures(1, &oldTexture);
+
     m_Shader->Bind();
     m_Shader->SetInt("skybox", 0);
-    m_Shader->Unbind();
-    
     std::cout << "Skybox: LoadCubemap completed (ID=" << m_TextureID << ")" << std::endl;
+    return true;
 }
 
 void Skybox::Draw(const Camera& camera, float aspectRatio) {
+    if (!RenderThread::IsCurrent() || !m_Shader || !m_VAO) return;
+    GLint previousDepthFunc = GL_LESS;
+    GLint previousProgram = 0;
+    GLint previousVAO = 0;
+    GLint previousActiveTexture = GL_TEXTURE0;
+    GLint previousCubemap = 0;
+    const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunc);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP, &previousCubemap);
     glDepthFunc(GL_LEQUAL);
     m_Shader->Bind();
     
@@ -186,11 +235,12 @@ void Skybox::Draw(const Camera& camera, float aspectRatio) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_TextureID);
     glDrawArrays(GL_TRIANGLES, 0, 36);
-    glBindVertexArray(0);
-
-    glEnable(GL_CULL_FACE);
-    glDepthFunc(GL_LESS);
-    m_Shader->Unbind();
+    glBindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(previousCubemap));
+    glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+    glBindVertexArray(static_cast<GLuint>(previousVAO));
+    if (cullWasEnabled) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    glDepthFunc(static_cast<GLenum>(previousDepthFunc));
+    glUseProgram(static_cast<GLuint>(previousProgram));
 }
 
 } // namespace Archura

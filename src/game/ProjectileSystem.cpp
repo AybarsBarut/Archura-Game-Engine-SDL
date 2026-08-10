@@ -9,8 +9,9 @@ namespace Archura {
 ProjectileSystem::ProjectileSystem() : m_Scene(nullptr) {
 }
 
-void ProjectileSystem::Init(Scene* scene) {
+void ProjectileSystem::Init(Scene* scene, PhysicsSystem* physicsSystem) {
     m_Scene = scene;
+    m_PhysicsSystem = physicsSystem;
 }
 
 // Detailed implementations are in Projectile.cpp

@@ -33,16 +33,16 @@ void ObjectManipulationTool::Draw(Scene *scene, Camera *camera,
       // Mode changed, reset state
       m_IsPainting = false;
       m_IsDeforming = false;
-      m_CurrentMesh = nullptr;
+      m_CurrentMesh.reset();
     }
 
     ImGui::Separator();
 
     if (selectedEntity) {
       MeshRenderer *mr = selectedEntity->GetComponent<MeshRenderer>();
-      if (mr && mr->mesh) {
-        if (m_CurrentMesh != mr->mesh) {
-          m_CurrentMesh = mr->mesh;
+      if (mr && mr->meshAsset) {
+        if (m_CurrentMesh != mr->meshAsset) {
+          m_CurrentMesh = mr->meshAsset;
           // New mesh selected, clear base state
           m_BaseMeshState.clear();
         }
@@ -54,11 +54,11 @@ void ObjectManipulationTool::Draw(Scene *scene, Camera *camera,
         }
       } else {
         ImGui::TextColored(ImVec4(1, 1, 0, 1), "Selected entity has no mesh.");
-        m_CurrentMesh = nullptr;
+        m_CurrentMesh.reset();
       }
     } else {
       ImGui::TextDisabled("Select an entity to manipulate.");
-      m_CurrentMesh = nullptr;
+      m_CurrentMesh.reset();
     }
   }
   ImGui::End();
@@ -112,7 +112,7 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
   float t;
   glm::vec3 hitPoint;
   bool hit =
-      RayIntersectsMesh(rayOrigin, rayDir, m_CurrentMesh, model, t, hitPoint);
+      RayIntersectsMesh(rayOrigin, rayDir, m_CurrentMesh.get(), model, t, hitPoint);
 
   if (hit) {
     // Draw 3D Brush Cursor
@@ -124,7 +124,7 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
         PushHistory(m_CurrentMesh);
         m_IsPainting = true;
       }
-      ApplyTerrainBrush(m_CurrentMesh, hitPoint, model);
+      ApplyTerrainBrush(m_CurrentMesh.get(), hitPoint, model);
     } else {
       m_IsPainting = false;
     }
@@ -268,7 +268,7 @@ void ObjectManipulationTool::RenderObjectModeUI() {
     if (m_BaseMeshState.empty()) {
       m_BaseMeshState = m_CurrentMesh->GetVertices();
     }
-    ApplyDeformation(m_CurrentMesh, m_DeformationType, m_DeformationValue,
+    ApplyDeformation(m_CurrentMesh.get(), m_DeformationType, m_DeformationValue,
                      m_DeformationAxis);
   }
 
@@ -513,7 +513,7 @@ void ObjectManipulationTool::ApplyDeformation(Mesh *mesh, DeformationType type,
   // (handled in UI)
 }
 
-void ObjectManipulationTool::PushHistory(Mesh *mesh) {
+void ObjectManipulationTool::PushHistory(const std::shared_ptr<Mesh>& mesh) {
   if (!mesh)
     return;
   HistoryState state;

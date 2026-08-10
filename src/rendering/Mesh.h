@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <glm/glm.hpp>
+#include <memory>
 
 namespace Archura {
 
@@ -44,6 +45,8 @@ public:
     // Copy constructor ve assignment operator'ı disable et
     Mesh(const Mesh&) = delete;
     Mesh& operator=(const Mesh&) = delete;
+    Mesh(Mesh&& other) noexcept;
+    Mesh& operator=(Mesh&& other) noexcept;
 
     void Draw(Shader* shader);
     void DrawInstanced(Shader* shader, const std::vector<glm::mat4>& models);
@@ -60,7 +63,20 @@ public:
     static Mesh* LoadFromOBJ(const std::string& path);
     static Mesh* LoadFromFBX(const std::string& path);
 
+    // Preferred C++17 ownership API. Raw factories above remain for source
+    // compatibility, but callers that attach a mesh to an entity should retain
+    // one of these handles through MeshRenderer::SetMeshAsset().
+    static std::shared_ptr<Mesh> CreateCubeShared(float size = 1.0f);
+    static std::shared_ptr<Mesh> CreatePlaneShared(float width = 10.0f, float height = 10.0f, float uvScale = 1.0f);
+    static std::shared_ptr<Mesh> CreateSphereShared(float radius = 1.0f, int segments = 32);
+    static std::shared_ptr<Mesh> CreateCapsuleShared(float radius = 0.5f, float height = 2.0f);
+    static std::shared_ptr<Mesh> CreateStairsShared(float width = 1.0f, float height = 1.0f, float depth = 1.0f, int steps = 5);
+    static std::shared_ptr<Mesh> CreateRampShared(float width = 1.0f, float height = 1.0f, float depth = 1.0f);
+    static std::shared_ptr<Mesh> LoadFromOBJShared(const std::string& path);
+    static std::shared_ptr<Mesh> LoadFromFBXShared(const std::string& path);
+
 private:
+    void Release() noexcept;
     void SetupMesh();
     void SetupInstancedAttributes();
 
@@ -80,6 +96,7 @@ private:
     unsigned int m_VAO;  // Vertex Array Object
     unsigned int m_VBO;  // Vertex Buffer Object
     unsigned int m_EBO;  // Element Buffer Object
+    size_t m_VertexCapacityBytes = 0;
     
     unsigned int m_InstanceVBO = 0; // For instanced rendering
     size_t m_InstanceCapacity = 0;  // To avoid reallocating VBO constantly
