@@ -22,14 +22,18 @@ public:
     // Shader management
     Shader* LoadShader(const std::string& name, const std::string& vertPath, const std::string& fragPath);
     Shader* GetShader(const std::string& name);
+    std::shared_ptr<Shader> GetShaderShared(const std::string& name);
 
     // Texture management
     Texture* LoadTexture(const std::string& name, const std::string& path, bool generateMipmaps = true);
     Texture* GetTexture(const std::string& name);
+    std::shared_ptr<Texture> GetTextureShared(const std::string& name);
 
     // Mesh management (procedural veya loaded)
     Mesh* AddMesh(const std::string& name, Mesh* mesh);
+    std::shared_ptr<Mesh> AddMesh(const std::string& name, std::shared_ptr<Mesh> mesh);
     Mesh* GetMesh(const std::string& name);
+    std::shared_ptr<Mesh> GetMeshShared(const std::string& name);
 
     // Camera management (for script-created cameras)
     class Camera* AddCamera(const std::string& name, Camera* camera);
@@ -56,9 +60,9 @@ private:
     ResourceManager& operator=(const ResourceManager&) = delete;
 
 private:
-    std::unordered_map<std::string, Shader*> m_Shaders;
-    std::unordered_map<std::string, Texture*> m_Textures;
-    std::unordered_map<std::string, Mesh*> m_Meshes;
+    std::unordered_map<std::string, std::shared_ptr<Shader>> m_Shaders;
+    std::unordered_map<std::string, std::shared_ptr<Texture>> m_Textures;
+    std::unordered_map<std::string, std::shared_ptr<Mesh>> m_Meshes;
     std::unordered_map<std::string, Camera*> m_Cameras;
 };
 

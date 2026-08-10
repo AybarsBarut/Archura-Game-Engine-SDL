@@ -56,7 +56,7 @@ Terrain* Terrain::LoadFromHeightmap(const std::string& heightmapPath,
 
     // STB ile greyscale goruntu yukle
     int w, h, channels;
-    stbi_set_flip_vertically_on_load(false);
+    stbi_set_flip_vertically_on_load_thread(0);
     unsigned char* data = stbi_load(heightmapPath.c_str(), &w, &h, &channels, 1); // 1 kanal = greyscale
 
     if (!data) {

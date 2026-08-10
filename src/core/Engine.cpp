@@ -39,7 +39,7 @@ bool Engine::Init(const EngineConfig& config) {
     }
     
     m_Window = std::make_unique<Window>(windowProps);
-    if (!m_Window->GetNativeWindow()) {
+    if (!m_Window->IsValid()) {
         std::cerr << "Failed to create window!" << std::endl;
         f = fopen(logPath, "a");
         if(f) { 
@@ -47,6 +47,7 @@ bool Engine::Init(const EngineConfig& config) {
             fflush(f);
             fclose(f); 
         }
+        m_Window.reset();
         return false;
     }
 
@@ -91,6 +92,9 @@ bool Engine::Init(const EngineConfig& config) {
             fflush(f);
             fclose(f); 
         }
+        m_Renderer.reset();
+        m_Input.reset();
+        m_Window.reset();
         return false;
     }
 

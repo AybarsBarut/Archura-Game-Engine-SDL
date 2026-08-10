@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace Archura {
@@ -20,27 +21,39 @@ public:
 
   bool Contains(EntityID entity) const {
     const uint32_t sparse = SparseIndex(entity);
-    return sparse < m_Sparse.size() && m_Sparse[sparse] != InvalidIndex;
+    if (sparse >= m_Sparse.size())
+      return false;
+    const uint32_t dense = m_Sparse[sparse];
+    return dense != InvalidIndex && dense < m_DenseEntities.size() &&
+           m_DenseEntities[dense] == entity;
   }
 
   uint32_t GetDenseIndex(EntityID entity) const {
     const uint32_t sparse = SparseIndex(entity);
     if (sparse >= m_Sparse.size())
       return InvalidIndex;
-    return m_Sparse[sparse];
+    return Contains(entity) ? m_Sparse[sparse] : InvalidIndex;
   }
 
   uint32_t Add(EntityID entity) {
     const uint32_t sparse = SparseIndex(entity);
     if (sparse >= m_Sparse.size())
       m_Sparse.resize(sparse + 1, InvalidIndex);
+    EnsureGeneration(entity);
+    if (m_Retired[sparse] != 0)
+      throw std::overflow_error(
+          "SparseSet ticket generation exhausted for entity");
 
-    uint32_t &dense = m_Sparse[sparse];
-    if (dense != InvalidIndex)
-      return dense;
+    uint32_t &denseSlot = m_Sparse[sparse];
+    if (denseSlot != InvalidIndex)
+      return denseSlot;
+    if (m_DenseEntities.size() >= InvalidIndex)
+      throw std::overflow_error("SparseSet dense index overflow");
 
-    dense = static_cast<uint32_t>(m_DenseEntities.size());
+    // Publish the sparse mapping only after dense allocation succeeds.
+    const uint32_t dense = static_cast<uint32_t>(m_DenseEntities.size());
     m_DenseEntities.push_back(entity);
+    denseSlot = dense;
     return dense;
   }
 
@@ -65,7 +78,7 @@ public:
       m_Sparse[SparseIndex(movedEntity)] = dense;
 
     EnsureGeneration(entity);
-    m_Generations[sparse]++;
+    AdvanceGeneration(sparse);
     return dense;
   }
 
@@ -88,7 +101,7 @@ public:
       if (sparse < m_Sparse.size()) {
         m_Sparse[sparse] = InvalidIndex;
         EnsureGeneration(entity);
-        m_Generations[sparse]++;
+        AdvanceGeneration(sparse);
       }
     }
     m_DenseEntities.clear();
@@ -99,13 +112,28 @@ private:
 
   void EnsureGeneration(EntityID entity) {
     const uint32_t sparse = SparseIndex(entity);
-    if (sparse >= m_Generations.size())
+    if (sparse >= m_Generations.size()) {
       m_Generations.resize(sparse + 1, 1);
+      m_Retired.resize(sparse + 1, 0);
+    }
+  }
+
+  void AdvanceGeneration(uint32_t sparse) noexcept {
+    // Never wrap back to an earlier ticket. On exhaustion this sparse slot is
+    // retired permanently; a future Add fails instead of creating an ABA
+    // alias. Reaching this requires 2^32-1 remove cycles for one entity.
+    if (m_Generations[sparse] ==
+        std::numeric_limits<uint32_t>::max()) {
+      m_Retired[sparse] = 1;
+      return;
+    }
+    ++m_Generations[sparse];
   }
 
   std::vector<uint32_t> m_Sparse;
   std::vector<EntityID> m_DenseEntities;
   std::vector<uint32_t> m_Generations;
+  std::vector<uint8_t> m_Retired;
 };
 
 } // namespace Archura

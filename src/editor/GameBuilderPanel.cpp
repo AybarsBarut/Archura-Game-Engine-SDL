@@ -73,7 +73,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
         if (scene) {
             Entity* e = scene->CreateEntity("MyObject_Cube");
             auto* mr  = e->AddComponent<MeshRenderer>();
-            mr->mesh  = Mesh::CreateCube();
+            mr->SetMeshAsset(Mesh::CreateCubeShared());
             mr->color = glm::vec3(0.7f, 0.7f, 0.9f);
             e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
             auto* t = e->GetComponent<Transform>();
@@ -86,7 +86,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
         if (scene) {
             Entity* e = scene->CreateEntity("MyObject_Sphere");
             auto* mr  = e->AddComponent<MeshRenderer>();
-            mr->mesh  = Mesh::CreateSphere(1.0f, 16);
+            mr->SetMeshAsset(Mesh::CreateSphereShared(1.0f, 16));
             mr->color = glm::vec3(0.9f, 0.5f, 0.2f);
             e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
             auto* t = e->GetComponent<Transform>();
@@ -99,7 +99,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
         if (scene) {
             Entity* e = scene->CreateEntity("MyObject_Capsule");
             auto* mr  = e->AddComponent<MeshRenderer>();
-            mr->mesh  = Mesh::CreateCapsule(0.5f, 2.0f);
+            mr->SetMeshAsset(Mesh::CreateCapsuleShared(0.5f, 2.0f));
             mr->color = glm::vec3(0.4f, 0.9f, 0.4f);
             e->AddComponent<BoxCollider>()->size = glm::vec3(1.f, 2.f, 1.f);
             auto* t = e->GetComponent<Transform>();
@@ -111,7 +111,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
         if (scene) {
             Entity* e = scene->CreateEntity("MyObject_Ramp");
             auto* mr  = e->AddComponent<MeshRenderer>();
-            mr->mesh  = Mesh::CreateRamp(4.0f, 2.0f, 4.0f);
+            mr->SetMeshAsset(Mesh::CreateRampShared(4.0f, 2.0f, 4.0f));
             mr->color = glm::vec3(0.8f, 0.6f, 0.3f);
             e->AddComponent<BoxCollider>()->size = glm::vec3(4.f, 2.f, 4.f);
             auto* t = e->GetComponent<Transform>();
@@ -123,7 +123,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
         if (scene) {
             Entity* e = scene->CreateEntity("MyObject_Stairs");
             auto* mr  = e->AddComponent<MeshRenderer>();
-            mr->mesh  = Mesh::CreateStairs(2.0f, 0.5f, 0.5f, 4);
+            mr->SetMeshAsset(Mesh::CreateStairsShared(2.0f, 0.5f, 0.5f, 4));
             mr->color = glm::vec3(0.7f, 0.7f, 0.7f);
             e->AddComponent<BoxCollider>();
             auto* t = e->GetComponent<Transform>();
@@ -171,7 +171,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
                     std::string stem = std::filesystem::path(fullPath).stem().string();
                     Entity* e = scene->CreateEntity("Model_" + stem);
                     auto* mr  = e->AddComponent<MeshRenderer>();
-                    mr->mesh  = Mesh::LoadFromOBJ(fullPath);
+                    mr->SetMeshAsset(Mesh::LoadFromOBJShared(fullPath));
                     mr->color = glm::vec3(1.f);
                     e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
                     auto* t = e->GetComponent<Transform>();
@@ -218,9 +218,9 @@ void GameBuilderPanel::DrawTexturesTab(Scene* scene, Entity* selectedEntity) {
                     if (mr) {
                         std::string path = "assets/textures/" + m_TextureFiles[i];
                         std::string stem = std::filesystem::path(path).stem().string();
-                        Texture* tex = TextureManager::Get().Load(stem, path);
+                        auto tex = TextureManager::Get().LoadShared(stem, path);
                         if (tex) {
-                            mr->texture = tex;
+                            mr->SetTextureAsset(std::move(tex));
                             std::cout << "[GameBuilder] Texture atandi: " << path << std::endl;
                         }
                     } else {

@@ -16,8 +16,14 @@ public:
     Texture() = default;
     ~Texture();
 
+    Texture(const Texture&) = delete;
+    Texture& operator=(const Texture&) = delete;
+    Texture(Texture&& other) noexcept;
+    Texture& operator=(Texture&& other) noexcept;
+
     // Texture'ı dosyadan yükle
-    bool LoadFromFile(const std::string& path, bool generateMipmaps = true);
+    bool LoadFromFile(const std::string& path, bool generateMipmaps = true,
+                      bool srgb = true);
     
     // Solid color texture oluştur
     bool CreateSolid(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255);
@@ -34,6 +40,8 @@ public:
     const std::string& GetPath() const { return m_Path; }
 
 private:
+    void Release() noexcept;
+
     unsigned int m_TextureID = 0;
     int m_Width = 0;
     int m_Height = 0;
@@ -50,9 +58,11 @@ public:
 
     // Texture yükle ve cache'le
     Texture* Load(const std::string& name, const std::string& path, bool generateMipmaps = true);
+    std::shared_ptr<Texture> LoadShared(const std::string& name, const std::string& path, bool generateMipmaps = true);
     
     // Cache'den texture al
     Texture* Get(const std::string& name);
+    std::shared_ptr<Texture> GetShared(const std::string& name);
     
     // Tüm texture'ları temizle
     void Clear();
@@ -65,6 +75,6 @@ private:
     TextureManager& operator=(const TextureManager&) = delete;
 
 private:
-    std::unordered_map<std::string, std::unique_ptr<Texture>> m_Textures;
+    std::unordered_map<std::string, std::shared_ptr<Texture>> m_Textures;
 };
 } // namespace Archura

@@ -44,6 +44,7 @@ public:
 
     void Update();
     bool ShouldClose() const;
+    bool IsValid() const { return m_Window != nullptr && m_Context != nullptr && m_Initialized; }
     
     void SetVSync(bool enabled);
     bool IsVSync() const { return m_VSync; }
@@ -56,7 +57,10 @@ public:
 
     unsigned int GetWidth() const { return m_Width; }
     unsigned int GetHeight() const { return m_Height; }
-    float GetAspectRatio() const { return (float)m_Width / (float)m_Height; }
+    float GetAspectRatio() const { return m_Height ? (float)m_Width / (float)m_Height : 1.0f; }
+    unsigned int GetFramebufferWidth() const { return m_FramebufferWidth; }
+    unsigned int GetFramebufferHeight() const { return m_FramebufferHeight; }
+    void RefreshDrawableSize();
 
     SDL_Window* GetNativeWindow() const { return m_Window; }
     void* GetContext() const { return m_Context; }
@@ -79,9 +83,11 @@ private:
     void* m_Context; // SDL_GLContext
     std::string m_Title;
     unsigned int m_Width, m_Height;
+    unsigned int m_FramebufferWidth = 0, m_FramebufferHeight = 0;
     bool m_VSync;
     bool m_Fullscreen;
     bool m_ShouldClose = false;
+    bool m_Initialized = false;
 
     // Performans tracking
     float m_DeltaTime;

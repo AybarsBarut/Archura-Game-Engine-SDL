@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../ecs/Entity.h"
 #include "../rendering/Camera.h"
 
 namespace Archura {
@@ -56,8 +57,8 @@ public:
     void HandleMouseLook(Input* input, float deltaTime);
 
 private:
-    void HandleMovement(Input* input, class Scene* scene, float deltaTime);
-    bool CheckCollision(const glm::vec3& position, class Scene* scene, float* outGroundHeight = nullptr, float stepHeight = 0.0f);
+    void HandleMovement(Input* input, float deltaTime,
+                        class PhysicsSystem* physicsSystem);
 
     // Physics Helpers
     struct MoveParams {
@@ -126,7 +127,7 @@ private:
     float m_MaxBunnyhopSpeed = 30.0f; // Soft cap for bunnyhop speed
 
     // Object Grabbing (In-game dragging)
-    uint32_t m_GrabbedEntityId = 0; // 0 means nothing grabbed
+    EntityHandle m_GrabbedEntity{};
     float m_GrabDistance = 0.0f;
     bool m_IsGrabbing = false;
 };
