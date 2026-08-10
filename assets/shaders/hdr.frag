@@ -35,9 +35,10 @@ void main() {
     if (uHDREnabled) {
         // Pozlama + ACES tone map
         vec3 mapped = ACESFilmic(hdrColor * uExposure);
-        // Keep the shader output linear. GL_FRAMEBUFFER_SRGB performs the
-        // transfer function for an sRGB-capable default framebuffer.
-        result = mapped;
+        // The active backbuffer path uses legacy display-space output. Apply
+        // the transfer function here instead of relying on global framebuffer
+        // conversion, which would also brighten ImGui and unlinearized passes.
+        result = pow(mapped, vec3(1.0 / 2.2));
     } else {
         result = clamp(hdrColor, 0.0, 1.0);
     }

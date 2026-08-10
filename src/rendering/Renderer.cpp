@@ -45,7 +45,12 @@ bool Renderer::Init() {
     
     // MSAA - GTX 1050'de sorunsuz calisir
     glEnable(GL_MULTISAMPLE);
-    glEnable(GL_FRAMEBUFFER_SRGB);
+    // The current material and UI colors are authored in display (sRGB-like)
+    // space and the post-process path is not part of the active frame graph.
+    // Enabling automatic framebuffer conversion globally therefore applies a
+    // second transfer function to both the scene and ImGui. Keep the legacy
+    // display-space pipeline explicit until every render pass is linearized.
+    glDisable(GL_FRAMEBUFFER_SRGB);
     
     m_Initialized = true;
     SetClearColor(m_ClearColor);
@@ -67,6 +72,8 @@ void Renderer::Shutdown() {
 
 void Renderer::BeginFrame() {
     if (!m_Initialized || !IsOnRenderThread()) return;
+    // Keep frame state deterministic even if an optional pass changed it.
+    glDisable(GL_FRAMEBUFFER_SRGB);
     m_Stats.Reset();
     if (m_ViewportWidth > 0 && m_ViewportHeight > 0) {
         glViewport(0, 0, static_cast<GLsizei>(m_ViewportWidth),
