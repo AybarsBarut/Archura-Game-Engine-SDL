@@ -156,8 +156,8 @@ bool Skybox::LoadCubemap(const std::vector<std::string>& faces) {
             GLenum format = GL_RED;
             GLenum internalFormat = GL_R8;
             if (nrChannels == 2) { format = GL_RG; internalFormat = GL_RG8; }
-            else if (nrChannels == 3) { format = GL_RGB; internalFormat = GL_SRGB8; }
-            else if (nrChannels == 4) { format = GL_RGBA; internalFormat = GL_SRGB8_ALPHA8; }
+            else if (nrChannels == 3) { format = GL_RGB; internalFormat = GL_RGB8; }
+            else if (nrChannels == 4) { format = GL_RGBA; internalFormat = GL_RGBA8; }
 
             glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
                          0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, data
