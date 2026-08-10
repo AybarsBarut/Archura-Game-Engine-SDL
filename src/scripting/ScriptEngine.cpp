@@ -15,6 +15,12 @@
 namespace Archura {
 
     struct ScriptEngineData {
+        struct ScriptMethods {
+            MonoMethod* OnCreate = nullptr;
+            MonoMethod* OnStart = nullptr;
+            MonoMethod* OnUpdate = nullptr;
+            MonoMethod* OnDestroy = nullptr;
+        };
         MonoDomain* RootDomain = nullptr;
         MonoDomain* AppDomain = nullptr;
 
@@ -23,8 +29,11 @@ namespace Archura {
 
         std::filesystem::path CoreAssemblyPath;
         
-        // Map Entity ID -> Script Instance
-        std::unordered_map<uint32_t, MonoObject*> EntityScriptInstances;
+        // Generation-checked entity handle -> rooted managed object handle.
+        // Raw MonoObject pointers are movable/collectable and must not be cached.
+        std::unordered_map<uint64_t, uint32_t> EntityScriptInstances;
+        std::unordered_map<MonoClass*, ScriptMethods> MethodCache;
+        MonoMethod* EntityIdSetter = nullptr;
     };
 
     static ScriptEngineData* s_Data = nullptr;
@@ -85,38 +94,67 @@ namespace Archura {
 
     static void ReportMonoException(MonoObject* exception) {
         if (!exception) return;
-        MonoString* exceptionString = mono_object_to_string(exception, nullptr);
+        MonoObject* formattingException = nullptr;
+        MonoString* exceptionString =
+            mono_object_to_string(exception, &formattingException);
+        if (!exceptionString || formattingException) {
+            std::cout << "[ScriptEngine] Managed exception (ToString failed)\n";
+            return;
+        }
         char* message = mono_string_to_utf8(exceptionString);
-        std::cout << "[ScriptEngine] Exception: " << message << std::endl;
-        mono_free(message);
+        std::cout << "[ScriptEngine] Exception: "
+                  << (message ? message : "<unavailable>") << std::endl;
+        if (message) mono_free(message);
     }
 
-    static bool InvokeNoArg(MonoObject* instance, MonoClass* monoClass, const char* methodName) {
-        MonoMethod* method = nullptr;
-        for (MonoClass* current = monoClass; current && !method; current = mono_class_get_parent(current)) {
-            method = mono_class_get_method_from_name(current, methodName, 0);
+    static MonoMethod* FindMethod(MonoClass* monoClass, const char* name,
+                                  int parameterCount) {
+        for (MonoClass* current = monoClass; current;
+             current = mono_class_get_parent(current)) {
+            if (MonoMethod* method = mono_class_get_method_from_name(
+                    current, name, parameterCount))
+                return method;
         }
-        if (!method) return false;
+        return nullptr;
+    }
 
+    static bool Invoke(MonoObject* instance, MonoMethod* method, void** args) {
+        if (!instance || !method) return false;
         MonoObject* exception = nullptr;
-        mono_runtime_invoke(method, instance, nullptr, &exception);
+        mono_runtime_invoke(method, instance, args, &exception);
         ReportMonoException(exception);
         return exception == nullptr;
     }
 
-    static void SetScriptInstanceEntityID(MonoObject* instance, MonoClass* /*monoClass*/, Entity entity) {
-        MonoClass* entityClass = mono_class_from_name(s_Data->CoreAssemblyImage, "Archura", "Entity");
-        MonoMethod* setId = entityClass ? mono_class_get_method_from_name(entityClass, "set_ID", 1) : nullptr;
-        if (!setId) return;
+    static ScriptEngineData::ScriptMethods& MethodsFor(MonoClass* monoClass) {
+        const auto found = s_Data->MethodCache.find(monoClass);
+        if (found != s_Data->MethodCache.end()) return found->second;
+        ScriptEngineData::ScriptMethods methods;
+        methods.OnCreate = FindMethod(monoClass, "OnCreate", 0);
+        methods.OnStart = FindMethod(monoClass, "OnStart", 0);
+        methods.OnUpdate = FindMethod(monoClass, "OnUpdate", 1);
+        methods.OnDestroy = FindMethod(monoClass, "OnDestroy", 0);
+        return s_Data->MethodCache.emplace(monoClass, methods).first->second;
+    }
 
-        uint64_t entityId = entity.GetID();
+    static bool SetScriptInstanceEntityID(MonoObject* instance,
+                                          const Entity& entity) {
+        if (!s_Data->EntityIdSetter) {
+            MonoClass* entityClass = mono_class_from_name(
+                s_Data->CoreAssemblyImage, "Archura", "Entity");
+            s_Data->EntityIdSetter = entityClass
+                ? mono_class_get_method_from_name(entityClass, "set_ID", 1)
+                : nullptr;
+        }
+        if (!s_Data->EntityIdSetter) return false;
+
+        uint64_t entityId = entity.GetHandle().Value();
         void* args[1] = { &entityId };
-        MonoObject* exception = nullptr;
-        mono_runtime_invoke(setId, instance, args, &exception);
-        ReportMonoException(exception);
+        return Invoke(instance, s_Data->EntityIdSetter, args);
     }
 
     void ScriptEngine::Init() {
+        if (s_Data) return;
         s_Data = new ScriptEngineData();
 
         InitMono();
@@ -137,8 +175,11 @@ namespace Archura {
     }
 
     void ScriptEngine::Shutdown() {
+        if (!s_Data) return;
+        OnRuntimeStop();
         ShutdownMono();
         delete s_Data;
+        s_Data = nullptr;
     }
 
     void ScriptEngine::InitMono() {
@@ -166,11 +207,21 @@ namespace Archura {
     }
 
     void ScriptEngine::ShutdownMono() {
-        // mono_domain_unload(s_Data->AppDomain); // Often causes crashes if not careful
-        s_Data->AppDomain = nullptr;
-        
-        // mono_jit_cleanup(s_Data->RootDomain);
-        s_Data->RootDomain = nullptr;
+        if (!s_Data) return;
+        if (s_Data->AppDomain) {
+            mono_domain_set(s_Data->RootDomain, true);
+            mono_domain_unload(s_Data->AppDomain);
+            s_Data->AppDomain = nullptr;
+        }
+        s_Data->CoreAssembly = nullptr;
+        s_Data->CoreAssemblyImage = nullptr;
+        s_Data->MethodCache.clear();
+        s_Data->EntityIdSetter = nullptr;
+        if (s_Data->RootDomain) {
+            MonoDomain* root = s_Data->RootDomain;
+            s_Data->RootDomain = nullptr;
+            mono_jit_cleanup(root);
+        }
     }
 
     void ScriptEngine::LoadAssembly(const std::filesystem::path& filepath) {
@@ -184,15 +235,35 @@ namespace Archura {
             return;
         }
 
-        s_Data->AppDomain = mono_domain_create_appdomain("ArchuraScriptRuntime", nullptr);
-        mono_domain_set(s_Data->AppDomain, true);
+        OnRuntimeStop();
+        if (s_Data->AppDomain) {
+            mono_domain_set(s_Data->RootDomain, true);
+            mono_domain_unload(s_Data->AppDomain);
+            s_Data->AppDomain = nullptr;
+        }
+        s_Data->CoreAssembly = nullptr;
+        s_Data->CoreAssemblyImage = nullptr;
+        s_Data->MethodCache.clear();
+        s_Data->EntityIdSetter = nullptr;
+
+        s_Data->AppDomain = mono_domain_create_appdomain(
+            const_cast<char*>("ArchuraScriptRuntime"), nullptr);
+        if (!s_Data->AppDomain || !mono_domain_set(s_Data->AppDomain, true)) {
+            std::cout << "[ScriptEngine] Failed to create/set app domain\n";
+            s_Data->AppDomain = nullptr;
+            return;
+        }
 
         s_Data->CoreAssemblyPath = filepath;
         s_Data->CoreAssembly = LoadMonoAssembly(filepath);
         if (s_Data->CoreAssembly)
             s_Data->CoreAssemblyImage = mono_assembly_get_image(s_Data->CoreAssembly);
-        else
+        else {
             std::cout << "Could not load assembly: " << filepath << std::endl;
+            mono_domain_set(s_Data->RootDomain, true);
+            mono_domain_unload(s_Data->AppDomain);
+            s_Data->AppDomain = nullptr;
+        }
     }
 
     void ScriptEngine::OnRuntimeStart(Scene* /*scene*/) {
@@ -200,53 +271,96 @@ namespace Archura {
     }
 
     void ScriptEngine::OnRuntimeStop() {
-        // Clear context
+        if (!s_Data) return;
+        for (const auto& entry : s_Data->EntityScriptInstances) {
+            MonoObject* instance = mono_gchandle_get_target(entry.second);
+            if (instance) {
+                auto& methods = MethodsFor(mono_object_get_class(instance));
+                if (methods.OnDestroy) Invoke(instance, methods.OnDestroy, nullptr);
+            }
+            mono_gchandle_free(entry.second);
+        }
+        s_Data->EntityScriptInstances.clear();
     }
 
-    void ScriptEngine::OnCreateEntity(Entity entity) {
-        if (!s_Data || !s_Data->CoreAssemblyImage) return;
-        if (!entity.HasComponent<ScriptComponent>()) return;
+    bool ScriptEngine::OnCreateEntity(const Entity& entity) {
+        if (!s_Data || !s_Data->CoreAssemblyImage) return false;
+        if (!entity.HasComponent<ScriptComponent>()) return false;
         
         auto& sc = entity.GetComponent<ScriptComponent>()->className;
-        if (sc.empty()) return;
+        if (sc.empty()) return false;
 
         if (ClassExists(sc)) {
              MonoClass* monoClass = mono_class_from_name(s_Data->CoreAssemblyImage, "Archura", sc.c_str());
              MonoObject* instance = InstantiateClass(monoClass);
-             SetScriptInstanceEntityID(instance, monoClass, entity);
-             s_Data->EntityScriptInstances[entity.GetID()] = instance;
+             if (!instance) return false;
+             if (!SetScriptInstanceEntityID(instance, entity)) return false;
+             const uint64_t key = entity.GetHandle().Value();
+             const auto existing = s_Data->EntityScriptInstances.find(key);
+             if (existing != s_Data->EntityScriptInstances.end()) {
+                 mono_gchandle_free(existing->second);
+                 s_Data->EntityScriptInstances.erase(existing);
+             }
+             s_Data->EntityScriptInstances.emplace(
+                 key, mono_gchandle_new(instance, false));
              
-             InvokeNoArg(instance, monoClass, "OnCreate");
-             InvokeNoArg(instance, monoClass, "OnStart");
+             auto& methods = MethodsFor(monoClass);
+             if (!methods.OnCreate ||
+                 !Invoke(instance, methods.OnCreate, nullptr) ||
+                 !methods.OnStart ||
+                 !Invoke(instance, methods.OnStart, nullptr)) {
+                 if (methods.OnDestroy)
+                     Invoke(instance, methods.OnDestroy, nullptr);
+                 const auto failed = s_Data->EntityScriptInstances.find(key);
+                 mono_gchandle_free(failed->second);
+                 s_Data->EntityScriptInstances.erase(failed);
+                 return false;
+             }
+             return true;
         }
+        return false;
     }
     
-    void ScriptEngine::OnUpdateEntity(Entity entity, float ts) {
-        if (!s_Data) return;
-        if (s_Data->EntityScriptInstances.find(entity.GetID()) == s_Data->EntityScriptInstances.end()) {
-            return;
-        }
+    bool ScriptEngine::OnUpdateEntity(const Entity& entity, float ts) {
+        if (!s_Data) return false;
+        const uint64_t key = entity.GetHandle().Value();
+        const auto found = s_Data->EntityScriptInstances.find(key);
+        if (found == s_Data->EntityScriptInstances.end()) return false;
 
-        MonoObject* instance = s_Data->EntityScriptInstances.at(entity.GetID());
+        MonoObject* instance = mono_gchandle_get_target(found->second);
+        if (!instance) return false;
         MonoClass* monoClass = mono_object_get_class(instance);
-        
-        // Optimize: Cache this method
-        MonoMethod* onUpdateMethod = nullptr;
-        for (MonoClass* current = monoClass; current && !onUpdateMethod; current = mono_class_get_parent(current)) {
-            onUpdateMethod = mono_class_get_method_from_name(current, "OnUpdate", 1);
-        }
-        if (onUpdateMethod) {
+        auto& methods = MethodsFor(monoClass);
+        if (methods.OnUpdate) {
              void* args[1];
              args[0] = &ts;
-             MonoObject* exception = nullptr;
-             mono_runtime_invoke(onUpdateMethod, instance, args, &exception);
-             ReportMonoException(exception);
+             return Invoke(instance, methods.OnUpdate, args);
         }
+        return false;
+    }
+
+    void ScriptEngine::OnDestroyEntity(EntityHandle entity) {
+        if (!s_Data) return;
+        const auto found = s_Data->EntityScriptInstances.find(entity.Value());
+        if (found == s_Data->EntityScriptInstances.end()) return;
+
+        MonoObject* instance = mono_gchandle_get_target(found->second);
+        if (instance) {
+            auto& methods = MethodsFor(mono_object_get_class(instance));
+            if (methods.OnDestroy) Invoke(instance, methods.OnDestroy, nullptr);
+        }
+        mono_gchandle_free(found->second);
+        s_Data->EntityScriptInstances.erase(found);
     }
 
     MonoObject* ScriptEngine::InstantiateClass(MonoClass* monoClass) {
+        if (!s_Data || !s_Data->AppDomain || !monoClass) return nullptr;
         MonoObject* instance = mono_object_new(s_Data->AppDomain, monoClass);
-        mono_runtime_object_init(instance);
+        if (!instance) return nullptr;
+        MonoMethod* constructor = mono_class_get_method_from_name(
+            monoClass, ".ctor", 0);
+        if (!constructor || !Invoke(instance, constructor, nullptr))
+            return nullptr;
         return instance;
     }
 
@@ -260,7 +374,7 @@ namespace Archura {
     }
 
     MonoImage* ScriptEngine::GetCoreAssemblyImage() {
-        return s_Data->CoreAssemblyImage;
+        return s_Data ? s_Data->CoreAssemblyImage : nullptr;
     }
 
 }

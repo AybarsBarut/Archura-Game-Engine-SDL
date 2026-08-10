@@ -835,9 +835,9 @@ void Editor::DrawInspector(Scene *scene) {
           selTex = i;
           std::string p = "assets/textures/" + m_CachedTextureFiles[i];
           std::string nm = std::filesystem::path(p).stem().string();
-          Texture *tex = TextureManager::Get().Load(nm, p);
+          auto tex = TextureManager::Get().LoadShared(nm, p);
           if (tex) {
-            mr->texture = tex;
+            mr->SetTextureAsset(std::move(tex));
             Log("Texture: " + p);
           }
         }
@@ -852,7 +852,7 @@ void Editor::DrawInspector(Scene *scene) {
       ImGui::BeginGroup();
       ImGui::Text("ID %u", mr->texture->GetID());
       if (ImGui::SmallButton("Remove"))
-        mr->texture = nullptr;
+        mr->ClearTextureAsset();
       ImGui::EndGroup();
     }
   }
@@ -1575,17 +1575,17 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
   col->size = glm::vec3(1.0f);
 
   if (type == "Cube")
-    mr->mesh = Mesh::CreateCube();
+    mr->SetMeshAsset(Mesh::CreateCubeShared());
   else if (type == "Sphere") {
-    mr->mesh = Mesh::CreateSphere(0.5f);
+    mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f));
   } else if (type == "Capsule") {
-    mr->mesh = Mesh::CreateCapsule(0.5f, 2.0f);
+    mr->SetMeshAsset(Mesh::CreateCapsuleShared(0.5f, 2.0f));
     col->size = {1, 2, 1};
   } else if (type == "Stairs") {
-    mr->mesh = Mesh::CreateStairs(1, 1, 2, 5);
+    mr->SetMeshAsset(Mesh::CreateStairsShared(1, 1, 2, 5));
     col->size = {1, 1, 2};
   } else if (type == "Ramp") {
-    mr->mesh = Mesh::CreateRamp(1, 1, 2);
+    mr->SetMeshAsset(Mesh::CreateRampShared(1, 1, 2));
     col->size = {1, 1, 2};
   } else if (type == "Light") {
     e->RemoveComponent<MeshRenderer>();
@@ -1597,12 +1597,12 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
     for (auto &c : ext)
       c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     if (ext == ".obj")
-      mr->mesh = Mesh::LoadFromOBJ(path);
+      mr->SetMeshAsset(Mesh::LoadFromOBJShared(path));
     else if (ext == ".fbx")
-      mr->mesh = Mesh::LoadFromFBX(path);
+      mr->SetMeshAsset(Mesh::LoadFromFBXShared(path));
     else {
       Log("[WARN] Unsupported model format: " + ext);
-      mr->mesh = Mesh::CreateSphere(0.5f);
+      mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f));
       mr->color = glm::vec3(1.0f, 0.0f, 1.0f);
     }
     if (name.find("Model_") == 0)
@@ -2018,8 +2018,8 @@ void Editor::CopySelected() {
     m_Clipboard.scale = tf->scale;
   }
   if (mr) {
-    m_Clipboard.mesh = mr->mesh;
-    m_Clipboard.texture = mr->texture;
+    m_Clipboard.mesh = mr->meshAsset;
+    m_Clipboard.texture = mr->textureAsset;
     m_Clipboard.color = mr->color;
   }
   if (bc) {
@@ -2048,8 +2048,8 @@ void Editor::PasteClipboard(Scene *scene) {
   }
   if (m_Clipboard.mesh) {
     auto *mr = e->AddComponent<MeshRenderer>();
-    mr->mesh = m_Clipboard.mesh;
-    mr->texture = m_Clipboard.texture;
+    mr->SetMeshAsset(m_Clipboard.mesh);
+    mr->SetTextureAsset(m_Clipboard.texture);
     mr->color = m_Clipboard.color;
   }
   if (m_Clipboard.hasBc) {

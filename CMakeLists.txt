@@ -17,8 +17,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ARCHURA_BUILD_MEMORY_BENCHMARKS "Build allocator benchmark executable" OFF)
 option(ARCHURA_BUILD_ECS_BENCHMARKS "Build ECS storage benchmark executable" OFF)
+option(ARCHURA_BUILD_RENDERER_TESTS "Build renderer ownership contract tests" OFF)
+option(ARCHURA_BUILD_ECS_TESTS "Build focused ECS core contract tests" ON)
+option(ARCHURA_BUILD_PHYSICS_TESTS "Build focused physics contract tests" ON)
 option(ARCHURA_DEBUG_PHYSICS "Build the F3 physics debug wireframe overlay" ON)
 option(ARCHURA_OPENAL "Build OpenAL Soft spatial audio support" OFF)
+option(ARCHURA_REQUIRE_SDL_NET "Fail configuration when SDL_net is unavailable" OFF)
 
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
 if(MSVC)
@@ -90,6 +94,37 @@ set_target_properties(SDL2main PROPERTIES
 )
 
 message(STATUS "Using SDL2 from: ${SDL2_BasePath}")
+
+# SDL_net is optional at configure time so the engine and protocol tests remain
+# buildable from source archives that do not bundle the SDK. Runtime networking
+# explicitly reports Unavailable unless this backend is present.
+set(ARCHURA_SDL_NET_TARGET "")
+set(SDL2_NET_BASE_PATH "${CMAKE_SOURCE_DIR}/external/SDL2_net")
+find_path(SDL2_NET_INCLUDE_DIR
+    NAMES SDL_net.h SDL2/SDL_net.h
+    HINTS "${SDL2_NET_BASE_PATH}/include"
+)
+find_library(SDL2_NET_LIBRARY
+    NAMES SDL2_net SDL2_net-static
+    HINTS "${SDL2_NET_BASE_PATH}/lib/x64" "${SDL2_NET_BASE_PATH}/lib"
+)
+if(SDL2_NET_INCLUDE_DIR AND SDL2_NET_LIBRARY)
+    add_library(ArchuraSDL2Net UNKNOWN IMPORTED)
+    set_target_properties(ArchuraSDL2Net PROPERTIES
+        IMPORTED_LOCATION "${SDL2_NET_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_NET_INCLUDE_DIR}"
+    )
+    set(ARCHURA_SDL_NET_TARGET ArchuraSDL2Net)
+    message(STATUS "SDL_net backend enabled: ${SDL2_NET_LIBRARY}")
+elseif(ARCHURA_REQUIRE_SDL_NET)
+    message(FATAL_ERROR
+        "ARCHURA_REQUIRE_SDL_NET=ON but SDL_net was not found. "
+        "Install SDL2_net or place it under external/SDL2_net.")
+else()
+    message(WARNING
+        "SDL_net was not found. Networking runtime will be unavailable; "
+        "framing/serialization remains enabled and testable.")
+endif()
 
 # GLAD - Use wrapper to ensure proper Windows header order
 add_library(glad src/glad_wrapper.c)
@@ -269,6 +304,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     "${MONO_LIB_DIR}/mono-2.0-sgen.lib"
 )
 
+if(ARCHURA_SDL_NET_TARGET)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${ARCHURA_SDL_NET_TARGET})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ARCHURA_HAS_SDL_NET=1)
+endif()
+
 if(ARCHURA_OPENAL)
     if(TARGET OpenAL::OpenAL)
         target_link_libraries(${PROJECT_NAME} PRIVATE OpenAL::OpenAL)
@@ -339,12 +379,43 @@ add_executable(ArchuraServer
 target_include_directories(ArchuraServer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    ${SDL2_INCLUDE_DIR}
 )
 
 # Server only needs network libraries
 target_link_libraries(ArchuraServer PRIVATE
     ws2_32
 )
+
+if(ARCHURA_SDL_NET_TARGET)
+    target_link_libraries(ArchuraServer PRIVATE SDL2 ${ARCHURA_SDL_NET_TARGET})
+    target_compile_definitions(ArchuraServer PRIVATE ARCHURA_HAS_SDL_NET=1)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(ArchuraNetworkProtocolTests
+        tests/network/NetworkProtocolTests.cpp
+        src/network/NetworkProtocol.cpp
+    )
+    target_include_directories(ArchuraNetworkProtocolTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME ArchuraNetworkProtocolTests COMMAND ArchuraNetworkProtocolTests)
+
+    # Intentionally compiled without ARCHURA_HAS_SDL_NET. This verifies that
+    # source archives without the optional SDK still produce a safe, explicit
+    # runtime stub instead of link failures or a false connected state.
+    add_executable(ArchuraNetworkNoBackendTests
+        tests/network/NetworkNoBackendTests.cpp
+        src/network/NetworkManager.cpp
+        src/network/NetworkProtocol.cpp
+    )
+    target_include_directories(ArchuraNetworkNoBackendTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME ArchuraNetworkNoBackendTests COMMAND ArchuraNetworkNoBackendTests)
+endif()
 
 if(ARCHURA_BUILD_MEMORY_BENCHMARKS)
     add_executable(ArchuraAllocatorBenchmark
@@ -371,6 +442,46 @@ if(ARCHURA_BUILD_ECS_BENCHMARKS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
     )
+endif()
+
+if(ARCHURA_BUILD_RENDERER_TESTS)
+    add_executable(ArchuraRendererOwnershipTests
+        tests/RendererOwnershipTests.cpp
+    )
+    target_include_directories(ArchuraRendererOwnershipTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    )
+    add_test(NAME Archura.Renderer.Ownership COMMAND ArchuraRendererOwnershipTests)
+endif()
+
+if(ARCHURA_BUILD_ECS_TESTS)
+    include(CTest)
+    add_executable(ArchuraECSCoreTests
+        tests/ECSCoreTests.cpp
+        src/ecs/Component.cpp
+        src/ecs/Entity.cpp
+    )
+    target_include_directories(ArchuraECSCoreTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    )
+    add_test(NAME Archura.ECS.Core COMMAND ArchuraECSCoreTests)
+endif()
+
+if(ARCHURA_BUILD_PHYSICS_TESTS)
+    include(CTest)
+    add_executable(ArchuraPhysicsCoreTests
+        tests/PhysicsCoreTests.cpp
+        src/ecs/Component.cpp
+        src/ecs/Entity.cpp
+        src/game/PhysicsSystem.cpp
+    )
+    target_include_directories(ArchuraPhysicsCoreTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    )
+    add_test(NAME Archura.Physics.Core COMMAND ArchuraPhysicsCoreTests)
 endif()
 
 # ============================================

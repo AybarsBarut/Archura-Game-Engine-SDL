@@ -23,6 +23,7 @@
 #include "core/AudioSystem.h"
 #include "core/Engine.h"
 #include "core/ImGuiLayer.h"
+#include "core/ResourceManager.h"
 #include "core/Window.h"
 
 // 5. ECS & Game Systems
@@ -61,6 +62,7 @@
 #include "rendering/HUDRenderer.h"
 #include "rendering/Mesh.h"
 #include "rendering/Renderer.h"
+#include "rendering/Texture.h"
 
 // 6. Third Party (ImGui)
 #include "../../external/imgui/backends/imgui_impl_sdl2.h"
@@ -86,7 +88,39 @@ Application *Application::s_Instance = nullptr;
 
 Application::Application() { s_Instance = this; }
 
-Application::~Application() {}
+Application::~Application() {
+  // Every owner that can issue glDelete* must die while the main context is
+  // current. Engine::Shutdown destroys that context, so explicit ordering here
+  // is part of the renderer lifetime contract.
+  m_PauseMenu.reset();
+  m_Editor.reset();
+#ifdef ARCHURA_DEBUG_PHYSICS
+  m_DebugPhysicsSystem.reset();
+#endif
+#ifdef ARCHURA_OPENAL
+  m_OpenALAudioSystem.reset();
+#endif
+  m_HUDRenderer.reset();
+  m_ProjectileSystem.reset();
+  m_ParticleSystem.reset();
+  m_ScriptSystem.reset();
+  m_PhysicsSystem.reset();
+  m_RenderSystem.reset();
+  m_FPSController.reset();
+  m_Scene.reset();
+  m_Camera.reset();
+  m_ImGuiLayer.reset();
+  TextureManager::Get().Clear();
+  ResourceManager::Get().Clear();
+
+  m_Player = nullptr;
+  m_Window = nullptr;
+  m_EngineWindow = nullptr;
+  m_Input = nullptr;
+  m_Renderer = nullptr;
+  Engine::Get().Shutdown();
+  s_Instance = nullptr;
+}
 
 void Application::SetSensitivity(float sens) {
   if (m_FPSController) {
@@ -402,7 +436,7 @@ void Application::Run() {
   m_ParticleSystem = std::make_unique<ParticleSystem>();
   m_ParticleSystem->Init(m_Scene.get());
   m_ProjectileSystem = std::make_unique<ProjectileSystem>();
-  m_ProjectileSystem->Init(m_Scene.get());
+  m_ProjectileSystem->Init(m_Scene.get(), m_PhysicsSystem.get());
 
   LogStartup("All systems initialized. Entering main loop");
 
@@ -431,7 +465,7 @@ void Application::Run() {
   Entity *floor = m_Scene->CreateEntity("Floor");
   {
     auto *mesh = floor->AddComponent<MeshRenderer>();
-    mesh->mesh = Mesh::CreateCube();
+    mesh->SetMeshAsset(Mesh::CreateCubeShared());
     mesh->color = glm::vec3(0.4f, 0.4f, 0.45f);
 
     auto *trans = floor->GetComponent<Transform>();
@@ -477,7 +511,7 @@ void Application::Run() {
   for (const auto &w : walls) {
     Entity *wall = m_Scene->CreateEntity(w.name);
     auto *mesh = wall->AddComponent<MeshRenderer>();
-    mesh->mesh = Mesh::CreateCube();
+    mesh->SetMeshAsset(Mesh::CreateCubeShared());
     mesh->color = w.c;
     wall->GetComponent<Transform>()->position = w.p;
     wall->GetComponent<Transform>()->scale = w.s;
@@ -578,6 +612,17 @@ void Application::ProcessInput() {
     if (event.type == SDL_WINDOWEVENT &&
         event.window.event == SDL_WINDOWEVENT_CLOSE)
       m_EngineWindow->SetShouldClose(true);
+    if (event.type == SDL_WINDOWEVENT &&
+        (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+         event.window.event == SDL_WINDOWEVENT_RESIZED)) {
+      m_EngineWindow->RefreshDrawableSize();
+      m_Renderer->SetViewport(m_EngineWindow->GetFramebufferWidth(),
+                              m_EngineWindow->GetFramebufferHeight());
+      if (m_HUDRenderer) {
+        m_HUDRenderer->SetScreenSize(static_cast<float>(m_EngineWindow->GetWidth()),
+                                     static_cast<float>(m_EngineWindow->GetHeight()));
+      }
+    }
   }
 
   // 2. Handle special input (pause, dev mode, console)

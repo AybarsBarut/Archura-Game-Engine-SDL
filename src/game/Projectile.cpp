@@ -1,5 +1,6 @@
 #include "Projectile.h"
 #include "ProjectileSystem.h"
+#include "PhysicsSystem.h"
 #include "../ecs/Entity.h"
 #include "../ecs/Component.h"
 #include "../rendering/Mesh.h"
@@ -12,11 +13,13 @@
 #include <iostream>
 #include <random>
 #include <algorithm>
+#include <cmath>
 
 namespace Archura {
 
 void ProjectileSystem::Update(float deltaTime) {
-    if (!m_Scene) return;
+    if (!m_Scene || !m_PhysicsSystem || !std::isfinite(deltaTime) || deltaTime <= 0.0f)
+        return;
 
     m_ProjectilesToDestroy.clear();
     m_ProjectilesToDestroy.reserve(10); // Pre-allocate for common case
@@ -26,34 +29,30 @@ void ProjectileSystem::Update(float deltaTime) {
         auto* projectile = entityPtr->GetComponent<Projectile>();
         if (projectile) {
             UpdateProjectile(entityPtr.get(), projectile, deltaTime);
-            
-            // Diger varliklarla carpismayi kontrol et
-            if (CheckCollision(entityPtr.get(), m_Scene)) {
-                projectile->hasHit = true;
-                m_ProjectilesToDestroy.push_back(entityPtr.get());
-            }
         }
     }
 
     // Vurmus veya suresi dolmus mermileri yok et
-    for (auto* entity : m_ProjectilesToDestroy) {
-        m_Scene->DestroyEntity(entity->GetID());
-    }
+    std::sort(m_ProjectilesToDestroy.begin(), m_ProjectilesToDestroy.end(),
+              [](EntityHandle lhs, EntityHandle rhs) { return lhs.Value() < rhs.Value(); });
+    m_ProjectilesToDestroy.erase(
+        std::unique(m_ProjectilesToDestroy.begin(), m_ProjectilesToDestroy.end()),
+        m_ProjectilesToDestroy.end());
+    for (EntityHandle handle : m_ProjectilesToDestroy)
+        m_Scene->DestroyEntity(handle);
 
     // Generic Lifecycle System (Simple implementation here for now)
-    std::vector<Entity*> expiredEntities;
+    std::vector<EntityHandle> expiredEntities;
     for (auto& entityPtr : m_Scene->GetEntities()) {
         auto* lifetime = entityPtr->GetComponent<Lifetime>();
         if (lifetime) {
             lifetime->remainingTime -= deltaTime;
             if (lifetime->remainingTime <= 0.0f) {
-                expiredEntities.push_back(entityPtr.get());
+                expiredEntities.push_back(entityPtr->GetHandle());
             }
         }
     }
-    for (auto* entity : expiredEntities) {
-        m_Scene->DestroyEntity(entity->GetID());
-    }
+    for (EntityHandle handle : expiredEntities) m_Scene->DestroyEntity(handle);
 }
 
 void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float deltaTime) {
@@ -63,7 +62,7 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
     // Omur suresi kontrolu
     proj->lifetime -= deltaTime;
     if (proj->lifetime <= 0.0f) {
-        m_ProjectilesToDestroy.push_back(entity);
+        m_ProjectilesToDestroy.push_back(entity->GetHandle());
         return;
     }
 
@@ -75,7 +74,7 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
             // std::cout << "BOOM! Grenade exploded." << std::endl;
             // Alan hasari mantigi burada (basitlestirilmis: sadece yok et)
             // Gercek bir uygulamada, tum varliklara olan mesafeyi kontrol ederdik
-            m_ProjectilesToDestroy.push_back(entity);
+            m_ProjectilesToDestroy.push_back(entity->GetHandle());
             return;
         }
     }
@@ -85,111 +84,44 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
         proj->velocity.y += proj->gravity * deltaTime;
     }
 
-    // Hareket
-    glm::vec3 nextPos = transform->position + proj->velocity * deltaTime;
-
-    // Zemin Carpismasi (Basit)
-    if (nextPos.y < 0.2f) { // Zemin seviyesi
-        if (proj->type == Projectile::ProjectileType::Grenade) {
-            // Sekme
-            nextPos.y = 0.2f;
-            proj->velocity.y = -proj->velocity.y * 0.5f; // Enerji kaybi
-            proj->velocity.x *= 0.8f; // Surtunme
-            proj->velocity.z *= 0.8f;
-            
-            // Cok yavassa dur
-            if (glm::length(proj->velocity) < 0.5f) {
-                proj->velocity = glm::vec3(0.0f);
-            }
-        } else {
-            // Mermiler zemine carpinca yok olur
-            m_ProjectilesToDestroy.push_back(entity);
-            return;
-        }
+    const glm::vec3 displacement = proj->velocity * deltaTime;
+    if (glm::length(displacement) <= 1.0e-6f) return;
+    PhysicsSystem::QueryFilter filter;
+    filter.ignoredA = entity->GetHandle();
+    filter.ignoredB = proj->owner;
+    filter.includeTriggers = false;
+    PhysicsSystem::ShapeCastHit hit;
+    const float radius = proj->type == Projectile::ProjectileType::Grenade ? 0.15f : 0.1f;
+    if (!m_PhysicsSystem->SweepSphere(transform->position, displacement, radius,
+                                      hit, filter)) {
+        transform->position += displacement;
+        return;
     }
 
-    transform->position = nextPos;
-}
+    transform->position += glm::normalize(displacement) * hit.distance;
+    transform->position += hit.normal * 1.0e-3f;
+    Entity* target = m_Scene->GetEntity(hit.entity);
+    if (!target) return;
+    SurfaceType surfaceType = SurfaceType::Concrete;
+    if (auto* surface = target->GetComponent<SurfaceProperty>())
+        surfaceType = surface->type;
+    SpawnDecal(m_Scene, hit.point, hit.normal, surfaceType);
 
-bool ProjectileSystem::CheckCollision(Entity* projectile, Scene* scene) {
-    auto* proj = projectile->GetComponent<Projectile>();
-    auto* projTransform = projectile->GetComponent<Transform>();
-    
-    if (!proj || !projTransform) return false;
-
-    // Mermi AABB (kucuk bir kutu)
-    glm::vec3 projMin = projTransform->position - glm::vec3(0.1f);
-    glm::vec3 projMax = projTransform->position + glm::vec3(0.1f);
-
-    bool hasHitAny = false;
-
-    for (const auto& targetPtr : scene->GetEntities()) {
-        Entity* target = targetPtr.get();
-        
-        // Kendine carpma
-        if (target == proj->owner) continue;
-        if (target == projectile) continue;
-
-        auto* collider = target->GetComponent<BoxCollider>();
-        auto* transform = target->GetComponent<Transform>();
-        auto* health = target->GetComponent<Health>();
-
-        if (collider && transform) {
-            // Hedef AABB
-            glm::vec3 halfSize = collider->size * transform->scale * 0.5f;
-            glm::vec3 targetMin = transform->position - halfSize;
-            glm::vec3 targetMax = transform->position + halfSize;
-
-            // AABB vs AABB Collision Detection
-            bool collisionX = projMax.x >= targetMin.x && projMin.x <= targetMax.x;
-            bool collisionY = projMax.y >= targetMin.y && projMin.y <= targetMax.y;
-            bool collisionZ = projMax.z >= targetMin.z && projMin.z <= targetMax.z;
-
-            if (collisionX && collisionY && collisionZ) {
-                
-                // Calculate Hit Normal (Axis of least penetration)
-                float overlapX = std::min(projMax.x, targetMax.x) - std::max(projMin.x, targetMin.x);
-                float overlapY = std::min(projMax.y, targetMax.y) - std::max(projMin.y, targetMin.y);
-                float overlapZ = std::min(projMax.z, targetMax.z) - std::max(projMin.z, targetMin.z);
-
-                glm::vec3 normal(0.0f);
-                glm::vec3 hitPos = projTransform->position;
-
-                if (overlapX < overlapY && overlapX < overlapZ) {
-                    normal = (projTransform->position.x > transform->position.x) ? glm::vec3(1, 0, 0) : glm::vec3(-1, 0, 0);
-                    hitPos.x = (normal.x > 0) ? targetMax.x : targetMin.x; // Snap to surface
-                } else if (overlapY < overlapX && overlapY < overlapZ) {
-                    normal = (projTransform->position.y > transform->position.y) ? glm::vec3(0, 1, 0) : glm::vec3(0, -1, 0);
-                    hitPos.y = (normal.y > 0) ? targetMax.y : targetMin.y;
-                } else {
-                    normal = (projTransform->position.z > transform->position.z) ? glm::vec3(0, 0, 1) : glm::vec3(0, 0, -1);
-                    hitPos.z = (normal.z > 0) ? targetMax.z : targetMin.z;
-                }
-
-                // Check Surface Property
-                SurfaceType surfaceType = SurfaceType::Concrete; // Default
-                if (auto* surfaceProp = target->GetComponent<SurfaceProperty>()) {
-                    surfaceType = surfaceProp->type;
-                }
-
-                // Spawn Decal with Surface Type
-                SpawnDecal(scene, hitPos, normal, surfaceType);
-
-                // Apply Damage if applicable
-                if (health) {
-                    health->current -= proj->damage;
-                    if (health->current < 0) health->current = 0;
-                }
-                
-                hasHitAny = true;
-                // std::cout << "Hit Entity " << target->GetName() << "! Damage: " << proj->damage << " Health: " << (health ? std::to_string(health->current) : "N/A") << std::endl;
-                
-                // Don't return strictly true immediately if we want to pierce, but for now destroy on first hit
-                return true;
-            }
-        }
+    if (proj->type == Projectile::ProjectileType::Grenade) {
+        const float incomingNormalSpeed = glm::dot(proj->velocity, hit.normal);
+        if (incomingNormalSpeed < 0.0f)
+            proj->velocity -= (1.0f + 0.5f) * incomingNormalSpeed * hit.normal;
+        const glm::vec3 normalVelocity = glm::dot(proj->velocity, hit.normal) * hit.normal;
+        proj->velocity = normalVelocity + (proj->velocity - normalVelocity) * 0.8f;
+        if (glm::length(proj->velocity) < 0.5f) proj->velocity = glm::vec3(0.0f);
+        return;
     }
-    return false;
+
+    if (auto* health = target->GetComponent<Health>()) {
+        health->current = std::max(0.0f, health->current - proj->damage);
+    }
+    proj->hasHit = true;
+    m_ProjectilesToDestroy.push_back(entity->GetHandle());
 }
 
 void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position, const glm::vec3& normal, SurfaceType surfaceType) {
@@ -225,8 +157,12 @@ void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position, const
     auto* meshRenderer = decal->AddComponent<MeshRenderer>();
     
     // Use Plane mesh
-    static Mesh* decalMesh = Mesh::CreatePlane(1.0f, 1.0f); // Static to avoid recreating
-    meshRenderer->mesh = decalMesh;
+    auto decalMesh = ResourceManager::Get().GetMeshShared("__projectile_decal");
+    if (!decalMesh) {
+        decalMesh = ResourceManager::Get().AddMesh(
+            "__projectile_decal", Mesh::CreatePlaneShared(1.0f, 1.0f));
+    }
+    meshRenderer->SetMeshAsset(std::move(decalMesh));
 
     // Use Bullet Hole Texture if available, else black color
     // Color based on Surface Type
@@ -296,8 +232,12 @@ void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position, const
         if(particleGravity) par->acceleration = glm::vec3(0.0f, -9.81f, 0.0f);
 
         auto* pmr = p->AddComponent<MeshRenderer>();
-        static Mesh* cubeMesh = Mesh::CreateCube(1.0f); // Cube pixel
-        pmr->mesh = cubeMesh;
+        auto cubeMesh = ResourceManager::Get().GetMeshShared("__projectile_pixel");
+        if (!cubeMesh) {
+            cubeMesh = ResourceManager::Get().AddMesh(
+                "__projectile_pixel", Mesh::CreateCubeShared(1.0f));
+        }
+        pmr->SetMeshAsset(std::move(cubeMesh));
         pmr->color = glm::vec3(decalColor);
     }
 }
@@ -311,7 +251,9 @@ Entity* ProjectileSystem::SpawnProjectile(
     Entity* owner,
     Projectile::ProjectileType type
 ) {
-    if (!scene) return nullptr;
+    const float directionLength = glm::length(direction);
+    if (!scene || !std::isfinite(directionLength) || directionLength <= 1.0e-6f ||
+        !std::isfinite(speed) || speed < 0.0f || !std::isfinite(damage)) return nullptr;
 
     // Mermi varligi olustur
     Entity* projectile = scene->CreateEntity("Projectile");
@@ -323,30 +265,30 @@ Entity* ProjectileSystem::SpawnProjectile(
     auto* meshRenderer = projectile->AddComponent<MeshRenderer>();
     
     if (type == Projectile::ProjectileType::Grenade) {
-        meshRenderer->mesh = Mesh::CreateCube(1.0f); 
+        meshRenderer->SetMeshAsset(Mesh::CreateCubeShared(1.0f));
         meshRenderer->color = glm::vec3(0.0f, 0.5f, 0.0f); // Yesil El Bombasi
         transform->scale = glm::vec3(0.3f);
     } else {
         // Mermi
-        Mesh* bulletMesh = ResourceManager::Get().GetMesh("bullet");
+        auto bulletMesh = ResourceManager::Get().GetMeshShared("bullet");
         if (!bulletMesh) {
-            bulletMesh = Mesh::CreateSphere(0.5f, 8);
-            ResourceManager::Get().AddMesh("bullet", bulletMesh);
+            bulletMesh = ResourceManager::Get().AddMesh(
+                "bullet", Mesh::CreateSphereShared(0.5f, 8));
         }
-        meshRenderer->mesh = bulletMesh;
+        meshRenderer->SetMeshAsset(std::move(bulletMesh));
         meshRenderer->color = glm::vec3(1.0f, 1.0f, 0.0f); // Sari Mermi
         transform->scale = glm::vec3(0.1f, 0.1f, 0.3f);
     }
 
     // Yone gore rotasyon hesapla (Basit)
-    glm::vec3 normalizedDir = glm::normalize(direction);
+    glm::vec3 normalizedDir = direction / directionLength;
     
     // Mermi bileseni
     auto* proj = projectile->AddComponent<Projectile>();
     proj->velocity = normalizedDir * speed;
     proj->speed = speed;
     proj->damage = damage;
-    proj->owner = owner;
+    proj->owner = owner ? owner->GetHandle() : EntityHandle{};
     proj->type = type;
     
     if (type == Projectile::ProjectileType::Grenade) {

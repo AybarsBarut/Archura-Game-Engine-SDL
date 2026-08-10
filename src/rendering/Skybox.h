@@ -11,8 +11,8 @@ public:
     Skybox();
     ~Skybox();
 
-    void Init();
-    void LoadCubemap(const std::vector<std::string>& faces);
+    bool Init();
+    bool LoadCubemap(const std::vector<std::string>& faces);
     void Draw(const Camera& camera, float aspectRatio);
 
 private:

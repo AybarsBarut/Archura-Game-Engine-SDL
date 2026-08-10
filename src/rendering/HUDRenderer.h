@@ -42,6 +42,17 @@ private:
     std::unique_ptr<Shader> m_HUDShader;
     unsigned int m_QuadVAO, m_QuadVBO, m_QuadEBO;
     float m_ScreenWidth, m_ScreenHeight;
+    int m_PreviousProgram = 0;
+    int m_PreviousVAO = 0;
+    int m_PreviousActiveTexture = 0;
+    int m_PreviousTexture0 = 0;
+    int m_BlendSrcRGB = 0, m_BlendDstRGB = 0;
+    int m_BlendSrcAlpha = 0, m_BlendDstAlpha = 0;
+    int m_BlendEquationRGB = 0, m_BlendEquationAlpha = 0;
+    bool m_DepthWasEnabled = false;
+    bool m_CullWasEnabled = false;
+    bool m_BlendWasEnabled = false;
+    bool m_InHUDPass = false;
 };
 
 } // namespace Archura

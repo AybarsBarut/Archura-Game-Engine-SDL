@@ -17,6 +17,11 @@ public:
     Shader() = default;
     ~Shader();
 
+    Shader(const Shader&) = delete;
+    Shader& operator=(const Shader&) = delete;
+    Shader(Shader&& other) noexcept;
+    Shader& operator=(Shader&& other) noexcept;
+
     // Shader'ı source code'dan yükle
     bool LoadFromSource(const std::string& vertexSrc, const std::string& fragmentSrc);
     
@@ -46,7 +51,8 @@ public:
 
 private:
     unsigned int CompileShader(unsigned int type, const std::string& source);
-    bool LinkProgram(unsigned int vertexShader, unsigned int fragmentShader);
+    unsigned int LinkProgram(unsigned int vertexShader, unsigned int fragmentShader);
+    void Release() noexcept;
     int GetUniformLocation(const std::string& name);
 
 private:
