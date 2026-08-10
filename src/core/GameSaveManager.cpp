@@ -223,7 +223,9 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
         file << "    {\n";
         file << "      \"name\": \""  << EscapeJson(e->GetName()) << "\",\n";
 
-        std::string meshType = "cube"; 
+        std::string meshType = bc && bc->shape == BoxCollider::Shape::Ramp
+                                   ? "ramp"
+                                   : "cube";
         std::string modelPath;
         if (mr) {
             meshType  = "cube";
@@ -247,6 +249,9 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
 
         if (bc) {
             file << "      \"collider\": [" << bc->size.x << "," << bc->size.y << "," << bc->size.z << "],\n";
+            file << "      \"collider_center\": [" << bc->center.x << "," << bc->center.y << "," << bc->center.z << "],\n";
+            file << "      \"collider_shape\": " << static_cast<int>(bc->shape) << ",\n";
+            file << "      \"collider_trigger\": " << (bc->isTrigger ? "true" : "false") << ",\n";
         }
 
         if (lc) {
@@ -314,6 +319,9 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
     float px=0,py=0,pz=0, rx=0,ry=0,rz=0, sx=1,sy=1,sz=1;
     float cr=1,cg=1,cb=1;
     float colX=1,colY=1,colZ=1;
+    float colCenterX=0,colCenterY=0,colCenterZ=0;
+    int colShape=0;
+    bool hasColliderShape=false, colTrigger=false;
     bool  hasLight = false;
     int   lightType = 0;
     float lr=1,lg=1,lb=1, lInt=1, lRange=20;
@@ -346,6 +354,12 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
 
         auto* col = e->AddComponent<BoxCollider>();
         col->size = {colX, colY, colZ};
+        col->center = {colCenterX, colCenterY, colCenterZ};
+        col->shape = hasColliderShape
+                         ? static_cast<BoxCollider::Shape>(colShape == 1 ? 1 : 0)
+                         : (curMeshType == "ramp" ? BoxCollider::Shape::Ramp
+                                                   : BoxCollider::Shape::Box);
+        col->isTrigger = colTrigger;
 
         if (hasLight) {
             auto* lc = e->AddComponent<LightComponent>();
@@ -360,6 +374,8 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
         curName.clear(); curMeshType = "cube"; curTexPath.clear();
         px=0; py=0; pz=0; rx=0; ry=0; rz=0; sx=1; sy=1; sz=1;
         cr=1; cg=1; cb=1; colX=1; colY=1; colZ=1;
+        colCenterX=0; colCenterY=0; colCenterZ=0;
+        colShape=0; hasColliderShape=false; colTrigger=false;
         hasLight=false; lightType=0; lr=1; lg=1; lb=1; lInt=1; lRange=20;
     };
 
@@ -430,12 +446,24 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
                 std::string v = ExtractJsonField(line, "light_range");
                 if (!v.empty()) try { lRange = std::stof(v); } catch (...) {}
             }
+            if (line.find("\"collider_shape\":") != std::string_view::npos) {
+                std::string v = ExtractJsonField(line, "collider_shape");
+                if (!v.empty()) try {
+                    colShape = std::stoi(v);
+                    hasColliderShape = true;
+                } catch (...) {}
+            }
+            if (line.find("\"collider_trigger\":") != std::string_view::npos)
+                colTrigger = line.find("true") != std::string_view::npos;
 
             parseArr3(line, "position",  px, py, pz);
             parseArr3(line, "rotation",  rx, ry, rz);
             parseArr3(line, "scale",     sx, sy, sz);
             parseArr3(line, "color",     cr, cg, cb);
-            parseArr3(line, "collider",  colX, colY, colZ);
+            if (line.find("\"collider\":") != std::string_view::npos)
+                parseArr3(line, "collider", colX, colY, colZ);
+            if (line.find("\"collider_center\":") != std::string_view::npos)
+                parseArr3(line, "collider_center", colCenterX, colCenterY, colCenterZ);
             parseArr3(line, "light_color", lr, lg, lb);
         }
     }

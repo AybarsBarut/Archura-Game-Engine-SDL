@@ -239,6 +239,7 @@ private:
         bool        hasBc     = false;
         glm::vec3   bcSize    = {1,1,1}, bcCenter = {};
         bool        bcTrigger = false;
+        int         bcShape   = 0;
         bool        hasScript = false;
         std::string scriptClass;
     };

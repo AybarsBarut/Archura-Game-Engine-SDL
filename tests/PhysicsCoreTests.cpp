@@ -36,6 +36,17 @@ Archura::Entity* AddBox(Archura::Scene& scene, const char* name,
     return entity;
 }
 
+Archura::Entity* AddRamp(Archura::Scene& scene, const char* name,
+                         const glm::vec3& position, const glm::vec3& size) {
+    Archura::Entity* entity = scene.CreateEntity(name);
+    entity->GetComponent<Archura::Transform>()->position = position;
+    auto* collider = entity->AddComponent<Archura::BoxCollider>();
+    collider->size = size;
+    collider->center = {0.0f, size.y * 0.5f, 0.0f};
+    collider->shape = Archura::BoxCollider::Shape::Ramp;
+    return entity;
+}
+
 void TestWorldBoundsAndQueries() {
     Archura::Scene scene("queries");
     Archura::Entity* box = AddBox(scene, "negative-scale", {5.0f, 0.0f, 0.0f},
@@ -202,6 +213,59 @@ void TestAuthoritativeCharacterSweep() {
     CHECK(Near(move.velocity.x, 0.0f));
     CHECK(move.position.z > 0.1f); // slides instead of cancelling all motion
     CHECK(move.grounded);
+}
+
+void TestRampShapeQueriesAndCharacterClimb() {
+    Archura::Scene scene("ramp-character");
+    Archura::Entity* ramp = AddRamp(scene, "ramp", glm::vec3(0.0f),
+                                    {2.0f, 1.0f, 4.0f});
+    AddBox(scene, "floor", {0.0f, -0.5f, 0.0f}, {20.0f, 1.0f, 20.0f});
+    Archura::PhysicsSystem physics;
+    physics.Init(&scene);
+
+    Archura::Entity* hit = nullptr;
+    glm::vec3 point(0.0f);
+    CHECK(physics.Raycast({0.0f, 3.0f, 0.0f}, {0.0f, -1.0f, 0.0f},
+                          10.0f, &hit, &point));
+    CHECK(hit == ramp);
+    CHECK(Near(point.y, 0.5f));
+
+    // A box collider would hit the front at z=2. The wedge must not be hit
+    // until the ray reaches the actual inclined surface at z=-1.2.
+    CHECK(physics.Raycast({0.0f, 0.8f, 3.0f}, {0.0f, 0.0f, -1.0f},
+                          10.0f, &hit, &point));
+    CHECK(hit == ramp);
+    CHECK(Near(point.z, -1.2f, 2.0e-3f));
+
+    const auto move = physics.MoveKinematicAABB(
+        {0.0f, 0.901f, 2.6f}, {0.3f, 0.9f, 0.3f},
+        {0.0f, -1.0f, -2.0f}, 0.5f);
+    CHECK(move.position.z < 2.2f);
+    CHECK(move.position.y > 0.95f);
+    CHECK(move.velocity.y > 0.0f);
+    CHECK(move.grounded);
+
+    const auto idle = physics.MoveKinematicAABB(
+        move.position, {0.3f, 0.9f, 0.3f}, glm::vec3(0.0f), 1.0f / 60.0f);
+    CHECK(idle.grounded);
+}
+
+void TestDynamicBodyResolvesAgainstRampSurface() {
+    Archura::Scene scene("ramp-dynamic");
+    AddRamp(scene, "ramp", glm::vec3(0.0f), {2.0f, 1.0f, 4.0f});
+    Archura::Entity* bodyEntity = AddBox(scene, "body", {0.0f, 0.55f, 0.0f},
+                                         {0.2f, 0.2f, 0.2f}, true);
+    auto* body = bodyEntity->GetComponent<Archura::RigidBody>();
+    body->velocity = {0.0f, -1.0f, 0.0f};
+
+    Archura::PhysicsSystem physics;
+    physics.Init(&scene);
+    physics.Update(1.0f / 60.0f);
+
+    const glm::vec3 position =
+        bodyEntity->GetComponent<Archura::Transform>()->position;
+    CHECK(position.y > 0.55f);
+    CHECK(body->velocity.y > -1.0f);
 }
 
 void TestCharacterInitialPenetrationAndSurfaceDeparture() {
@@ -371,6 +435,8 @@ int main() {
     TestForceDragAndFixedStep();
     TestTriggersAndDestroyedExit();
     TestAuthoritativeCharacterSweep();
+    TestRampShapeQueriesAndCharacterClimb();
+    TestDynamicBodyResolvesAgainstRampSurface();
     TestCharacterInitialPenetrationAndSurfaceDeparture();
     TestStaticBodyVelocityDoesNotInjectImpulse();
     TestDestroyDuringCollisionCallback();

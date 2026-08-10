@@ -39,6 +39,9 @@ private:
     void AppendBox(std::vector<LineVertex>& vertices,
                    const glm::mat4& model,
                    const glm::vec3& color) const;
+    void AppendRamp(std::vector<LineVertex>& vertices,
+                    const glm::mat4& model,
+                    const glm::vec3& color) const;
     void CapturePlayerState();
     void RestorePlayerState();
 

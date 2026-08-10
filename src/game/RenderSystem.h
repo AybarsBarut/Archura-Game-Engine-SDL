@@ -63,7 +63,8 @@ private:
     void ReleaseGPUResources() noexcept;
     unsigned int m_DepthMapFBO = 0;
     unsigned int m_DepthMapTexture = 0;
-    const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+    static constexpr unsigned int SHADOW_WIDTH = 2048;
+    static constexpr unsigned int SHADOW_HEIGHT = 2048;
     std::unique_ptr<Shader> m_DepthShader;
     glm::mat4 m_LightSpaceMatrix;
 

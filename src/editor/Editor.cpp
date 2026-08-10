@@ -859,7 +859,11 @@ void Editor::DrawInspector(Scene *scene) {
 
   // ── Box Collider ───────────────────────────────────────────────────────
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
-  if (bc && ImGui::CollapsingHeader("Box Collider")) {
+  if (bc && ImGui::CollapsingHeader("Collider")) {
+    const char *shapeNames[] = {"Box", "Ramp"};
+    int shape = static_cast<int>(bc->shape);
+    if (ImGui::Combo("Shape", &shape, shapeNames, 2))
+      bc->shape = static_cast<BoxCollider::Shape>(shape);
     ImGui::DragFloat3("Size", &bc->size.x, 0.05f);
     ImGui::DragFloat3("Center", &bc->center.x, 0.05f);
     ImGui::Checkbox("Is Trigger", &bc->isTrigger);
@@ -1587,6 +1591,8 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
   } else if (type == "Ramp") {
     mr->SetMeshAsset(Mesh::CreateRampShared(1, 1, 2));
     col->size = {1, 1, 2};
+    col->center = {0, 0.5f, 0};
+    col->shape = BoxCollider::Shape::Ramp;
   } else if (type == "Light") {
     e->RemoveComponent<MeshRenderer>();
     e->AddComponent<LightComponent>();
@@ -2027,6 +2033,7 @@ void Editor::CopySelected() {
     m_Clipboard.bcSize = bc->size;
     m_Clipboard.bcCenter = bc->center;
     m_Clipboard.bcTrigger = bc->isTrigger;
+    m_Clipboard.bcShape = static_cast<int>(bc->shape);
   }
   if (sc) {
     m_Clipboard.hasScript = true;
@@ -2057,6 +2064,7 @@ void Editor::PasteClipboard(Scene *scene) {
     bc->size = m_Clipboard.bcSize;
     bc->center = m_Clipboard.bcCenter;
     bc->isTrigger = m_Clipboard.bcTrigger;
+    bc->shape = static_cast<BoxCollider::Shape>(m_Clipboard.bcShape);
   }
   if (m_Clipboard.hasScript) {
     auto *ns = e->AddComponent<ScriptComponent>();

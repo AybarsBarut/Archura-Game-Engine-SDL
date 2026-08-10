@@ -34,29 +34,34 @@ uniform vec3  uSpecular;
 uniform float uShininess;
 
 // Shadow map
-uniform sampler2D uShadowMap;
+uniform sampler2DShadow uShadowMap;
 uniform mat4      uLightSpaceMatrix;
 
 // ── Shadow PCF 3x3 with normal-based bias ────────────────────────────────────
 float ShadowCalculation(vec4 fragPosLS, vec3 norm, vec3 lightDir) {
+    if (fragPosLS.w <= 0.0) return 0.0;
     vec3 projCoords = fragPosLS.xyz / fragPosLS.w;
     projCoords = projCoords * 0.5 + 0.5;
 
     // Outside ortho frustum → fully lit
-    if (projCoords.z > 1.0) return 0.0;
+    if (projCoords.z <= 0.0 || projCoords.z >= 1.0 ||
+        any(lessThan(projCoords.xy, vec2(0.0))) ||
+        any(greaterThan(projCoords.xy, vec2(1.0)))) return 0.0;
 
     float currentDepth = projCoords.z;
 
     // Normal-based bias: grazing angles get more bias to prevent acne
     float cosTheta = max(dot(norm, lightDir), 0.0);
-    float bias = mix(0.015, 0.003, cosTheta);
+    float bias = max(0.0015 * (1.0 - cosTheta), 0.00025);
 
     float shadow = 0.0;
     vec2 texelSize = 1.0 / vec2(textureSize(uShadowMap, 0));
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(uShadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
-            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+            float visibility = texture(uShadowMap,
+                vec3(projCoords.xy + vec2(x, y) * texelSize,
+                     currentDepth - bias));
+            shadow += 1.0 - visibility;
         }
     }
     return shadow / 9.0;
