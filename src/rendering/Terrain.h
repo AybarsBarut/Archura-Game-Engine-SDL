@@ -83,7 +83,7 @@ public:
     void SetGrassTexture(unsigned int texId) { m_TexGrass = texId; }
     void SetRockTexture (unsigned int texId) { m_TexRock  = texId; }
     void SetSnowTexture (unsigned int texId) { m_TexSnow  = texId; }
-    void SetTextureScale(float scale)         { m_TexScale = scale; }
+    void SetTextureScale(float textureScale)  { m_TexScale = textureScale; }
 
     // ── Yukseklik sorgulama ─────────────────────────────────────────────────
 

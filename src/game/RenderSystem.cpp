@@ -70,8 +70,11 @@ bool RenderSystem::InitShadowMap() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
                  SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    // Bilinear percentage-closer filtering prevents visible square texels.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -295,9 +298,10 @@ void RenderSystem::Update(float deltaTime) {
         glClear(GL_DEPTH_BUFFER_BIT);
         
         // Light Space Matrix
-        float near_plane = 1.0f, far_plane = 100.0f; // Alan genisligine gore ayarlanmali
-        // Orthographic projection for directional light (Expanded bounds)
-        float orthoSize = 100.0f; 
+        constexpr float near_plane = 1.0f;
+        constexpr float far_plane = 140.0f;
+        // Preserve useful texel density around the active camera.
+        constexpr float orthoSize = 45.0f;
         glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, near_plane, far_plane);
         
         // Build a non-degenerate directional-light view. Using the entity
@@ -308,13 +312,30 @@ void RenderSystem::Update(float deltaTime) {
         } else {
             lightDirection = glm::normalize(lightDirection);
         }
-        const glm::vec3 shadowCenter = viewPos;
-        lightPos = shadowCenter - lightDirection * 50.0f;
+        const glm::mat4 inverseView = glm::inverse(view);
+        glm::vec3 cameraForward = -glm::vec3(inverseView[2]);
+        if (glm::dot(cameraForward, cameraForward) < 1.0e-8f)
+            cameraForward = glm::vec3(0.0f, 0.0f, -1.0f);
+        else
+            cameraForward = glm::normalize(cameraForward);
+        const glm::vec3 shadowCenter = viewPos + cameraForward * 12.0f;
+        lightPos = shadowCenter - lightDirection * 65.0f;
         const glm::vec3 up = std::abs(glm::dot(lightDirection, glm::vec3(0, 1, 0))) > 0.99f
                                  ? glm::vec3(0, 0, 1)
                                  : glm::vec3(0, 1, 0);
         glm::mat4 lightView = glm::lookAt(lightPos, shadowCenter, up);
         
+        m_LightSpaceMatrix = lightProjection * lightView;
+
+        // Stabilize the map so sub-texel camera motion cannot make shadows crawl.
+        glm::vec4 shadowOrigin = m_LightSpaceMatrix * glm::vec4(0, 0, 0, 1);
+        shadowOrigin *= static_cast<float>(SHADOW_WIDTH) * 0.5f;
+        const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
+        glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) *
+                                (2.0f / static_cast<float>(SHADOW_WIDTH));
+        roundOffset.z = 0.0f;
+        roundOffset.w = 0.0f;
+        lightProjection[3] += roundOffset;
         m_LightSpaceMatrix = lightProjection * lightView;
         
         m_DepthShader->Bind();

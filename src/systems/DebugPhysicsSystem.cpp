@@ -203,7 +203,28 @@ void DebugPhysicsSystem::BuildColliderLines(std::vector<LineVertex>& vertices) {
         const glm::vec3 color =
             collider->isTrigger ? glm::vec3(1.0f, 0.82f, 0.20f)
                                 : glm::vec3(0.18f, 1.0f, 0.58f);
-        AppendBox(vertices, model, color);
+        if (collider->shape == BoxCollider::Shape::Ramp)
+            AppendRamp(vertices, model, color);
+        else
+            AppendBox(vertices, model, color);
+    }
+}
+
+void DebugPhysicsSystem::AppendRamp(std::vector<LineVertex>& vertices,
+                                    const glm::mat4& model,
+                                    const glm::vec3& color) const {
+    static const std::array<glm::vec3, 6> corners = {
+        glm::vec3(-0.5f, -0.5f, -0.5f), glm::vec3(0.5f, -0.5f, -0.5f),
+        glm::vec3(-0.5f,  0.5f, -0.5f), glm::vec3(0.5f,  0.5f, -0.5f),
+        glm::vec3(-0.5f, -0.5f,  0.5f), glm::vec3(0.5f, -0.5f,  0.5f)
+    };
+    static const std::array<unsigned int, 18> edges = {
+        0, 1, 1, 3, 3, 2, 2, 0,
+        0, 4, 1, 5, 4, 5, 4, 2, 5, 3
+    };
+    for (unsigned int index : edges) {
+        vertices.push_back({glm::vec3(model * glm::vec4(corners[index], 1.0f)),
+                            color});
     }
 }
 

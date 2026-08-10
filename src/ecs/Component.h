@@ -73,9 +73,15 @@ struct MeshRenderer : public Component {
  * @brief Box Collider component - Fiziksel carpisma kutusu
  */
 struct BoxCollider : public Component {
+    enum class Shape : std::uint8_t {
+        Box = 0,
+        Ramp = 1
+    };
+
     glm::vec3 size = glm::vec3(1.0f); // Boyutlar (Genislik, Yukseklik, Derinlik)
     glm::vec3 center = glm::vec3(0.0f); // Merkez ofseti
     bool isTrigger = false;
+    Shape shape = Shape::Box;
 };
 
 /**

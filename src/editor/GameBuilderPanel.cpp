@@ -113,7 +113,10 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateRampShared(4.0f, 2.0f, 4.0f));
             mr->color = glm::vec3(0.8f, 0.6f, 0.3f);
-            e->AddComponent<BoxCollider>()->size = glm::vec3(4.f, 2.f, 4.f);
+            auto* collider = e->AddComponent<BoxCollider>();
+            collider->size = glm::vec3(4.f, 2.f, 4.f);
+            collider->center = glm::vec3(0.f, 1.f, 0.f);
+            collider->shape = BoxCollider::Shape::Ramp;
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 0, 0);
         }
