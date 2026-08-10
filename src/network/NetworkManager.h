@@ -1,93 +1,106 @@
 #pragma once
 
+#include "NetworkProtocol.h"
+
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
-#include <functional>
-
-// SDK Version Control - Must be included BEFORE any other Windows headers
-#include <sdkddkver.h>
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0A00 // Windows 10
-#endif
-
-// Prevent Windows.h from defining min/max macros and reduce header bloat
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-
-// Include Winsock2 headers (winsock2.h includes windows.h internally)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
-#pragma comment(lib, "ws2_32.lib")
 
 namespace Archura {
 
-enum class PacketType : uint8_t {
-    Connect = 0,
-    Disconnect,
-    PlayerUpdate,
-    PlayerShoot,
-    WorldState
+using PacketType = Net::PacketType;
+using PlayerUpdatePacket = Net::PlayerUpdatePacket;
+using PlayerShootPacket = Net::PlayerShootPacket;
+
+enum class ConnectionState : std::uint8_t {
+    Stopped,
+    Listening,
+    Handshaking,
+    Connected,
+    ShuttingDown,
+    Failed
 };
 
-#pragma pack(push, 1)
-struct PacketHeader {
-    PacketType type;
-    uint32_t size; // Payload size
+enum class DisconnectReason : std::uint8_t {
+    None,
+    LocalShutdown,
+    PeerClosed,
+    PeerRequested,
+    TransportError,
+    ProtocolViolation,
+    HandshakeTimeout,
+    IdleTimeout,
+    Backpressure,
+    Unavailable
 };
 
-struct PlayerUpdatePacket {
-    uint32_t id;
-    float x, y, z;      // Position
-    float yaw, pitch;   // Rotation
+struct NetworkLimits {
+    std::size_t maxClients = 64;
+    std::size_t maxQueuedBytesPerPeer = 512U * 1024U;
+    std::uint32_t handshakeTimeoutMs = 10'000;
+    std::uint32_t idleTimeoutMs = 30'000;
 };
 
-struct PlayerShootPacket {
-    uint32_t id;        // Shooter ID
-    float originX, originY, originZ;
-    float dirX, dirY, dirZ;
-    int weaponType;
+struct NetworkStats {
+    std::uint64_t bytesReceived = 0;
+    std::uint64_t bytesSent = 0;
+    std::uint64_t framesReceived = 0;
+    std::uint64_t framesSent = 0;
+    std::uint64_t rejectedConnections = 0;
+    std::size_t connectedPeers = 0;
+    std::size_t queuedBytes = 0;
 };
-#pragma pack(pop)
 
-class NetworkManager {
+// SDL_net-backed framed TCP transport. Public methods are thread-safe. Socket I/O
+// happens only in UpdateServer/UpdateClient; callbacks are invoked after the
+// internal lock is released and may safely call NetworkManager again.
+class NetworkManager final {
 public:
     static NetworkManager& Get();
+
+    NetworkManager(const NetworkManager&) = delete;
+    NetworkManager& operator=(const NetworkManager&) = delete;
 
     bool Init();
     void Shutdown();
 
-    bool IsServer() const { return m_IsServer; }
-    bool IsConnected() const { return m_IsConnected; }
+    bool IsServer() const noexcept;
+    bool IsConnected() const noexcept;
+    ConnectionState GetState() const noexcept;
+    DisconnectReason GetLastDisconnectReason() const noexcept;
+    std::string GetLastError() const;
+    NetworkStats GetStats() const;
 
-    // Server functions
+    bool SetLimits(const NetworkLimits& limits);
+
     bool StartServer(int port);
     void UpdateServer();
 
-    // Client functions
-    bool Connect(const std::string& ip, int port);
+    // Returns true once the TCP transport is open. IsConnected becomes true only
+    // after the protocol handshake completes in UpdateClient.
+    bool Connect(const std::string& host, int port);
+    bool Reconnect();
     void UpdateClient();
-    void SendPlayerUpdate(const PlayerUpdatePacket& packet);
-    void SendPlayerShoot(const PlayerShootPacket& packet);
 
-    // Callbacks
+    bool SendPlayerUpdate(const PlayerUpdatePacket& packet);
+    bool SendPlayerShoot(const PlayerShootPacket& packet);
+    bool SendWorldState(const std::vector<std::uint8_t>& payload);
+
     void SetOnPlayerUpdate(std::function<void(const PlayerUpdatePacket&)> callback);
     void SetOnPlayerShoot(std::function<void(const PlayerShootPacket&)> callback);
+    void SetOnWorldState(
+        std::function<void(const std::vector<std::uint8_t>&)> callback);
+    void SetOnDisconnected(std::function<void(DisconnectReason)> callback);
 
 private:
-    NetworkManager() = default;
-    ~NetworkManager() = default;
+    NetworkManager();
+    ~NetworkManager();
 
-    bool m_Initialized = false;
-    bool m_IsServer = false;
-    bool m_IsConnected = false;
-    
-    SOCKET m_Socket = INVALID_SOCKET;
-    std::vector<SOCKET> m_ClientSockets;
-
-    std::function<void(const PlayerUpdatePacket&)> m_OnPlayerUpdate;
-    std::function<void(const PlayerShootPacket&)> m_OnPlayerShoot;
+    struct Impl;
+    std::unique_ptr<Impl> m_Impl;
 };
 
 } // namespace Archura

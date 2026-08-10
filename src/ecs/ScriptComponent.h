@@ -1,15 +1,5 @@
 #pragma once
 
-#include <string>
-
-namespace Archura {
-
-    struct ScriptComponent {
-        std::string ClassName;
-
-        ScriptComponent() = default;
-        ScriptComponent(const ScriptComponent&) = default;
-        ScriptComponent(const std::string& className) : ClassName(className) {}
-    };
-
-}
+// Compatibility include. ScriptComponent has one canonical definition so that
+// including this header together with Component.h cannot violate the ODR.
+#include "Component.h"

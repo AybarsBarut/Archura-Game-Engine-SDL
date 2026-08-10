@@ -326,22 +326,22 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
 
         auto* mr = e->AddComponent<MeshRenderer>();
         if (curMeshType == "sphere")
-            mr->mesh = Mesh::CreateSphere();
+            mr->SetMeshAsset(Mesh::CreateSphereShared());
         else if (curMeshType == "capsule")
-            mr->mesh = Mesh::CreateCapsule();
+            mr->SetMeshAsset(Mesh::CreateCapsuleShared());
         else if (curMeshType == "ramp")
-            mr->mesh = Mesh::CreateRamp();
+            mr->SetMeshAsset(Mesh::CreateRampShared());
         else if (curMeshType == "stairs")
-            mr->mesh = Mesh::CreateStairs();
+            mr->SetMeshAsset(Mesh::CreateStairsShared());
         else
-            mr->mesh = Mesh::CreateCube();
+            mr->SetMeshAsset(Mesh::CreateCubeShared());
 
         mr->color = {cr,cg,cb};
 
         if (!curTexPath.empty()) {
             std::string stem = std::filesystem::path(curTexPath).stem().string();
-            Texture* tex = TextureManager::Get().Load(stem, curTexPath);
-            if (tex) mr->texture = tex;
+            auto tex = TextureManager::Get().LoadShared(stem, curTexPath);
+            if (tex) mr->SetTextureAsset(std::move(tex));
         }
 
         auto* col = e->AddComponent<BoxCollider>();

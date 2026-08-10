@@ -1,5 +1,7 @@
 #include "Mesh.h"
 #include "Shader.h"
+#include "RenderThread.h"
+#include "../core/Logger.h"
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -10,10 +12,21 @@
 #include <iostream>
 #include <map>
 #include <algorithm>
+#include <limits>
+#include <utility>
 #include <ufbx.h>
 #include <fast_obj.h>
 
 namespace Archura {
+
+std::shared_ptr<Mesh> Mesh::CreateCubeShared(float size) { return std::shared_ptr<Mesh>(CreateCube(size)); }
+std::shared_ptr<Mesh> Mesh::CreatePlaneShared(float width, float height, float uvScale) { return std::shared_ptr<Mesh>(CreatePlane(width, height, uvScale)); }
+std::shared_ptr<Mesh> Mesh::CreateSphereShared(float radius, int segments) { return std::shared_ptr<Mesh>(CreateSphere(radius, segments)); }
+std::shared_ptr<Mesh> Mesh::CreateCapsuleShared(float radius, float height) { return std::shared_ptr<Mesh>(CreateCapsule(radius, height)); }
+std::shared_ptr<Mesh> Mesh::CreateStairsShared(float width, float height, float depth, int steps) { return std::shared_ptr<Mesh>(CreateStairs(width, height, depth, steps)); }
+std::shared_ptr<Mesh> Mesh::CreateRampShared(float width, float height, float depth) { return std::shared_ptr<Mesh>(CreateRamp(width, height, depth)); }
+std::shared_ptr<Mesh> Mesh::LoadFromOBJShared(const std::string& path) { return std::shared_ptr<Mesh>(LoadFromOBJ(path)); }
+std::shared_ptr<Mesh> Mesh::LoadFromFBXShared(const std::string& path) { return std::shared_ptr<Mesh>(LoadFromFBX(path)); }
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
     : m_Vertices(vertices)
@@ -26,26 +39,83 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>&
 }
 
 Mesh::~Mesh() {
+    Release();
+}
+
+Mesh::Mesh(Mesh&& other) noexcept {
+    *this = std::move(other);
+}
+
+Mesh& Mesh::operator=(Mesh&& other) noexcept {
+    if (this == &other) return *this;
+    Release();
+    m_Vertices = std::move(other.m_Vertices);
+    m_Indices = std::move(other.m_Indices);
+    m_VAO = std::exchange(other.m_VAO, 0);
+    m_VBO = std::exchange(other.m_VBO, 0);
+    m_EBO = std::exchange(other.m_EBO, 0);
+    m_VertexCapacityBytes = std::exchange(other.m_VertexCapacityBytes, 0);
+    m_InstanceVBO = std::exchange(other.m_InstanceVBO, 0);
+    m_InstanceCapacity = std::exchange(other.m_InstanceCapacity, 0);
+    m_InstancedSetup = std::exchange(other.m_InstancedSetup, false);
+    return *this;
+}
+
+void Mesh::Release() noexcept {
+    if ((m_VAO || m_VBO || m_EBO || m_InstanceVBO) && !RenderThread::IsCurrent()) {
+        ARCH_LOG_ERROR("Mesh destruction attempted outside the render thread; GPU deletion skipped");
+        m_VAO = m_VBO = m_EBO = m_InstanceVBO = 0;
+        return;
+    }
     if (m_VAO) glDeleteVertexArrays(1, &m_VAO);
     if (m_VBO) glDeleteBuffers(1, &m_VBO);
     if (m_EBO) glDeleteBuffers(1, &m_EBO);
+    if (m_InstanceVBO) glDeleteBuffers(1, &m_InstanceVBO);
+    m_VAO = m_VBO = m_EBO = m_InstanceVBO = 0;
+    m_VertexCapacityBytes = 0;
+    m_InstanceCapacity = 0;
+    m_InstancedSetup = false;
 }
 
 void Mesh::SetupMesh() {
+    if (!RenderThread::IsCurrent()) {
+        ARCH_LOG_ERROR("Mesh creation must run on the OpenGL render thread");
+        return;
+    }
+    constexpr size_t kBufferMax =
+        static_cast<size_t>(std::numeric_limits<GLsizeiptr>::max());
+    if (m_Vertices.size() > kBufferMax / sizeof(Vertex) ||
+        m_Indices.size() > kBufferMax / sizeof(unsigned int) ||
+        m_Vertices.size() > static_cast<size_t>(std::numeric_limits<unsigned int>::max()) ||
+        std::any_of(m_Indices.begin(), m_Indices.end(), [this](unsigned int index) {
+            return static_cast<size_t>(index) >= m_Vertices.size();
+        })) {
+        ARCH_LOG_ERROR("Mesh data exceeds OpenGL limits or contains an invalid index");
+        return;
+    }
     // VAO olustur
     glGenVertexArrays(1, &m_VAO);
     glGenBuffers(1, &m_VBO);
     glGenBuffers(1, &m_EBO);
+    if (!m_VAO || !m_VBO || !m_EBO) {
+        ARCH_LOG_ERROR("OpenGL failed to allocate mesh objects");
+        Release();
+        return;
+    }
 
     glBindVertexArray(m_VAO);
 
     // VBO - Vertex data
     glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-    glBufferData(GL_ARRAY_BUFFER, m_Vertices.size() * sizeof(Vertex), m_Vertices.data(), GL_STATIC_DRAW);
+    m_VertexCapacityBytes = m_Vertices.size() * sizeof(Vertex);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_VertexCapacityBytes),
+                 m_Vertices.empty() ? nullptr : m_Vertices.data(), GL_STATIC_DRAW);
 
     // EBO - Index data
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Indices.size() * sizeof(unsigned int), m_Indices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(m_Indices.size() * sizeof(unsigned int)),
+                 m_Indices.empty() ? nullptr : m_Indices.data(), GL_STATIC_DRAW);
 
     // Vertex attributes
     // Position
@@ -74,14 +144,19 @@ void Mesh::SetupMesh() {
     glVertexAttribPointer(9, MAX_BONE_INFLUENCE, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, m_Weights));
 
     glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 
 void Mesh::SetupInstancedAttributes() {
-    if (m_InstancedSetup) return;
+    if (m_InstancedSetup || !m_VAO) return;
 
     glBindVertexArray(m_VAO);
     glGenBuffers(1, &m_InstanceVBO);
+    if (!m_InstanceVBO) {
+        glBindVertexArray(0);
+        return;
+    }
     glBindBuffer(GL_ARRAY_BUFFER, m_InstanceVBO);
     
     // Mat4 4 tane vec4'ten olusur. Attribute location 4, 5, 6, 7 kullanacagiz.
@@ -94,11 +169,17 @@ void Mesh::SetupInstancedAttributes() {
     }
 
     glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     m_InstancedSetup = true;
 }
 
 void Mesh::DrawInstanced(Shader* shader, const std::vector<glm::mat4>& models) {
-    if (models.empty()) return;
+    if (models.empty() || !shader || !RenderThread::IsCurrent() || !m_VAO || !m_EBO) return;
+
+    constexpr size_t kGLsizeiMax = static_cast<size_t>(std::numeric_limits<GLsizei>::max());
+    if (m_Indices.empty() || m_Indices.size() > kGLsizeiMax || models.size() > kGLsizeiMax) {
+        return;
+    }
 
     if (shader) {
         shader->Bind();
@@ -112,6 +193,7 @@ void Mesh::DrawInstanced(Shader* shader, const std::vector<glm::mat4>& models) {
 
     if (!m_InstancedSetup) {
         SetupInstancedAttributes();
+        if (!m_InstancedSetup) return;
     }
 
     glBindVertexArray(m_VAO);
@@ -121,15 +203,24 @@ void Mesh::DrawInstanced(Shader* shader, const std::vector<glm::mat4>& models) {
     // Eger kapasite yeterliyse glBufferSubData, degilse glBufferData
     size_t dataSize = models.size() * sizeof(glm::mat4);
     if (dataSize > m_InstanceCapacity) {
-        glBufferData(GL_ARRAY_BUFFER, dataSize, models.data(), GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(dataSize),
+                     models.data(), GL_STREAM_DRAW);
         m_InstanceCapacity = dataSize;
     } else {
-        glBufferSubData(GL_ARRAY_BUFFER, 0, dataSize, models.data());
+        // Orphaning avoids waiting on a previous frame that is still consuming
+        // the instance buffer. It is preferable to an implicit CPU/GPU sync here.
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_InstanceCapacity),
+                     nullptr, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(dataSize),
+                        models.data());
     }
 
-    glDrawElementsInstanced(GL_TRIANGLES, static_cast<unsigned int>(m_Indices.size()), GL_UNSIGNED_INT, 0, static_cast<unsigned int>(models.size()));
+    glDrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(m_Indices.size()),
+                            GL_UNSIGNED_INT, nullptr,
+                            static_cast<GLsizei>(models.size()));
     
     glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     
     if (shader) {
         shader->SetInt("uUseInstancing", 0); // Reset
@@ -137,12 +228,16 @@ void Mesh::DrawInstanced(Shader* shader, const std::vector<glm::mat4>& models) {
 }
 
 void Mesh::Draw(Shader* shader) {
+    if (!shader || !RenderThread::IsCurrent() || !m_VAO || !m_EBO) return;
+    if (m_Indices.empty() ||
+        m_Indices.size() > static_cast<size_t>(std::numeric_limits<GLsizei>::max())) return;
     if (shader) {
         shader->Bind();
     }
 
     glBindVertexArray(m_VAO);
-    glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(m_Indices.size()), GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_Indices.size()),
+                   GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
 }
 
@@ -855,11 +950,25 @@ Mesh* Mesh::LoadFromFBX(const std::string& path) {
 
 
 void Mesh::UpdateVertices() {
+    if (!RenderThread::IsCurrent() || m_VBO == 0) return;
     glBindVertexArray(m_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-    // Note: glBufferSubData is faster than glBufferData for updates, assuming size hasn't changed.
-    // If we were rescheduling the size, we'd need glBufferData. For simple deformation, size is const.
-    glBufferSubData(GL_ARRAY_BUFFER, 0, m_Vertices.size() * sizeof(Vertex), m_Vertices.data());
+    if (m_Vertices.size() >
+        static_cast<size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(Vertex)) {
+        ARCH_LOG_ERROR("Mesh vertex update exceeds GLsizeiptr");
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+        return;
+    }
+    const size_t byteSize = m_Vertices.size() * sizeof(Vertex);
+    if (byteSize > m_VertexCapacityBytes) {
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(byteSize),
+                     m_Vertices.empty() ? nullptr : m_Vertices.data(), GL_DYNAMIC_DRAW);
+        m_VertexCapacityBytes = byteSize;
+    } else if (byteSize != 0) {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(byteSize),
+                        m_Vertices.data());
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 }

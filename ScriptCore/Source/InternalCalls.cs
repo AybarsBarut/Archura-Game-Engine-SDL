@@ -87,19 +87,19 @@ namespace Archura
         public static extern ulong Camera_Create(ref Vector3 position);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern void Camera_SetActive(ulong cameraPtr);
+        public static extern void Camera_SetActive(ulong cameraHandle);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern void Camera_GetPosition(ulong cameraPtr, out Vector3 position);
+        public static extern void Camera_GetPosition(ulong cameraHandle, out Vector3 position);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern void Camera_SetPosition(ulong cameraPtr, ref Vector3 position);
+        public static extern void Camera_SetPosition(ulong cameraHandle, ref Vector3 position);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern float Camera_GetPitch(ulong cameraPtr);
+        public static extern float Camera_GetPitch(ulong cameraHandle);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern float Camera_GetYaw(ulong cameraPtr);
+        public static extern float Camera_GetYaw(ulong cameraHandle);
         #endregion
     }
 

@@ -35,8 +35,9 @@ void main() {
     if (uHDREnabled) {
         // Pozlama + ACES tone map
         vec3 mapped = ACESFilmic(hdrColor * uExposure);
-        // Gamma duzeltme (sRGB = 2.2)
-        result = pow(mapped, vec3(1.0 / 2.2));
+        // Keep the shader output linear. GL_FRAMEBUFFER_SRGB performs the
+        // transfer function for an sRGB-capable default framebuffer.
+        result = mapped;
     } else {
         result = clamp(hdrColor, 0.0, 1.0);
     }

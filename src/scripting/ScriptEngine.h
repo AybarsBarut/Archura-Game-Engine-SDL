@@ -12,6 +12,8 @@ typedef struct _MonoImage MonoImage;
 
 namespace Archura {
 
+    struct EntityHandle;
+
     class ScriptEngine {
     public:
         static void Init();
@@ -23,8 +25,9 @@ namespace Archura {
         static void OnRuntimeStop();
 
         static bool ClassExists(const std::string& fullClassName);
-        static void OnCreateEntity(class Entity entity);
-        static void OnUpdateEntity(class Entity entity, float ts);
+        static bool OnCreateEntity(const class Entity& entity);
+        static bool OnUpdateEntity(const class Entity& entity, float ts);
+        static void OnDestroyEntity(EntityHandle entity);
 
         static MonoImage* GetCoreAssemblyImage();
 

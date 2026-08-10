@@ -234,8 +234,8 @@ private:
         std::string name;
         glm::vec3   pos       = {}, rot = {}, scale = {1,1,1};
         glm::vec3   color     = {1,1,1};
-        Mesh*       mesh      = nullptr;
-        Texture*    texture   = nullptr;
+        std::shared_ptr<Mesh> mesh;
+        std::shared_ptr<Texture> texture;
         bool        hasBc     = false;
         glm::vec3   bcSize    = {1,1,1}, bcCenter = {};
         bool        bcTrigger = false;

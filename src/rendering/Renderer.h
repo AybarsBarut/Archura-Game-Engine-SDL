@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <memory>
+#include <thread>
 
 namespace Archura {
 
@@ -25,6 +26,8 @@ public:
 
     void SetClearColor(const glm::vec4& color);
     void Clear();
+    void SetViewport(unsigned int width, unsigned int height);
+    bool IsOnRenderThread() const;
 
     // Stats
     struct RenderStats {
@@ -44,6 +47,10 @@ public:
 private:
     glm::vec4 m_ClearColor = glm::vec4(0.1f, 0.1f, 0.15f, 1.0f); // Koyu gri-mavi
     RenderStats m_Stats;
+    std::thread::id m_RenderThread;
+    unsigned int m_ViewportWidth = 0;
+    unsigned int m_ViewportHeight = 0;
+    bool m_Initialized = false;
 };
 
 } // namespace Archura

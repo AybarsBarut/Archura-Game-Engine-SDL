@@ -5,9 +5,11 @@
 #include "../ecs/Component.h"
 #include "../rendering/Mesh.h"
 #include "../rendering/Texture.h"
+#include "../rendering/RenderThread.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <cmath>
 
 namespace Archura {
 
@@ -16,35 +18,51 @@ RenderSystem::RenderSystem(Camera* camera)
 {
 }
 
-RenderSystem::~RenderSystem() = default;
+RenderSystem::~RenderSystem() {
+    Shutdown();
+}
 
 void RenderSystem::Init(Scene* scene) {
+    Shutdown();
     System::Init(scene);
     
     // Varsayilan shader'i yukle
     m_DefaultShader = std::make_unique<Shader>();
     if (!m_DefaultShader->LoadFromFile("assets/shaders/basic.vert", "assets/shaders/basic.frag")) {
         std::cerr << "Failed to load default shader!\n";
+        Shutdown();
+        return;
     }
 
     // Shadow Map Init
-    InitShadowMap();
+    if (!InitShadowMap()) {
+        Shutdown();
+        return;
+    }
 
     m_DepthShader = std::make_unique<Shader>();
     if (!m_DepthShader->LoadFromFile("assets/shaders/depth.vert", "assets/shaders/depth.frag")) {
         std::cerr << "Failed to load depth shader!\n";
+        Shutdown();
+        return;
     }
 
     // Debug Mesh (Cube)
-    m_DebugMesh = Mesh::CreateCube(1.0f);
+    m_DebugMesh = Mesh::CreateCubeShared(1.0f);
     
     m_Skybox = std::make_unique<Skybox>();
-    m_Skybox->Init();
+    if (!m_Skybox->Init()) {
+        Shutdown();
+        return;
+    }
+
+    m_Initialized = true;
 
     // std::cout << "RenderSystem initialized." << std::endl;
 }
 
-void RenderSystem::InitShadowMap() {
+bool RenderSystem::InitShadowMap() {
+    if (!RenderThread::IsCurrent()) return false;
     glGenFramebuffers(1, &m_DepthMapFBO);
     
     glGenTextures(1, &m_DepthMapTexture);
@@ -64,15 +82,22 @@ void RenderSystem::InitShadowMap() {
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
     
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    const bool complete =
+        glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (!complete)
         std::cerr << "Shadow Framebuffer is not complete!\n";
         
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if (!complete) {
+        ReleaseGPUResources();
+    }
+    return complete;
 }
 
 void RenderSystem::Update(float deltaTime) {
     (void)deltaTime;
-    if (!m_Scene || !m_Camera) return;
+    if (!m_Initialized || !RenderThread::IsCurrent() || !m_Scene || !m_Camera) return;
 
     // --- Shader Hot-Reload (sadece DEBUG modda dosyalar degistiyse yeniden derle) ---
 #ifndef NDEBUG
@@ -130,7 +155,8 @@ void RenderSystem::Update(float deltaTime) {
         auto* meshRenderer = entityPtr->GetComponent<MeshRenderer>();
         auto* transform = entityPtr->GetComponent<Transform>();
         
-        if (!meshRenderer || !transform || !meshRenderer->mesh) continue;
+        Mesh* renderMesh = meshRenderer ? meshRenderer->GetMesh() : nullptr;
+        if (!meshRenderer || !transform || !renderMesh) continue;
 
         // Frustum Culling
         glm::vec3 entityPos = transform->position;
@@ -141,12 +167,12 @@ void RenderSystem::Update(float deltaTime) {
         }
 
         // Batch bul veya olustur
-        Shader* targetShader = meshRenderer->shader ? meshRenderer->shader : m_DefaultShader.get();
-        Texture* targetTexture = meshRenderer->texture;
+        Shader* targetShader = meshRenderer->GetShader() ? meshRenderer->GetShader() : m_DefaultShader.get();
+        Texture* targetTexture = meshRenderer->GetTexture();
         
         bool found = false;
         for (auto& batch : batches) {
-            if (batch.mesh == meshRenderer->mesh && 
+            if (batch.mesh == renderMesh &&
                 batch.shader == targetShader && 
                 batch.texture == targetTexture &&
                 batch.color == meshRenderer->color) { // Renk de ayni olmali
@@ -159,7 +185,7 @@ void RenderSystem::Update(float deltaTime) {
         
         if (!found) {
             RenderBatch newBatch;
-            newBatch.mesh = meshRenderer->mesh;
+            newBatch.mesh = renderMesh;
             newBatch.shader = targetShader;
             newBatch.texture = targetTexture;
             newBatch.color = meshRenderer->color;
@@ -240,6 +266,7 @@ void RenderSystem::Update(float deltaTime) {
     // Simdilik list'teki type=0 olan ilk isigi alalim
     
     glm::vec3 lightPos = glm::vec3(0.0f);
+    glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
     bool hasDirLight = false;
     
     for (const auto& l : lights) {
@@ -248,6 +275,7 @@ void RenderSystem::Update(float deltaTime) {
              // But here we use a simple large ortho map.
              // Position is important for the View Matrix of the light.
              lightPos = l.position;
+             lightDirection = l.direction;
              // Ensure the "Light Position" is far enough back along the inverse direction vector
              // so it doesn't clip scene objects behind it if we use it as "Eye" pos.
              // But for Ortho, Z matters less except for Near/Far plane clipping.
@@ -272,8 +300,20 @@ void RenderSystem::Update(float deltaTime) {
         float orthoSize = 100.0f; 
         glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, near_plane, far_plane);
         
-        // Light View: Isik pozisyonundan (0,0,0)'a (veya sahne merkezine) bakis
-        glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        // Build a non-degenerate directional-light view. Using the entity
+        // position as the eye and world-up directly produced NaNs whenever the
+        // sun sat above the origin (forward parallel to up).
+        if (glm::dot(lightDirection, lightDirection) < 1.0e-8f) {
+            lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+        } else {
+            lightDirection = glm::normalize(lightDirection);
+        }
+        const glm::vec3 shadowCenter = viewPos;
+        lightPos = shadowCenter - lightDirection * 50.0f;
+        const glm::vec3 up = std::abs(glm::dot(lightDirection, glm::vec3(0, 1, 0))) > 0.99f
+                                 ? glm::vec3(0, 0, 1)
+                                 : glm::vec3(0, 1, 0);
+        glm::mat4 lightView = glm::lookAt(lightPos, shadowCenter, up);
         
         m_LightSpaceMatrix = lightProjection * lightView;
         
@@ -319,7 +359,7 @@ void RenderSystem::Update(float deltaTime) {
     // --- 2. Pass: Normal Rendering ---
     
     // Reset Viewport
-    glViewport(0, 0, window->GetWidth(), window->GetHeight());
+    glViewport(0, 0, window->GetFramebufferWidth(), window->GetFramebufferHeight());
     
     // 4. Draw Skybox first (optimized via Depth Funcl inside Skybox::Draw)
     // Find Skybox Component
@@ -327,8 +367,9 @@ void RenderSystem::Update(float deltaTime) {
         auto* skyComp = entityPtr->GetComponent<SkyboxComponent>();
         if (skyComp) {
             if (skyComp->shouldReload) {
-                m_Skybox->LoadCubemap(skyComp->facePaths);
-                skyComp->shouldReload = false;
+                if (m_Skybox->LoadCubemap(skyComp->facePaths)) {
+                    skyComp->shouldReload = false;
+                }
             }
              m_Skybox->Draw(*m_Camera, Engine::Get().GetWindow()->GetAspectRatio());
              break; // Only one skybox
@@ -406,6 +447,8 @@ void RenderSystem::DrawColliders() {
     // Save previous state (optional but good practice)
     GLint polygonMode[2];
     glGetIntegerv(GL_POLYGON_MODE, polygonMode);
+    const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    const GLboolean depthWasEnabled = glIsEnabled(GL_DEPTH_TEST);
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glDisable(GL_CULL_FACE); 
@@ -451,17 +494,35 @@ void RenderSystem::DrawColliders() {
     // Restore state
     glPolygonMode(GL_FRONT, polygonMode[0]);
     glPolygonMode(GL_BACK, polygonMode[1]);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
+    if (cullWasEnabled) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (depthWasEnabled) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
 }
 
 void RenderSystem::Shutdown() {
-    m_DefaultShader.reset();
-    if (m_DebugMesh) {
-        delete m_DebugMesh;
-        m_DebugMesh = nullptr;
+    if (!RenderThread::IsCurrent()) {
+        if (m_Initialized || m_DepthMapFBO || m_DepthMapTexture || m_DebugMesh) {
+            std::cerr << "RenderSystem::Shutdown must run on the render thread\n";
+        }
+        return;
     }
+    m_Initialized = false;
+    m_Skybox.reset();
+    m_DepthShader.reset();
+    m_DefaultShader.reset();
+    m_DebugMesh.reset();
+    ReleaseGPUResources();
     // std::cout << "RenderSystem shut down." << std::endl;
+}
+
+void RenderSystem::ReleaseGPUResources() noexcept {
+    if (m_DepthMapTexture) {
+        glDeleteTextures(1, &m_DepthMapTexture);
+        m_DepthMapTexture = 0;
+    }
+    if (m_DepthMapFBO) {
+        glDeleteFramebuffers(1, &m_DepthMapFBO);
+        m_DepthMapFBO = 0;
+    }
 }
 
 } // namespace Archura

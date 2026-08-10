@@ -221,6 +221,7 @@ builds/release/*.dll
 !README.md
 build_latest/
 build_latest_release/
+build_*/
 build_memory/
 build_memory_msvc/
 build_memory_msvc_release/
