@@ -23,7 +23,7 @@ public:
 
     // Texture'ı dosyadan yükle
     bool LoadFromFile(const std::string& path, bool generateMipmaps = true,
-                      bool srgb = true);
+                      bool srgb = false);
     
     // Solid color texture oluştur
     bool CreateSolid(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255);
