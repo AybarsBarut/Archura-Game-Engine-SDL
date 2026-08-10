@@ -1,5 +1,6 @@
 #include "ImGuiLayer.h"
 
+#include <glad/glad.h>
 #include <imgui.h>
 #include "../../external/imgui/backends/imgui_impl_sdl2.h"
 #include "../../external/imgui/backends/imgui_impl_opengl3.h"
@@ -47,7 +48,20 @@ namespace Archura {
 
     void ImGuiLayer::EndFrame() {
         ImGui::Render();
+
+        // Dear ImGui style/vertex colors are already authored for display.
+        // Do not run them through the framebuffer's linear-to-sRGB conversion.
+        // Preserve the caller's state so a future linear scene pass can still
+        // opt into GL_FRAMEBUFFER_SRGB without brightening the editor UI.
+        const GLboolean framebufferSrgbWasEnabled =
+            glIsEnabled(GL_FRAMEBUFFER_SRGB);
+        if (framebufferSrgbWasEnabled) {
+            glDisable(GL_FRAMEBUFFER_SRGB);
+        }
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (framebufferSrgbWasEnabled) {
+            glEnable(GL_FRAMEBUFFER_SRGB);
+        }
     }
 
 }

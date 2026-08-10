@@ -147,7 +147,7 @@ bool Texture::CreateSolid(unsigned char r, unsigned char g, unsigned char b, uns
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, 1, 1, 0, GL_RGBA,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, data);
 
     glBindTexture(GL_TEXTURE_2D, 0);
