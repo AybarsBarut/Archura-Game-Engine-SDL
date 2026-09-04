@@ -1,3 +1,5 @@
+#pragma once
+
 #include <SDL.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -11,7 +13,7 @@ public:
 
     void Update(); // Called once per frame (mouse delta calculation)
     void OnEvent(const SDL_Event& event); // Process events
-    void EndFrame(); // Cleanup (PreviousKeys update)
+    void EndFrame(); // Snapshot current keyboard state for edge queries
 
     // Keyboard
     bool IsKeyPressed(int keycode) const; // Uses SDL_Scancode as int
@@ -49,7 +51,8 @@ private:
 
     // Mouse Button State (1..5)
     bool m_MouseButtons[6];
+    bool m_MouseButtonsPressed[6];
+    bool m_MouseButtonsReleased[6];
 };
 
 } // namespace Archura
-

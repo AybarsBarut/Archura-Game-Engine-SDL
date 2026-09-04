@@ -37,6 +37,7 @@ private:
     static std::deque<Job> s_JobQueue;
     static std::mutex s_QueueMutex;
     static std::condition_variable s_Condition;
+    static std::condition_variable s_IdleCondition;
     static std::atomic<bool> s_Running;
     static std::atomic<uint32_t> s_ActiveJobs; // Tracks jobs currently running + in queue
 };

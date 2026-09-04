@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GraphicsAPI.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <thread>
@@ -18,7 +19,7 @@ public:
     Renderer() = default;
     ~Renderer() = default;
 
-    bool Init();
+    bool Init(GraphicsAPI api = GraphicsAPI::OpenGL);
     void Shutdown();
 
     void BeginFrame();
@@ -28,6 +29,7 @@ public:
     void Clear();
     void SetViewport(unsigned int width, unsigned int height);
     bool IsOnRenderThread() const;
+    GraphicsAPI GetGraphicsAPI() const { return m_GraphicsAPI; }
 
     // Stats
     struct RenderStats {
@@ -51,6 +53,7 @@ private:
     unsigned int m_ViewportWidth = 0;
     unsigned int m_ViewportHeight = 0;
     bool m_Initialized = false;
+    GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;
 };
 
 } // namespace Archura

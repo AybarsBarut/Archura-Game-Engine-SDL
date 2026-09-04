@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include "../rendering/GraphicsAPI.h"
 
 namespace Archura {
 
@@ -24,6 +25,8 @@ public:
         bool vsync = false;
         bool fullscreen = false;
         bool editorMode = true; // Editor UI'ı aktif mi?
+        GraphicsAPI graphicsAPI = GraphicsAPI::Auto;
+        bool allowGraphicsFallback = true;
     };
 
 public:
@@ -40,6 +43,7 @@ public:
 
     bool IsRunning() const { return m_Running; }
     bool IsEditorMode() const { return m_EditorMode; }
+    GraphicsAPI GetGraphicsAPI() const { return m_GraphicsAPI; }
 
 private:
     Engine() = default;
@@ -59,6 +63,7 @@ private:
 
     bool m_Running = false;
     bool m_EditorMode = true;
+    GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;
 };
 
 } // namespace Archura

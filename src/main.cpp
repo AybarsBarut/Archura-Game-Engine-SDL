@@ -1,5 +1,6 @@
 #define SDL_MAIN_HANDLED
 #include "core/Application.h"
+#include "rendering/GraphicsAPI.h"
 #include <iostream>
 #include <cstdio>
 #include <windows.h>
@@ -59,6 +60,15 @@ void LoadingWorker() {
 }
 
 int main(int argc, char** argv) {
+    Archura::GraphicsLaunchOptions graphicsOptions;
+    std::string graphicsError;
+    if (!Archura::ResolveGraphicsLaunchOptions(
+            argc, argv, "config/graphics_api.cfg", graphicsOptions,
+            graphicsError)) {
+        std::cerr << "GRAPHICS CONFIG ERROR: " << graphicsError << "\n";
+        return -1;
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SPLASH ERROR: SDL_Init Failed: " << SDL_GetError() << "\n";
         return -1;
@@ -200,7 +210,7 @@ int main(int argc, char** argv) {
     SDL_FlushEvent(SDL_QUIT);
 
     try {
-        auto app = std::make_unique<Archura::Application>();
+        auto app = std::make_unique<Archura::Application>(graphicsOptions);
         app->Run();
     } catch (const std::exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << std::endl;

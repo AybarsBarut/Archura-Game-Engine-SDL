@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../core/FrameTelemetry.h"
 #include "../ecs/System.h"
 #include "../rendering/Camera.h"
 #include "../rendering/Shader.h"
@@ -26,6 +27,10 @@ public:
 
     void SetCamera(Camera* camera) { m_Camera = camera; }
     Camera* GetCamera() const { return m_Camera; }
+    bool IsInitialized() const noexcept { return m_Initialized; }
+    SceneRenderCounters GetLastFrameCounters() const {
+        return m_LastFrameCounters;
+    }
 
     /**
      * @brief Override the view + projection matrices for one frame.
@@ -66,10 +71,11 @@ private:
     static constexpr unsigned int SHADOW_WIDTH = 2048;
     static constexpr unsigned int SHADOW_HEIGHT = 2048;
     std::unique_ptr<Shader> m_DepthShader;
-    glm::mat4 m_LightSpaceMatrix;
+    glm::mat4 m_LightSpaceMatrix{1.0f};
 
     std::unique_ptr<class Skybox> m_Skybox;
     bool m_Initialized = false;
+    SceneRenderCounters m_LastFrameCounters;
 };
 
 } // namespace Archura

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "FrameTelemetry.h"
 #include "Window.h"
+#include "../rendering/GraphicsAPI.h"
 #include <cstdint>
 #include <memory>
 
@@ -8,7 +10,7 @@ namespace Archura {
 
     class Application {
     public:
-        Application();
+        explicit Application(GraphicsLaunchOptions graphicsOptions = {});
         virtual ~Application();
 
         static Application& Get() { return *s_Instance; }
@@ -35,12 +37,14 @@ namespace Archura {
         class Scene* GetScene() const { return m_Scene.get(); } // Expose Scene
         class RenderSystem* GetRenderSystem() { return m_RenderSystem.get(); }
         class Camera* GetCamera() { return m_Camera.get(); } // Expose Camera
+        const FrameTelemetry& GetFrameTelemetry() const { return m_FrameTelemetry; }
 
     private:
         static Application* s_Instance;
         Window* m_Window; // Reference to Engine's window (owned by Engine)
         std::unique_ptr<class ImGuiLayer> m_ImGuiLayer;
         bool m_Running = true;
+        GraphicsLaunchOptions m_GraphicsOptions;
         
         // Tickrate Configuration (128 Hz fixed timestep)
         static constexpr float TICK_RATE = 128.0f;
@@ -57,6 +61,7 @@ namespace Archura {
         int m_FrameCount = 0;
         float m_CurrentFPS = 0.0f;
         float m_FPSLimit = 144.0f;
+        FrameTelemetry m_FrameTelemetry;
 
         // Game State (Moved from local Run scope)
         std::unique_ptr<class Scene> m_Scene; // Scene is now a member
@@ -82,8 +87,9 @@ namespace Archura {
         class Input* m_Input = nullptr;
         class Renderer* m_Renderer = nullptr;
         
-        // Player entity
-        class Entity* m_Player = nullptr;
+        // Generation-checked player identity. Resolve through Scene before use;
+        // editor deletion must never leave a cached raw pointer behind.
+        uint64_t m_PlayerHandleValue = 0;
         
         bool m_DevModeActive = true;
         bool m_IsPaused = false;

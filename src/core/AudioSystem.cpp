@@ -8,6 +8,8 @@
 #include <iostream>
 #include <filesystem>
 #include <vector> // Added vector
+#include <algorithm>
+#include <cmath>
 #include "../game/AudioSource.h"
 #include "../game/AudioSource.h"
 #include "../rendering/Camera.h"
@@ -36,6 +38,7 @@ void AudioSystem::Shutdown() {
     StopMusic();
     // Tum sesleri kapat
     mciSendString("close all", NULL, 0, NULL);
+    m_OneShotAliases.clear();
 }
 
 void AudioSystem::PlayMusic(const std::string& filename, bool loop) {
@@ -85,7 +88,8 @@ void AudioSystem::PlayOneShot(const std::string& filename) {
     
     // Dosyayi ac
     std::string cmdOpen = "open \"" + path + "\" type mpegvideo alias " + alias;
-    mciSendString(cmdOpen.c_str(), NULL, 0, NULL);
+    if (mciSendString(cmdOpen.c_str(), NULL, 0, NULL) != 0)
+        return;
 
     // Cal ve bitince otomatik kapat (notify kullanilabilir ama basitlik icin wait yapmiyoruz)
     // MCI'da "auto close" yok, bu yuzden surekli yeni alias acmak bellek sizintisina yol acabilir.
@@ -102,7 +106,10 @@ void AudioSystem::PlayOneShot(const std::string& filename) {
     ApplyVolume(alias, m_SFXVolume);
 
     std::string cmdPlay = "play " + alias;
-    mciSendString(cmdPlay.c_str(), NULL, 0, NULL);
+    if (mciSendString(cmdPlay.c_str(), NULL, 0, NULL) == 0)
+        m_OneShotAliases.push_back(alias);
+    else
+        mciSendString(("close " + alias).c_str(), NULL, 0, NULL);
 }
 
 void AudioSystem::StopMusic() {
@@ -114,7 +121,7 @@ void AudioSystem::StopMusic() {
 }
 
 void AudioSystem::SetMasterVolume(float volume) {
-    m_MasterVolume = volume;
+    m_MasterVolume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 1.0f;
     // Muzik sesini guncelle
     if (!m_CurrentMusicAlias.empty()) {
         ApplyVolume(m_CurrentMusicAlias, m_MusicVolume);
@@ -122,19 +129,22 @@ void AudioSystem::SetMasterVolume(float volume) {
 }
 
 void AudioSystem::SetMusicVolume(float volume) {
-    m_MusicVolume = volume;
+    m_MusicVolume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 1.0f;
     if (!m_CurrentMusicAlias.empty()) {
         ApplyVolume(m_CurrentMusicAlias, m_MusicVolume);
     }
 }
 
 void AudioSystem::SetSFXVolume(float volume) {
-    m_SFXVolume = volume;
+    m_SFXVolume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 1.0f;
 }
 
 void AudioSystem::ApplyVolume(const std::string& alias, float channelVolume) {
     // MCI volume range: 0 to 1000
-    int finalVol = static_cast<int>(m_MasterVolume * channelVolume * 1000.0f);
+    const float safeChannelVolume = std::isfinite(channelVolume)
+                                        ? std::clamp(channelVolume, 0.0f, 1.0f)
+                                        : 0.0f;
+    int finalVol = static_cast<int>(m_MasterVolume * safeChannelVolume * 1000.0f);
     if (finalVol < 0) finalVol = 0;
     if (finalVol > 1000) finalVol = 1000;
 
@@ -143,6 +153,7 @@ void AudioSystem::ApplyVolume(const std::string& alias, float channelVolume) {
 }
 
 void AudioSystem::Update(Scene* scene, Camera* camera) {
+    CleanupFinishedOneShots();
     if (!scene || !camera) return;
 
     for (auto& entityPtr : scene->GetEntities()) {
@@ -153,7 +164,7 @@ void AudioSystem::Update(Scene* scene, Camera* camera) {
         if (!transform) continue;
 
         // Calculate distance
-        float distance = glm::distance(transform->position, camera->GetPosition());
+        const float distance = glm::distance(transform->position, camera->GetPosition());
 
         // Linear attenuation
         // minDistance: volume = max
@@ -161,17 +172,22 @@ void AudioSystem::Update(Scene* scene, Camera* camera) {
         
         float volume = source->volume;
         
-        if (distance < source->minDistance) {
-            volume = source->volume;
-        } else if (distance > source->maxDistance) {
+        const float minDistance = std::max(0.0f, source->minDistance);
+        const float maxDistance = std::max(minDistance, source->maxDistance);
+        const float sourceVolume = std::isfinite(source->volume)
+                                       ? std::clamp(source->volume, 0.0f, 1.0f)
+                                       : 0.0f;
+        if (distance < minDistance || maxDistance <= minDistance) {
+            volume = sourceVolume;
+        } else if (distance > maxDistance) {
             volume = 0.0f;
         } else {
-            float pct = 1.0f - ((distance - source->minDistance) / (source->maxDistance - source->minDistance));
-            volume = source->volume * pct;
+            const float pct = 1.0f - ((distance - minDistance) / (maxDistance - minDistance));
+            volume = sourceVolume * std::clamp(pct, 0.0f, 1.0f);
         }
         
         // MCI uses volume 0-1000
-        int finalVol = (int)(volume * 1000.0f);
+        int finalVol = static_cast<int>(std::clamp(volume, 0.0f, 1.0f) * 1000.0f);
         if (finalVol < 0) finalVol = 0;
         if (finalVol > 1000) finalVol = 1000;
 
@@ -205,6 +221,7 @@ void AudioSystem::Play(AudioSource* source, const std::string& alias) {
         if (source->loop) cmdPlay += " repeat";
         mciSendString(cmdPlay.c_str(), NULL, 0, NULL);
         source->isPlaying = true;
+        source->runtimeAlias = alias;
     } else {
          std::cerr << "AudioSource Open Error: " << path << std::endl;
     }
@@ -213,9 +230,28 @@ void AudioSystem::Play(AudioSource* source, const std::string& alias) {
 void AudioSystem::Stop(AudioSource* source) {
     if (!source || source->runtimeAlias.empty()) return;
 
-    std::string cmd = "stop " + source->runtimeAlias;
+    const std::string alias = source->runtimeAlias;
+    std::string cmd = "stop " + alias;
     mciSendStringA(cmd.c_str(), NULL, 0, NULL);
+    mciSendStringA(("close " + alias).c_str(), NULL, 0, NULL);
+    source->runtimeAlias.clear();
     source->isPlaying = false;
+}
+
+void AudioSystem::CleanupFinishedOneShots() {
+    char mode[32]{};
+    for (auto it = m_OneShotAliases.begin(); it != m_OneShotAliases.end();) {
+        const std::string query = "status " + *it + " mode";
+        const MCIERROR error = mciSendStringA(query.c_str(), mode, sizeof(mode), nullptr);
+        const bool playing = error == 0 && std::string(mode) == "playing";
+        if (!playing) {
+            mciSendStringA(("close " + *it).c_str(), nullptr, 0, nullptr);
+            it = m_OneShotAliases.erase(it);
+        } else {
+            ++it;
+        }
+        mode[0] = '\0';
+    }
 }
 
 } // namespace Archura

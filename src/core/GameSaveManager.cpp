@@ -13,6 +13,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <system_error>
+#include <cmath>
+#include <cstdlib>
 
 namespace Archura {
 
@@ -231,6 +233,7 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
             meshType  = "cube";
         }
         file << "      \"mesh_type\": \"" << meshType << "\",\n";
+        file << "      \"has_mesh_renderer\": " << (mr ? "true" : "false") << ",\n";
 
         if (!modelPath.empty())
             file << "      \"model_path\": \"" << EscapeJson(modelPath) << "\",\n";
@@ -291,181 +294,265 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
 
-    if (size <= 0) return false;
+    constexpr std::streamsize kMaxProjectSize = 32 * 1024 * 1024;
+    if (size <= 0 || size > kMaxProjectSize) {
+        std::cerr << "[SaveManager] Gecersiz proje boyutu\n";
+        return false;
+    }
 
     std::string content;
     content.resize(static_cast<size_t>(size));
     if (!file.read(content.data(), size)) return false;
     file.close();
 
-    {
-        const auto& entities = scene->GetEntities();
-        std::vector<uint32_t> toDelete;
-        toDelete.reserve(entities.size());
-        for (const auto& ePtr : entities) {
-            if (!IsSystemEntity(ePtr->GetName()))
-                toDelete.push_back(ePtr->GetID());
-        }
-        for (auto id : toDelete)
-            scene->DestroyEntity(id);
+    const size_t first = content.find_first_not_of(" \t\r\n");
+    const size_t last = content.find_last_not_of(" \t\r\n");
+    if (first == std::string::npos || content[first] != '{' ||
+        last == std::string::npos || content[last] != '}' ||
+        content.find("\"entities\"") == std::string::npos) {
+        std::cerr << "[SaveManager] Gecersiz proje formati\n";
+        return false;
     }
 
-    std::string_view remaining(content);
+    struct LoadedEntity {
+        std::string name;
+        std::string meshType = "cube";
+        std::string texturePath;
+        glm::vec3 position{0.0f};
+        glm::vec3 rotation{0.0f};
+        glm::vec3 scale{1.0f};
+        glm::vec3 color{1.0f};
+        glm::vec3 colliderSize{1.0f};
+        glm::vec3 colliderCenter{0.0f};
+        glm::vec3 lightColor{1.0f};
+        int colliderShape = 0;
+        int lightType = 0;
+        float lightIntensity = 1.0f;
+        float lightRange = 20.0f;
+        bool hasMeshRenderer = true; // backwards-compatible with old saves
+        bool hasCollider = false;
+        bool colliderTrigger = false;
+        bool hasLight = false;
+        bool hasColliderShape = false;
+    };
+
+    std::vector<LoadedEntity> loaded;
+    loaded.reserve(64);
+    LoadedEntity current;
     bool inEntities = false;
+    bool entitiesClosed = false;
+    bool currentOpen = false;
+    bool parseError = false;
 
-    std::string  curName;
-    std::string  curMeshType = "cube";
-    std::string  curTexPath;
-    float px=0,py=0,pz=0, rx=0,ry=0,rz=0, sx=1,sy=1,sz=1;
-    float cr=1,cg=1,cb=1;
-    float colX=1,colY=1,colZ=1;
-    float colCenterX=0,colCenterY=0,colCenterZ=0;
-    int colShape=0;
-    bool hasColliderShape=false, colTrigger=false;
-    bool  hasLight = false;
-    int   lightType = 0;
-    float lr=1,lg=1,lb=1, lInt=1, lRange=20;
-
-    auto applyEntity = [&]() {
-        if (curName.empty()) return;
-        Entity* e = scene->CreateEntity(curName);
-        auto* t = e->GetComponent<Transform>();
-        if (t) { t->position={px,py,pz}; t->rotation={rx,ry,rz}; t->scale={sx,sy,sz}; }
-
-        auto* mr = e->AddComponent<MeshRenderer>();
-        if (curMeshType == "sphere")
-            mr->SetMeshAsset(Mesh::CreateSphereShared());
-        else if (curMeshType == "capsule")
-            mr->SetMeshAsset(Mesh::CreateCapsuleShared());
-        else if (curMeshType == "ramp")
-            mr->SetMeshAsset(Mesh::CreateRampShared());
-        else if (curMeshType == "stairs")
-            mr->SetMeshAsset(Mesh::CreateStairsShared());
-        else
-            mr->SetMeshAsset(Mesh::CreateCubeShared());
-
-        mr->color = {cr,cg,cb};
-
-        if (!curTexPath.empty()) {
-            std::string stem = std::filesystem::path(curTexPath).stem().string();
-            auto tex = TextureManager::Get().LoadShared(stem, curTexPath);
-            if (tex) mr->SetTextureAsset(std::move(tex));
+    auto parseArr3 = [&](std::string_view line, std::string_view key,
+                         glm::vec3& value) -> bool {
+        const std::string quotedKey = "\"" + std::string(key) + "\"";
+        const size_t kp = line.find(quotedKey);
+        if (kp == std::string_view::npos) return true;
+        const size_t open = line.find('[', kp);
+        if (open == std::string_view::npos) return false;
+        const char* begin = line.data() + open + 1;
+        const char* end = line.data() + line.size();
+        char* next = nullptr;
+        float values[3]{};
+        const char* cursor = begin;
+        for (float& component : values) {
+            while (cursor < end && (*cursor == ' ' || *cursor == '\t' || *cursor == ',')) ++cursor;
+            component = std::strtof(cursor, &next);
+            if (next == cursor || !std::isfinite(component)) return false;
+            cursor = next;
         }
+        value = glm::vec3(values[0], values[1], values[2]);
+        return true;
+    };
 
-        auto* col = e->AddComponent<BoxCollider>();
-        col->size = {colX, colY, colZ};
-        col->center = {colCenterX, colCenterY, colCenterZ};
-        col->shape = hasColliderShape
-                         ? static_cast<BoxCollider::Shape>(colShape == 1 ? 1 : 0)
-                         : (curMeshType == "ramp" ? BoxCollider::Shape::Ramp
-                                                   : BoxCollider::Shape::Box);
-        col->isTrigger = colTrigger;
-
-        if (hasLight) {
-            auto* lc = e->AddComponent<LightComponent>();
-            lc->type      = static_cast<LightComponent::Type>(lightType);
-            lc->color     = {lr,lg,lb};
-            lc->intensity = lInt;
-            lc->range     = lRange;
+    auto parseFloat = [&](std::string_view line, std::string_view key,
+                          float& target) -> bool {
+        const std::string value = ExtractJsonField(line, key);
+        if (value.empty()) return false;
+        try {
+            size_t consumed = 0;
+            const float parsed = std::stof(value, &consumed);
+            if (consumed != value.size() || !std::isfinite(parsed)) return false;
+            target = parsed;
+            return true;
+        } catch (...) {
+            return false;
         }
     };
 
-    auto resetCurrent = [&]() {
-        curName.clear(); curMeshType = "cube"; curTexPath.clear();
-        px=0; py=0; pz=0; rx=0; ry=0; rz=0; sx=1; sy=1; sz=1;
-        cr=1; cg=1; cb=1; colX=1; colY=1; colZ=1;
-        colCenterX=0; colCenterY=0; colCenterZ=0;
-        colShape=0; hasColliderShape=false; colTrigger=false;
-        hasLight=false; lightType=0; lr=1; lg=1; lb=1; lInt=1; lRange=20;
+    auto parseInt = [&](std::string_view line, std::string_view key,
+                        int& target) -> bool {
+        const std::string value = ExtractJsonField(line, key);
+        if (value.empty()) return false;
+        try {
+            size_t consumed = 0;
+            const int parsed = std::stoi(value, &consumed);
+            if (consumed != value.size()) return false;
+            target = parsed;
+            return true;
+        } catch (...) {
+            return false;
+        }
     };
 
-    auto parseArr3 = [](std::string_view line, std::string_view key, float& a, float& b, float& c) {
-        size_t kp = line.find(key);
-        if (kp == std::string_view::npos || kp == 0 || line[kp-1] != '"') return;
-        size_t p = line.find('[', kp);
-        if (p == std::string_view::npos) return; ++p;
-        
-        const char* str = line.data() + p;
-        const char* endStr = line.data() + line.length();
-        char* nextPtr;
-        
-        float va = std::strtof(str, &nextPtr);
-        if (str == nextPtr) return;
-        str = nextPtr;
-        while(str < endStr && (*str == ' ' || *str == '\t' || *str == ',')) ++str;
-        
-        float vb = std::strtof(str, &nextPtr);
-        if (str == nextPtr) return;
-        str = nextPtr;
-        while(str < endStr && (*str == ' ' || *str == '\t' || *str == ',')) ++str;
-        
-        float vc = std::strtof(str, nullptr);
-        
-        a = va; b = vb; c = vc;
-    };
-
+    std::string_view remaining(content);
     while (!remaining.empty()) {
-        size_t eol = remaining.find('\n');
-        std::string_view line;
-        if (eol == std::string_view::npos) {
-            line = remaining;
-            remaining = {};
-        } else {
-            line = remaining.substr(0, eol);
-            remaining = remaining.substr(eol + 1);
-        }
+        const size_t eol = remaining.find('\n');
+        std::string_view line = eol == std::string_view::npos
+                                    ? remaining
+                                    : remaining.substr(0, eol);
+        remaining = eol == std::string_view::npos
+                        ? std::string_view{}
+                        : remaining.substr(eol + 1);
+        const size_t start = line.find_first_not_of(" \t\r");
+        if (start == std::string_view::npos) continue;
+        line = line.substr(start);
+        const size_t end = line.find_last_not_of(" \t\r");
+        if (end != std::string_view::npos) line = line.substr(0, end + 1);
 
-        size_t startPos = line.find_first_not_of(" \t\r");
-        if (startPos == std::string_view::npos) continue;
-        line = line.substr(startPos);
-        
-        size_t endPos = line.find_last_not_of(" \t\r");
-        if (endPos != std::string_view::npos) {
-            line = line.substr(0, endPos + 1);
+        if (line.find("\"entities\"") != std::string_view::npos) {
+            inEntities = true;
+            continue;
         }
-
-        if (line.find("\"entities\"") != std::string_view::npos) { inEntities = true; continue; }
         if (!inEntities) continue;
 
-        if (line == "{") { resetCurrent(); }
-        else if (line == "}" || line == "},") { applyEntity(); curName.clear(); }
-        else {
-            if (line.find("\"name\":")      != std::string_view::npos) curName     = ExtractJsonField(line, "name");
-            if (line.find("\"mesh_type\":") != std::string_view::npos) curMeshType = ExtractJsonField(line, "mesh_type");
-            if (line.find("\"texture\":")   != std::string_view::npos) curTexPath  = ExtractJsonField(line, "texture");
-            if (line.find("\"light_type\":") != std::string_view::npos) {
-                hasLight = true;
-                std::string v = ExtractJsonField(line, "light_type");
-                if (!v.empty()) try { lightType = std::stoi(v); } catch (...) {}
-            }
-            if (line.find("\"light_intensity\":") != std::string_view::npos) {
-                std::string v = ExtractJsonField(line, "light_intensity");
-                if (!v.empty()) try { lInt = std::stof(v); } catch (...) {}
-            }
-            if (line.find("\"light_range\":") != std::string_view::npos) {
-                std::string v = ExtractJsonField(line, "light_range");
-                if (!v.empty()) try { lRange = std::stof(v); } catch (...) {}
-            }
-            if (line.find("\"collider_shape\":") != std::string_view::npos) {
-                std::string v = ExtractJsonField(line, "collider_shape");
-                if (!v.empty()) try {
-                    colShape = std::stoi(v);
-                    hasColliderShape = true;
-                } catch (...) {}
-            }
-            if (line.find("\"collider_trigger\":") != std::string_view::npos)
-                colTrigger = line.find("true") != std::string_view::npos;
-
-            parseArr3(line, "position",  px, py, pz);
-            parseArr3(line, "rotation",  rx, ry, rz);
-            parseArr3(line, "scale",     sx, sy, sz);
-            parseArr3(line, "color",     cr, cg, cb);
-            if (line.find("\"collider\":") != std::string_view::npos)
-                parseArr3(line, "collider", colX, colY, colZ);
-            if (line.find("\"collider_center\":") != std::string_view::npos)
-                parseArr3(line, "collider_center", colCenterX, colCenterY, colCenterZ);
-            parseArr3(line, "light_color", lr, lg, lb);
+        if (line == "]") {
+            entitiesClosed = true;
+            continue;
         }
+        if (entitiesClosed) continue;
+
+        if (line == "{") {
+            if (currentOpen || loaded.size() >= 100000) {
+                parseError = true;
+                break;
+            }
+            current = LoadedEntity{};
+            currentOpen = true;
+            continue;
+        }
+        if (line == "}" || line == "},") {
+            if (!currentOpen || current.name.empty()) {
+                parseError = true;
+                break;
+            }
+            loaded.push_back(current);
+            currentOpen = false;
+            continue;
+        }
+        if (!currentOpen) continue;
+
+        if (line.find("\"name\":") != std::string_view::npos) {
+            current.name = ExtractJsonField(line, "name");
+            if (current.name.empty()) parseError = true;
+        }
+        if (line.find("\"mesh_type\":") != std::string_view::npos) {
+            current.meshType = ExtractJsonField(line, "mesh_type");
+            if (current.meshType != "cube" && current.meshType != "sphere" &&
+                current.meshType != "capsule" && current.meshType != "ramp" &&
+                current.meshType != "stairs") parseError = true;
+        }
+        if (line.find("\"has_mesh_renderer\":") != std::string_view::npos) {
+            const std::string value = ExtractJsonField(line, "has_mesh_renderer");
+            if (value == "true") current.hasMeshRenderer = true;
+            else if (value == "false") current.hasMeshRenderer = false;
+            else parseError = true;
+        }
+        if (line.find("\"texture\":") != std::string_view::npos)
+            current.texturePath = ExtractJsonField(line, "texture");
+        if (line.find("\"light_type\":") != std::string_view::npos) {
+            current.hasLight = parseInt(line, "light_type", current.lightType);
+            if (!current.hasLight) parseError = true;
+        }
+        if (line.find("\"light_intensity\":") != std::string_view::npos &&
+            !parseFloat(line, "light_intensity", current.lightIntensity)) parseError = true;
+        if (line.find("\"light_range\":") != std::string_view::npos &&
+            !parseFloat(line, "light_range", current.lightRange)) parseError = true;
+        if (line.find("\"collider_shape\":") != std::string_view::npos) {
+            current.hasColliderShape = parseInt(line, "collider_shape", current.colliderShape);
+            if (!current.hasColliderShape) parseError = true;
+        }
+        if (line.find("\"collider_trigger\":") != std::string_view::npos) {
+            const std::string value = ExtractJsonField(line, "collider_trigger");
+            if (value == "true") current.colliderTrigger = true;
+            else if (value == "false") current.colliderTrigger = false;
+            else parseError = true;
+        }
+        if (line.find("\"collider\":") != std::string_view::npos) {
+            current.hasCollider = parseArr3(line, "collider", current.colliderSize);
+            if (!current.hasCollider) parseError = true;
+        }
+        if (!parseArr3(line, "position", current.position) ||
+            !parseArr3(line, "rotation", current.rotation) ||
+            !parseArr3(line, "scale", current.scale) ||
+            !parseArr3(line, "color", current.color) ||
+            !parseArr3(line, "collider_center", current.colliderCenter) ||
+            !parseArr3(line, "light_color", current.lightColor)) parseError = true;
+    }
+
+    if (!entitiesClosed || currentOpen || parseError || loaded.size() > 100000) {
+        std::cerr << "[SaveManager] Proje parse edilemedi; sahne degistirilmedi\n";
+        return false;
+    }
+
+    // Only mutate the scene after the complete file has been read and
+    // validated. A malformed save can no longer erase the current scene.
+    std::vector<EntityID> toDelete;
+    for (const auto& ePtr : scene->GetEntities()) {
+        if (!IsSystemEntity(ePtr->GetName())) toDelete.push_back(ePtr->GetID());
+    }
+    for (EntityID id : toDelete) scene->DestroyEntity(id);
+
+    std::vector<EntityHandle> created;
+    created.reserve(loaded.size());
+    try {
+        for (const LoadedEntity& data : loaded) {
+            Entity* e = scene->CreateEntity(data.name);
+            created.push_back(e->GetHandle());
+            if (auto* t = e->GetComponent<Transform>()) {
+                t->position = data.position;
+                t->rotation = data.rotation;
+                t->scale = data.scale;
+            }
+
+            if (data.hasMeshRenderer) {
+                auto* mr = e->AddComponent<MeshRenderer>();
+                if (data.meshType == "sphere") mr->SetMeshAsset(Mesh::CreateSphereShared());
+                else if (data.meshType == "capsule") mr->SetMeshAsset(Mesh::CreateCapsuleShared());
+                else if (data.meshType == "ramp") mr->SetMeshAsset(Mesh::CreateRampShared());
+                else if (data.meshType == "stairs") mr->SetMeshAsset(Mesh::CreateStairsShared());
+                else mr->SetMeshAsset(Mesh::CreateCubeShared());
+                mr->color = data.color;
+                if (!data.texturePath.empty()) {
+                    const std::string stem = std::filesystem::path(data.texturePath).stem().string();
+                    auto tex = TextureManager::Get().LoadShared(stem, data.texturePath);
+                    if (tex) mr->SetTextureAsset(std::move(tex));
+                }
+            }
+
+            if (data.hasCollider) {
+                auto* col = e->AddComponent<BoxCollider>();
+                col->size = data.colliderSize;
+                col->center = data.colliderCenter;
+                col->shape = data.hasColliderShape
+                                 ? static_cast<BoxCollider::Shape>(data.colliderShape == 1 ? 1 : 0)
+                                 : (data.meshType == "ramp" ? BoxCollider::Shape::Ramp
+                                                               : BoxCollider::Shape::Box);
+                col->isTrigger = data.colliderTrigger;
+            }
+            if (data.hasLight) {
+                auto* lc = e->AddComponent<LightComponent>();
+                lc->type = static_cast<LightComponent::Type>(data.lightType);
+                lc->color = data.lightColor;
+                lc->intensity = data.lightIntensity;
+                lc->range = data.lightRange;
+            }
+        }
+    } catch (...) {
+        for (EntityHandle handle : created) scene->DestroyEntity(handle);
+        std::cerr << "[SaveManager] Entity olusturma basarisiz\n";
+        return false;
     }
 
     std::cout << "[SaveManager] Proje yuklendi: " << filePath << std::endl;
@@ -479,10 +566,13 @@ bool GameSaveManager::DeleteProject(const std::string& filePath) {
     std::error_code ec;
     if (std::filesystem::exists(filePath, ec)) {
         std::filesystem::remove(filePath, ec);
+        if (ec) return false;
         std::cout << "[SaveManager] Proje silindi: " << filePath << std::endl;
+    } else if (ec) {
+        return false;
     }
     RefreshProjects();
-    return true;
+    return !std::filesystem::exists(filePath, ec) && !ec;
 }
 
 } // namespace Archura

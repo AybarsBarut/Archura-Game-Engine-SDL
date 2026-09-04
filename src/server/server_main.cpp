@@ -115,6 +115,7 @@ int main(int argc, char** argv) {
     
     // Parse command line arguments
     g_Config.ParseCommandLine(argc, argv);
+    if (g_Config.helpRequested) return 0;
     
     // Validate configuration
     if (!g_Config.Validate()) {
@@ -138,6 +139,10 @@ int main(int argc, char** argv) {
     std::cout << "Starting network listener on port " << g_Config.port << "...\n";
     NetworkLimits limits;
     limits.maxClients = static_cast<std::size_t>(g_Config.maxPlayers);
+    limits.handshakeTimeoutMs = static_cast<std::uint32_t>(
+        std::max(0.1f, g_Config.connectionTimeout) * 1000.0f);
+    limits.idleTimeoutMs = static_cast<std::uint32_t>(
+        std::max(0.1f, g_Config.clientTimeout) * 1000.0f);
     auto& network = NetworkManager::Get();
     if (!network.SetLimits(limits) || !network.StartServer(g_Config.port)) {
         std::cerr << "Failed to start network listener: " << network.GetLastError() << '\n';

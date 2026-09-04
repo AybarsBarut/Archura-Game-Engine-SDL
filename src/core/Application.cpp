@@ -68,6 +68,7 @@
 #include "../../external/imgui/backends/imgui_impl_sdl2.h"
 
 #include <cstdio>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -86,7 +87,10 @@ static void LogStartup(const char *message) {
 
 Application *Application::s_Instance = nullptr;
 
-Application::Application() { s_Instance = this; }
+Application::Application(GraphicsLaunchOptions graphicsOptions)
+    : m_GraphicsOptions(graphicsOptions) {
+  s_Instance = this;
+}
 
 Application::~Application() {
   // Every owner that can issue glDelete* must die while the main context is
@@ -113,7 +117,7 @@ Application::~Application() {
   TextureManager::Get().Clear();
   ResourceManager::Get().Clear();
 
-  m_Player = nullptr;
+  m_PlayerHandleValue = 0;
   m_Window = nullptr;
   m_EngineWindow = nullptr;
   m_Input = nullptr;
@@ -155,6 +159,8 @@ bool Application::Init() {
   config.windowHeight = 1080;
   config.vsync = false;
   config.fullscreen = false;
+  config.graphicsAPI = m_GraphicsOptions.requestedAPI;
+  config.allowGraphicsFallback = m_GraphicsOptions.allowFallback;
 
   config.fullscreen = false;
 
@@ -384,6 +390,11 @@ void Application::Run() {
 
   m_RenderSystem = std::make_unique<RenderSystem>(m_Camera.get());
   m_RenderSystem->Init(m_Scene.get());
+  if (!m_RenderSystem->IsInitialized()) {
+    std::cerr << "[Render] RenderSystem initialization failed\n";
+    m_Running = false;
+    return;
+  }
 
   LogStartup("RenderSystem initialized");
 
@@ -397,7 +408,9 @@ void Application::Run() {
 
   // Initialize HUDRenderer as member
   m_HUDRenderer = std::make_unique<HUDRenderer>();
-  m_HUDRenderer->Init();
+  if (!m_HUDRenderer->Init()) {
+    std::cerr << "[HUD] HUD renderer initialization failed; continuing without HUD\n";
+  }
 
   // Initialize Editor as member
   m_Editor = std::make_unique<Editor>();
@@ -416,10 +429,11 @@ void Application::Run() {
   });
 
   // Create Player entity (store as member)
-  m_Player = m_Scene->CreateEntity("Player");
-  auto *weapon = m_Player->AddComponent<Weapon>();
+  Entity *player = m_Scene->CreateEntity("Player");
+  m_PlayerHandleValue = player->GetHandle().Value();
+  auto *weapon = player->AddComponent<Weapon>();
   weapon->InitInventory();
-  auto *playerHealth = m_Player->AddComponent<Health>();
+  auto *playerHealth = player->AddComponent<Health>();
   playerHealth->max = 100.0f;
   playerHealth->current = 100.0f;
 
@@ -552,6 +566,8 @@ void Application::Run() {
 
       m_Accumulator += frameTime;
 
+      const auto cpuWorkStart = std::chrono::steady_clock::now();
+
       // Fixed timestep update loop (128 Hz)
       // Process input and events (ONCE PER FRAME)
       ProcessInput();
@@ -574,6 +590,16 @@ void Application::Run() {
 
       // Render with interpolation
       RenderFrame(alpha);
+
+      const auto cpuWorkEnd = std::chrono::steady_clock::now();
+      const std::chrono::duration<double, std::milli> cpuWorkDuration =
+          cpuWorkEnd - cpuWorkStart;
+      m_FrameTelemetry.RecordCpuWorkMilliseconds(cpuWorkDuration.count());
+
+      // Swap/vsync and the limiter are deliberately outside the CPU-work
+      // telemetry scope.
+      m_EngineWindow->Update();
+      m_Input->EndFrame();
 
       LimitFrameRate(frameStartTime);
 
@@ -686,7 +712,25 @@ void Application::ProcessInput() {
 }
 
 void Application::UpdateGameLogic(float dt) {
+  // Socket I/O is deliberately performed on the main/owner thread. Pump the
+  // active transport every fixed tick so client handshakes, heartbeats and
+  // queued frames can progress while the game is running.
+  auto &network = NetworkManager::Get();
+  if (network.IsServer()) {
+    network.UpdateServer();
+  } else if (network.GetState() == ConnectionState::Handshaking ||
+             network.GetState() == ConnectionState::Connected) {
+    network.UpdateClient();
+  }
+
   if (!m_IsPaused) {
+    // Weapon progression is fixed-tick state. Advance it exactly once before
+    // FPSController evaluates held-fire for this tick.
+    WeaponSystem weaponSystem;
+    weaponSystem.Update(m_Scene.get(),
+                        EntityHandle::FromValue(m_PlayerHandleValue), m_Input,
+                        m_Camera.get(), m_ProjectileSystem.get(), dt);
+
     m_FPSController->Update(m_Input, m_Scene.get(), dt,
                             m_ProjectileSystem.get(), m_PhysicsSystem.get());
 #ifdef ARCHURA_DEBUG_PHYSICS
@@ -732,6 +776,27 @@ void Application::RenderFrame(float /*alpha*/) {
   }
 
   m_RenderSystem->Update(TICK_INTERVAL);
+
+  // Draw the gameplay HUD after the 3-D pass and before ImGui overlays.
+  if (m_HUDRenderer && !editorEditMode && m_Window) {
+    m_HUDRenderer->BeginHUD(static_cast<float>(m_Window->GetWidth()),
+                            static_cast<float>(m_Window->GetHeight()));
+    m_HUDRenderer->DrawCrosshair();
+    const Entity* player = m_Scene->GetEntity(
+        EntityHandle::FromValue(m_PlayerHandleValue));
+    if (player) {
+      if (const auto* health = player->GetComponent<Health>()) {
+        m_HUDRenderer->DrawHealthBar(health->current, health->max, 32.0f,
+                                     32.0f, 220.0f, 18.0f);
+      }
+      if (const auto* weapon = player->GetComponent<Weapon>()) {
+        m_HUDRenderer->DrawAmmoCounter(weapon->stats.currentMag,
+                                       weapon->stats.magSize, 32.0f,
+                                       58.0f);
+      }
+    }
+    m_HUDRenderer->EndHUD();
+  }
 #ifdef ARCHURA_DEBUG_PHYSICS
   if (m_DebugPhysicsSystem) {
     m_DebugPhysicsSystem->Render(activeView, activeProjection);
@@ -763,9 +828,6 @@ void Application::RenderFrame(float /*alpha*/) {
 
   m_ImGuiLayer->EndFrame();
   m_Renderer->EndFrame();
-
-  m_EngineWindow->Update();
-  m_Input->EndFrame();
 }
 
 void Application::LimitFrameRate(float frameStartTime) {

@@ -98,6 +98,7 @@ private:
     std::vector<ParticleInstance> m_GPUData;   // GPU'ya gidecek buffer
     std::vector<ParticleCPU>      m_CPUData;   // Fizik icin CPU yan verisi
     std::vector<int>              m_Alive;      // Yasayan parcacik indeksleri (pool)
+    std::vector<int>              m_FreeIndices; // Reusable dead-particle slots
 
     // OpenGL kaynaklar
     unsigned int m_QuadVAO    = 0;

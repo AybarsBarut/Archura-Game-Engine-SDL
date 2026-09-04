@@ -54,6 +54,13 @@ struct NetworkStats {
     std::size_t queuedBytes = 0;
 };
 
+struct NetworkRuntimeSnapshot {
+    ConnectionState state = ConnectionState::Stopped;
+    DisconnectReason lastDisconnectReason = DisconnectReason::None;
+    NetworkStats stats;
+    std::string lastError;
+};
+
 // SDL_net-backed framed TCP transport. Public methods are thread-safe. Socket I/O
 // happens only in UpdateServer/UpdateClient; callbacks are invoked after the
 // internal lock is released and may safely call NetworkManager again.
@@ -73,6 +80,7 @@ public:
     DisconnectReason GetLastDisconnectReason() const noexcept;
     std::string GetLastError() const;
     NetworkStats GetStats() const;
+    NetworkRuntimeSnapshot GetRuntimeSnapshot() const;
 
     bool SetLimits(const NetworkLimits& limits);
 

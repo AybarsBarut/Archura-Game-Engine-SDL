@@ -4,6 +4,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <random>
 #include <algorithm>
+#include <cmath>
 
 namespace Archura {
 
@@ -26,6 +27,12 @@ GPUParticleSystem::~GPUParticleSystem() {
 }
 
 void GPUParticleSystem::Init(int maxParticles) {
+    if (m_Initialized)
+        Shutdown();
+    if (maxParticles <= 0) {
+        ARCH_LOG_ERROR("[GPUParticleSystem] maxParticles must be positive");
+        return;
+    }
     m_MaxParticles = maxParticles;
 
     // Shader yükle
@@ -83,6 +90,7 @@ void GPUParticleSystem::Init(int maxParticles) {
     m_GPUData.reserve(maxParticles);
     m_CPUData.reserve(maxParticles);
     m_Alive.reserve(maxParticles);
+    m_FreeIndices.reserve(maxParticles);
 
     m_Initialized = true;
     ARCH_LOG_INFO("[GPUParticleSystem] Baslatildi. MaxParticles=" + std::to_string(maxParticles));
@@ -98,7 +106,16 @@ void GPUParticleSystem::Emit(const EmitterConfig& cfg) {
     if (!m_Initialized) return;
 
     for (int i = 0; i < cfg.count; ++i) {
-        if ((int)m_GPUData.size() >= m_MaxParticles) break; // Havuz dolu
+        int index = -1;
+        if (!m_FreeIndices.empty()) {
+            index = m_FreeIndices.back();
+            m_FreeIndices.pop_back();
+        } else {
+            if (static_cast<int>(m_GPUData.size()) >= m_MaxParticles) break;
+            index = static_cast<int>(m_GPUData.size());
+            m_GPUData.emplace_back();
+            m_CPUData.emplace_back();
+        }
 
         // Rastgele yayilim yonu (normal etrafinda)
         glm::vec3 rnd = glm::normalize(glm::vec3(
@@ -126,26 +143,29 @@ void GPUParticleSystem::Emit(const EmitterConfig& cfg) {
         cpu.startLifetime = lifetime;
         cpu.alive         = true;
 
-        m_GPUData.push_back(inst);
-        m_CPUData.push_back(cpu);
-        m_Alive.push_back(static_cast<int>(m_GPUData.size()) - 1);
+        m_GPUData[static_cast<size_t>(index)] = inst;
+        m_CPUData[static_cast<size_t>(index)] = cpu;
+        m_Alive.push_back(index);
     }
 }
 
 void GPUParticleSystem::Update(float deltaTime) {
     if (!m_Initialized) return;
 
-    std::vector<int> stillAlive;
-    stillAlive.reserve(m_Alive.size());
+    if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) return;
 
-    for (int idx : m_Alive) {
-        auto& cpu = m_CPUData[idx];
-        auto& gpu = m_GPUData[idx];
+    for (size_t aliveIndex = 0; aliveIndex < m_Alive.size();) {
+        const int idx = m_Alive[aliveIndex];
+        auto& cpu = m_CPUData[static_cast<size_t>(idx)];
+        auto& gpu = m_GPUData[static_cast<size_t>(idx)];
 
         cpu.lifetime -= deltaTime;
         if (cpu.lifetime <= 0.0f) {
             cpu.alive = false;
-            continue; // Bu parcacigi at
+            m_FreeIndices.push_back(idx);
+            m_Alive[aliveIndex] = m_Alive.back();
+            m_Alive.pop_back();
+            continue;
         }
 
         // Fizik
@@ -155,16 +175,7 @@ void GPUParticleSystem::Update(float deltaTime) {
         // Yasam orani
         gpu.lifeFrac = glm::clamp(cpu.lifetime / cpu.startLifetime, 0.0f, 1.0f);
 
-        stillAlive.push_back(idx);
-    }
-
-    m_Alive = std::move(stillAlive);
-
-    // Olenleri havuzdan temizle: veri vektorleri buyube bilir ama hizli kalsin
-    // Basit strateji: yasayan parcaciklari sikistir
-    if (m_Alive.empty()) {
-        m_GPUData.clear();
-        m_CPUData.clear();
+        ++aliveIndex;
     }
 }
 
@@ -215,6 +226,10 @@ void GPUParticleSystem::Shutdown() {
     if (m_QuadVBO) { glDeleteBuffers(1, &m_QuadVBO); m_QuadVBO = 0; }
     if (m_InstVBO) { glDeleteBuffers(1, &m_InstVBO); m_InstVBO = 0; }
     m_Shader.reset();
+    m_GPUData.clear();
+    m_CPUData.clear();
+    m_Alive.clear();
+    m_FreeIndices.clear();
     m_Initialized = false;
 }
 

@@ -82,6 +82,21 @@ if not exist "!CHOSEN_PATH!" (
     exit /b 1
 )
 
+echo.
+echo  Grafik API:
+echo    [1] Otomatik ^(onerilen^)
+echo    [2] Vulkan ^(bu build'de yoksa OpenGL'e geri doner^)
+echo    [3] OpenGL ^(uyumluluk^)
+set /p GRAPHICS_CHOICE=  Seciminiz [1]:
+if "!GRAPHICS_CHOICE!"=="" set GRAPHICS_CHOICE=1
+if "!GRAPHICS_CHOICE!"=="2" (
+    set ARCHURA_GRAPHICS_CHOICE=vulkan
+) else if "!GRAPHICS_CHOICE!"=="3" (
+    set ARCHURA_GRAPHICS_CHOICE=opengl
+) else (
+    set ARCHURA_GRAPHICS_CHOICE=auto
+)
+
 echo  Assets senkronize ediliyor...
 xcopy assets build\bin\Release\assets /E /I /Y /Q >nul
 
@@ -90,7 +105,7 @@ echo  ------------------------------------------
 echo    Calistiriliyor...
 echo  ------------------------------------------
 cd build\bin\Release
-ArchuraEngine.exe
+ArchuraEngine.exe --graphics=!ARCHURA_GRAPHICS_CHOICE!
 cd ..\..\..
 
 echo.
