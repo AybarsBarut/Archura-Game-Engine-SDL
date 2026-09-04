@@ -191,6 +191,8 @@ if not exist "%SRC_EXE%" (
     pause & goto MENU
 )
 
+call :SELECT_GRAPHICS_API
+
 echo  Assets senkronize ediliyor...
 xcopy assets build\bin\Debug\assets /E /I /Y /Q >nul
 
@@ -200,7 +202,7 @@ echo.
 echo  ------------------------------------------
 echo    Calistiriliyor (Debug + konsol)
 echo  ------------------------------------------
-ArchuraEngine.exe --console
+ArchuraEngine.exe --console --graphics=%ARCHURA_GRAPHICS_CHOICE%
 set EXIT_CODE=%ERRORLEVEL%
 cd ..\..\..
 
@@ -209,6 +211,19 @@ echo  Motor kapatildi. Cikis kodu: %EXIT_CODE%
 echo.
 pause
 goto MENU
+
+:SELECT_GRAPHICS_API
+echo.
+echo  Grafik API:
+echo    [1] Otomatik ^(onerilen^)
+echo    [2] Vulkan ^(bu build'de yoksa OpenGL'e geri doner^)
+echo    [3] OpenGL ^(uyumluluk^)
+set /p GRAPHICS_CHOICE=  Seciminiz [1]:
+if "%GRAPHICS_CHOICE%"=="" set GRAPHICS_CHOICE=1
+if "%GRAPHICS_CHOICE%"=="2" set ARCHURA_GRAPHICS_CHOICE=vulkan& exit /b 0
+if "%GRAPHICS_CHOICE%"=="3" set ARCHURA_GRAPHICS_CHOICE=opengl& exit /b 0
+set ARCHURA_GRAPHICS_CHOICE=auto
+exit /b 0
 
 :END
 endlocal

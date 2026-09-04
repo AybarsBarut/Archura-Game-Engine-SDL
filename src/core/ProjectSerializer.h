@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include "../ecs/Entity.h"
 
@@ -20,6 +21,9 @@ namespace Archura {
     private:
         // Helper to serialize an entity to a JSON-like string
         static std::string SerializeEntity(Entity* entity);
+        static std::string EscapeJson(std::string_view value);
+        static std::string ExtractJsonField(std::string_view line,
+                                             std::string_view key);
     };
 
 } // namespace Archura

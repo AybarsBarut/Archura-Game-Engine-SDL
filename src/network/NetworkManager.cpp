@@ -419,12 +419,18 @@ struct NetworkManager::Impl {
                         std::function<void(const PlayerShootPacket&)> shootCallback,
                         std::function<void(const std::vector<std::uint8_t>&)> worldCallback) {
         for (const auto& event : pending) {
-            if (event.type == Net::PacketType::PlayerUpdate && updateCallback) {
-                updateCallback(event.update);
-            } else if (event.type == Net::PacketType::PlayerShoot && shootCallback) {
-                shootCallback(event.shoot);
-            } else if (event.type == Net::PacketType::WorldState && worldCallback) {
-                worldCallback(event.worldState);
+            try {
+                if (event.type == Net::PacketType::PlayerUpdate && updateCallback) {
+                    updateCallback(event.update);
+                } else if (event.type == Net::PacketType::PlayerShoot && shootCallback) {
+                    shootCallback(event.shoot);
+                } else if (event.type == Net::PacketType::WorldState && worldCallback) {
+                    worldCallback(event.worldState);
+                }
+            } catch (const std::exception& error) {
+                std::cerr << "[Network] callback exception: " << error.what() << '\n';
+            } catch (...) {
+                std::cerr << "[Network] callback threw an unknown exception\n";
             }
         }
     }
@@ -534,6 +540,16 @@ std::string NetworkManager::GetLastError() const {
 NetworkStats NetworkManager::GetStats() const {
     std::lock_guard<std::mutex> lock(m_Impl->mutex);
     return m_Impl->stats;
+}
+
+NetworkRuntimeSnapshot NetworkManager::GetRuntimeSnapshot() const {
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+    NetworkRuntimeSnapshot snapshot;
+    snapshot.state = m_Impl->state;
+    snapshot.lastDisconnectReason = m_Impl->lastDisconnect;
+    snapshot.stats = m_Impl->stats;
+    snapshot.lastError = m_Impl->lastError;
+    return snapshot;
 }
 
 bool NetworkManager::SetLimits(const NetworkLimits& limits) {
@@ -809,7 +825,14 @@ void NetworkManager::UpdateClient() {
     m_Impl->DispatchEvents(std::move(events), std::move(updateCallback),
                            std::move(shootCallback), std::move(worldCallback));
     if (disconnectCallback) {
-        disconnectCallback(disconnected);
+        try {
+            disconnectCallback(disconnected);
+        } catch (const std::exception& error) {
+            std::cerr << "[Network] disconnect callback exception: "
+                      << error.what() << '\n';
+        } catch (...) {
+            std::cerr << "[Network] disconnect callback threw an unknown exception\n";
+        }
     }
 #endif
 }

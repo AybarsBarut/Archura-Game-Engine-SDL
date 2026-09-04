@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../rendering/GraphicsAPI.h"
 #include <string>
 #include <memory>
 
@@ -24,14 +25,17 @@ public:
         unsigned int height;
         bool vsync;
         bool fullscreen;
+        GraphicsAPI graphicsAPI;
 
         WindowProps(
             const std::string& title = "Archura Engine",
             unsigned int width = 1920,
             unsigned int height = 1080,
             bool vsync = false,
-            bool fullscreen = false
-        ) : title(title), width(width), height(height), vsync(vsync), fullscreen(fullscreen) {}
+            bool fullscreen = false,
+            GraphicsAPI graphicsAPI = GraphicsAPI::OpenGL
+        ) : title(title), width(width), height(height), vsync(vsync),
+            fullscreen(fullscreen), graphicsAPI(graphicsAPI) {}
     };
 
 public:
@@ -44,7 +48,10 @@ public:
 
     void Update();
     bool ShouldClose() const;
-    bool IsValid() const { return m_Window != nullptr && m_Context != nullptr && m_Initialized; }
+    bool IsValid() const {
+        return m_Window != nullptr && m_Initialized &&
+               (m_GraphicsAPI != GraphicsAPI::OpenGL || m_Context != nullptr);
+    }
     
     void SetVSync(bool enabled);
     bool IsVSync() const { return m_VSync; }
@@ -64,6 +71,7 @@ public:
 
     SDL_Window* GetNativeWindow() const { return m_Window; }
     void* GetContext() const { return m_Context; }
+    GraphicsAPI GetGraphicsAPI() const { return m_GraphicsAPI; }
     
     void SetShouldClose(bool value) { m_ShouldClose = value; }
 
@@ -88,6 +96,7 @@ private:
     bool m_Fullscreen;
     bool m_ShouldClose = false;
     bool m_Initialized = false;
+    GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;
 
     // Performans tracking
     float m_DeltaTime;

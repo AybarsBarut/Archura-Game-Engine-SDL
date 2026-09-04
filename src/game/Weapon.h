@@ -7,6 +7,7 @@
 namespace Archura {
 
 class Entity;
+struct EntityHandle;
 class Input;
 class Scene;
 class Camera;
@@ -68,8 +69,13 @@ struct Weapon : public Component {
         // Grenade
         inventory[WeaponType::Grenade] = { 100.0f, 1.0f, 20.0f, 1, 1, 5, 0.0f, 0.0f, false };
         
-        // Set default
-        SwitchWeapon(WeaponType::Rifle);
+        // Select the freshly initialized preset directly. SwitchWeapon would
+        // first save the component's generic pre-inventory stats over the
+        // rifle entry because Rifle is also the default enum value.
+        type = WeaponType::Rifle;
+        stats = inventory[WeaponType::Rifle];
+        isReloading = false;
+        reloadTimer = 0.0f;
     }
 
     void SwitchWeapon(WeaponType newType) {
@@ -97,9 +103,12 @@ public:
     ~WeaponSystem() = default;
 
     void Update(Entity* entity, Input* input, Scene* scene, Camera* camera, ProjectileSystem* projectileSystem, float deltaTime);
+    void Update(Scene* scene, EntityHandle entity, Input* input, Camera* camera,
+                ProjectileSystem* projectileSystem, float deltaTime);
     
     // Silah aksiyonlari
-    bool TryShoot(Weapon* weapon, Entity* entity, Scene* scene, Camera* camera, ProjectileSystem* projectileSystem);
+    bool TryShoot(Weapon* weapon, Entity* entity, Scene* scene, Camera* camera,
+                  ProjectileSystem* projectileSystem);
     void Reload(Weapon* weapon);
     void UpdateRecoil(Weapon* weapon, Camera* camera, float deltaTime);
 

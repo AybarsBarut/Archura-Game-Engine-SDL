@@ -210,6 +210,8 @@ builds/release/*.meta
 
 # Artifact / dokumantasyon markdown dosyalari
 *.md
+!.gauntlet/
+!.gauntlet/*.md
 
 # Build arsiv klasoru - EXE,  meta ve DLL'ler izlenmez
 builds/debug/*.exe
@@ -221,6 +223,7 @@ builds/release/*.dll
 !README.md
 build_latest/
 build_latest_release/
+/build-codex-graphics-api/
 build_*/
 build_memory/
 build_memory_msvc/
@@ -231,3 +234,4 @@ compile_commands.json
 .cache/
 .clangd
 
+.ai/

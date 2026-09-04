@@ -46,7 +46,13 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     add_compile_options(/W4 /MP /wd4201)
 else()
-    add_compile_options(-O3 -march=native -ffast-math -flto)
+    # Keep Debug numerics and portability intact. Fast-math can turn malformed
+    # input into undefined behaviour; native CPU tuning also makes binaries
+    # unusable on older/other machines. Apply only safe optimizations to Release.
+    add_compile_options(
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:Release>:-flto>
+    )
 endif()
 
 # Output Directories
@@ -185,6 +191,8 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/core/DeveloperConsole.cpp"
     "src/core/ResourceManager.cpp"
     "src/core/Logger.cpp"
+    "src/core/threading/JobSystem.cpp"
+    "src/core/FrameTelemetry.cpp"
     "src/core/memory/MemoryTracker.cpp"
     "src/core/ProjectSerializer.cpp"
     "src/core/GameSaveManager.cpp"
@@ -212,10 +220,12 @@ file(GLOB_RECURSE CLIENT_SOURCES
 file(GLOB_RECURSE CLIENT_HEADERS
     "src/core/Engine.h"
     "src/core/Application.h"
+    "src/core/FrameTelemetry.h"
     "src/core/Window.h"
     "src/core/ImGuiLayer.h"
     "src/core/AudioSystem.h"
     "src/core/memory/*.h"
+    "src/core/threading/*.h"
     "src/rendering/*.h"
     "src/input/*.h"
     "src/scripting/*.h"
@@ -394,6 +404,92 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(ArchuraGraphicsAPISelectionTests
+        tests/GraphicsAPISelectionTests.cpp
+        src/rendering/GraphicsAPI.cpp
+    )
+    target_include_directories(ArchuraGraphicsAPISelectionTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME Archura.Rendering.GraphicsAPISelection
+             COMMAND ArchuraGraphicsAPISelectionTests)
+
+    add_executable(ArchuraWeaponProgressionTests
+        tests/WeaponProgressionTests.cpp
+        src/ecs/Component.cpp
+        src/ecs/Entity.cpp
+        src/game/Weapon.cpp
+    )
+    target_include_directories(ArchuraWeaponProgressionTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+        ${SDL2_INCLUDE_DIR}
+    )
+    add_test(NAME Archura.Weapon.Progression COMMAND ArchuraWeaponProgressionTests)
+
+    add_executable(ArchuraJobSystemTests
+        tests/JobSystemTests.cpp
+        src/core/threading/JobSystem.cpp
+    )
+    target_include_directories(ArchuraJobSystemTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME Archura.Core.JobSystem COMMAND ArchuraJobSystemTests)
+
+    add_executable(ArchuraProjectSerializerTests
+        tests/ProjectSerializerTests.cpp
+        src/core/ProjectSerializer.cpp
+        src/ecs/Component.cpp
+        src/ecs/Entity.cpp
+    )
+    target_include_directories(ArchuraProjectSerializerTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+    )
+    add_test(NAME Archura.Core.ProjectSerializer COMMAND ArchuraProjectSerializerTests)
+
+    add_executable(ArchuraServerConfigTests
+        tests/ServerConfigTests.cpp
+        src/network/ServerConfig.cpp
+    )
+    target_include_directories(ArchuraServerConfigTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME Archura.Network.ServerConfig COMMAND ArchuraServerConfigTests)
+
+    add_executable(ArchuraGameplayScrollTests
+        tests/GameplayScrollTests.cpp
+        src/game/FPSController.cpp
+        src/input/Input.cpp
+        src/rendering/Camera.cpp
+    )
+    target_include_directories(ArchuraGameplayScrollTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+        ${SDL2_INCLUDE_DIR}
+    )
+    add_test(NAME Archura.Gameplay.Scroll COMMAND ArchuraGameplayScrollTests)
+
+    add_executable(ArchuraInputMouseButtonTests
+        tests/InputMouseButtonTests.cpp
+        src/input/Input.cpp
+    )
+    target_include_directories(ArchuraInputMouseButtonTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+        ${SDL2_INCLUDE_DIR}
+    )
+    add_test(NAME Archura.Input.MouseButtons COMMAND ArchuraInputMouseButtonTests)
+
+    add_executable(ArchuraFrameTelemetryTests
+        tests/FrameTelemetryTests.cpp
+        src/core/FrameTelemetry.cpp
+    )
+    target_include_directories(ArchuraFrameTelemetryTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME Archura.Core.FrameTelemetry COMMAND ArchuraFrameTelemetryTests)
+
     add_executable(ArchuraNetworkProtocolTests
         tests/network/NetworkProtocolTests.cpp
         src/network/NetworkProtocol.cpp
@@ -415,6 +511,20 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME ArchuraNetworkNoBackendTests COMMAND ArchuraNetworkNoBackendTests)
+
+    add_executable(ArchuraNetworkConsoleTests
+        tests/network/NetworkConsoleTests.cpp
+        src/network/NetworkConsole.cpp
+        src/network/NetworkManager.cpp
+        src/network/NetworkProtocol.cpp
+    )
+    target_include_directories(ArchuraNetworkConsoleTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_compile_definitions(ArchuraNetworkConsoleTests PRIVATE
+        ARCHURA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    add_test(NAME Archura.Network.Console COMMAND ArchuraNetworkConsoleTests)
 endif()
 
 if(ARCHURA_BUILD_MEMORY_BENCHMARKS)
@@ -489,6 +599,7 @@ endif()
 # ============================================
 add_executable(ArchuraLauncher
     src/launcher/Launcher.cpp
+    src/rendering/GraphicsAPI.cpp
 )
 
 target_include_directories(ArchuraLauncher PRIVATE

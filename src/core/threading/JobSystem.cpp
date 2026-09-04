@@ -8,12 +8,16 @@ std::vector<std::thread> JobSystem::s_WorkerThreads;
 std::deque<JobSystem::Job> JobSystem::s_JobQueue;
 std::mutex JobSystem::s_QueueMutex;
 std::condition_variable JobSystem::s_Condition;
+std::condition_variable JobSystem::s_IdleCondition;
 std::atomic<bool> JobSystem::s_Running = false;
 std::atomic<uint32_t> JobSystem::s_ActiveJobs = 0;
 
 void JobSystem::Init() {
-    uint32_t numCores = std::thread::hardware_concurrency();
-    uint32_t numWorkers = std::max(1u, numCores - 1);
+    if (s_Running)
+        return;
+
+    const uint32_t numCores = std::thread::hardware_concurrency();
+    const uint32_t numWorkers = numCores > 1 ? numCores - 1 : 1;
 
     s_Running = true;
 
@@ -27,6 +31,9 @@ void JobSystem::Init() {
 }
 
 void JobSystem::Shutdown() {
+    if (!s_Running && s_WorkerThreads.empty())
+        return;
+
     s_Running = false;
     
     // Wake up all threads
@@ -42,6 +49,9 @@ void JobSystem::Shutdown() {
 }
 
 void JobSystem::Execute(const JobSystem::Job& job) {
+    if (!job || !s_Running)
+        return;
+
     s_ActiveJobs++;
     
     {
@@ -60,10 +70,10 @@ void JobSystem::Dispatch(uint32_t jobCount, uint32_t groupSize, const std::funct
     
     for (uint32_t i = 0; i < jobCount; ++i) {
          // Copy args by value to lambda
-        Execute([i, job]() {
+        Execute([i, groupSize, job]() {
             JobSystem::JobDispatchArgs args;
             args.jobIndex = i;
-            args.groupIndex = 0;
+            args.groupIndex = i / groupSize;
             job(args);
         });
     }
@@ -74,13 +84,14 @@ bool JobSystem::IsBusy() {
 }
 
 void JobSystem::Wait() {
-    while (IsBusy()) {
-        std::this_thread::yield();
-    }
+    std::unique_lock<std::mutex> lock(s_QueueMutex);
+    s_IdleCondition.wait(lock, [] {
+        return s_ActiveJobs.load() == 0 && s_JobQueue.empty();
+    });
 }
 
 void JobSystem::WorkerThread() {
-    while (s_Running) {
+    while (true) {
         JobSystem::Job job;
         {
             std::unique_lock<std::mutex> lock(s_QueueMutex);
@@ -90,16 +101,21 @@ void JobSystem::WorkerThread() {
                 return;
             }
             
-                continue;
-            
             job = s_JobQueue.front();
             s_JobQueue.pop_front();
         }
         
         // Execute Job
-        job();
+        try {
+            job();
+        } catch (const std::exception& e) {
+            std::cerr << "[JobSystem] Job exception: " << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "[JobSystem] Job threw an unknown exception\n";
+        }
         
         s_ActiveJobs--;
+        s_IdleCondition.notify_all();
     }
 }
 

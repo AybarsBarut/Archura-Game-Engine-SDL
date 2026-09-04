@@ -5,6 +5,7 @@
 #include <fstream>
 #include <cctype>
 #include <map>
+#include <exception>
 
 
 namespace Archura {
@@ -92,7 +93,13 @@ namespace Archura {
                 Print("[Console] '" + resolvedCommand + "' requires debug.cheats 1");
                 return;
             }
-            cmdPtr->Execute(args);
+            try {
+                cmdPtr->Execute(args);
+            } catch (const std::exception& e) {
+                Print("[Console] Command failed: " + std::string(e.what()));
+            } catch (...) {
+                Print("[Console] Command failed: unknown exception");
+            }
             return;
         }
 
@@ -305,13 +312,23 @@ namespace Archura {
         file << "// Archura FPS Engine - Configuration File\n";
         file << "// Auto-generated config\n\n";
 
+        auto escapeValue = [](const std::string& value) {
+            std::string escaped;
+            escaped.reserve(value.size());
+            for (const char c : value) {
+                if (c == '\\' || c == '"') escaped += '\\';
+                escaped += c;
+            }
+            return escaped;
+        };
+
         // CVARs
         file << "// === Console Variables ===\n";
         auto varNames = GetVariableNames();
         for (const auto& name : varNames) {
             auto var = GetVariable(name);
             if (var) {
-                file << name << " \"" << var->GetValue() << "\"\n";
+                file << name << " \"" << escapeValue(var->GetValue()) << "\"\n";
             }
         }
 
@@ -334,16 +351,34 @@ namespace Archura {
                 continue;
             }
 
-            std::istringstream iss(line);
-            std::string varName, varValue;
-            if (iss >> varName >> varValue) {
-                // Tırnak işaretlerini çıkar
-                if (!varValue.empty() && varValue.front() == '"' && varValue.back() == '"') {
-                    varValue = varValue.substr(1, varValue.length() - 2);
+            const size_t nameEnd = line.find_first_of(" \t");
+            if (nameEnd == std::string::npos) continue;
+            const std::string varName = line.substr(0, nameEnd);
+            size_t valueStart = line.find_first_not_of(" \t", nameEnd);
+            if (valueStart == std::string::npos) continue;
+
+            std::string varValue = line.substr(valueStart);
+            if (!varValue.empty() && varValue.front() == '"') {
+                if (varValue.size() < 2 || varValue.back() != '"') continue;
+                varValue = varValue.substr(1, varValue.size() - 2);
+                std::string unescaped;
+                unescaped.reserve(varValue.size());
+                bool escaped = false;
+                for (const char c : varValue) {
+                    if (escaped) {
+                        unescaped += c;
+                        escaped = false;
+                    } else if (c == '\\') {
+                        escaped = true;
+                    } else {
+                        unescaped += c;
+                    }
                 }
-                SetVariableValue(varName, varValue);
-                lineCount++;
+                if (escaped) continue;
+                varValue = std::move(unescaped);
             }
+            SetVariableValue(varName, varValue);
+            lineCount++;
         }
 
         file.close();

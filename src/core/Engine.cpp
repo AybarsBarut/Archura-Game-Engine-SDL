@@ -21,6 +21,24 @@ bool Engine::Init(const EngineConfig& config) {
     }
 
     m_EditorMode = config.editorMode;
+    m_GraphicsAPI = config.graphicsAPI;
+    if (m_GraphicsAPI == GraphicsAPI::Auto) {
+        m_GraphicsAPI = IsGraphicsAPICompiled(GraphicsAPI::Vulkan)
+                            ? GraphicsAPI::Vulkan
+                            : GraphicsAPI::OpenGL;
+    }
+    if (!IsGraphicsAPICompiled(m_GraphicsAPI)) {
+        if (!config.allowGraphicsFallback) {
+            std::cerr << "Requested graphics API '" << ToString(m_GraphicsAPI)
+                      << "' is not compiled into this build." << std::endl;
+            return false;
+        }
+        std::cerr << "Requested graphics API '" << ToString(m_GraphicsAPI)
+                  << "' is unavailable; falling back to OpenGL." << std::endl;
+        m_GraphicsAPI = GraphicsAPI::OpenGL;
+    }
+
+    std::cout << "Graphics API: " << ToString(m_GraphicsAPI) << std::endl;
 
     // Pencere olustur
     Window::WindowProps windowProps(
@@ -28,7 +46,8 @@ bool Engine::Init(const EngineConfig& config) {
         config.windowWidth,
         config.windowHeight,
         config.vsync,
-        config.fullscreen
+        config.fullscreen,
+        m_GraphicsAPI
     );
     
     f = fopen(logPath, "a");
@@ -84,7 +103,7 @@ bool Engine::Init(const EngineConfig& config) {
     }
     
     m_Renderer = std::make_unique<Renderer>();
-    if (!m_Renderer->Init()) {
+    if (!m_Renderer->Init(m_GraphicsAPI)) {
         std::cerr << "Failed to initialize renderer!" << std::endl;
         f = fopen(logPath, "a");
         if(f) { 

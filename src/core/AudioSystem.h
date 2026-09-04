@@ -64,8 +64,10 @@ private:
     ~AudioSystem() = default;
 
     void ApplyVolume(const std::string& alias, float volume);
+    void CleanupFinishedOneShots();
 
     std::string m_CurrentMusicAlias;
+    std::vector<std::string> m_OneShotAliases;
     int m_NextSoundID = 0;
 
     float m_MasterVolume = 1.0f;

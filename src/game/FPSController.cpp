@@ -67,28 +67,33 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
     }
 
     // --- ATIŞ MANTIĞI ---
-    if (input->IsMouseButtonDown(SDL_BUTTON_LEFT)) {
-        // Oyuncuyu Bul (Her kare verimsiz arama, ama demo için uygun)
+    if (input && input->IsCursorLocked()) {
         Entity* player = nullptr;
-        for(auto& e : scene->GetEntities()) {
-            if(e->GetName() == "Player") { player = e.get(); break; }
+        if (scene) {
+            // No structural mutation occurs in this lookup. Keep the fallback
+            // compatible with the lightweight controller test target.
+            for (const auto& entity : scene->GetEntities()) {
+                if (entity->GetName() == "Player") {
+                    player = entity.get();
+                    break;
+                }
+            }
         }
 
-        if (player && projectileSystem) {
-            auto* weapon = player->GetComponent<Weapon>();
-            if (weapon) {
-                // Genel sistem sarmalayıcısını örneklendir
-                WeaponSystem ws;
-                if (ws.TryShoot(weapon, player, scene, m_Camera, projectileSystem)) {
-                    // Geri Tepme Uygula
-                    // Eğim (X ekseni dönüşü) genellikle Y fare hareketidir
-                    // Geri tepme YUKARI teper, bu yüzden fare YUKARI (+Y) hareket etmiş gibi davranıyoruz
-                    // Rastgele yatay sallantı
-                    float rX = ((rand() % 100) / 100.0f - 0.5f) * weapon->stats.recoilAmount * 0.5f;
-                    float rY = weapon->stats.recoilAmount; 
+        auto* weapon = player ? player->GetComponent<Weapon>() : nullptr;
+        const bool fireInput = weapon &&
+            (weapon->stats.isAutomatic
+                 ? input->IsMouseButtonDown(SDL_BUTTON_LEFT)
+                 : input->IsMouseButtonPressed(SDL_BUTTON_LEFT));
 
-                    AddRecoil(glm::vec3(rY, rX, 0.0f)); 
-                }
+        if (fireInput && projectileSystem) {
+            // Genel sistem sarmalayıcısını örneklendir
+            WeaponSystem ws;
+            if (ws.TryShoot(weapon, player, scene, m_Camera, projectileSystem)) {
+                // Eğim (X ekseni dönüşü) genellikle Y fare hareketidir.
+                float rX = ((rand() % 100) / 100.0f - 0.5f) * weapon->stats.recoilAmount * 0.5f;
+                float rY = weapon->stats.recoilAmount;
+                AddRecoil(glm::vec3(rY, rX, 0.0f));
             }
         }
     }
@@ -413,11 +418,6 @@ void FPSController::HandleMovement(Input* input, float deltaTime,
         m_IsGrounded = false;
     }
 
-    // FOV kontrolu (fare tekerlegi) (Eski koddan)
-    float scrollDelta = input->GetMouseScrollDelta();
-    if (scrollDelta != 0.0f) {
-        m_Camera->ProcessMouseScroll(scrollDelta);
-    }
 }
 
 void FPSController::HandleMouseLook(Input* input, float deltaTime) {
@@ -431,6 +431,12 @@ void FPSController::HandleMouseLook(Input* input, float deltaTime) {
 
         m_Camera->ProcessMouseMovement(mouseDelta.x * m_MouseSensitivity, 
                                       -mouseDelta.y * m_MouseSensitivity); // Y eksenini ters cevir
+
+        // Scroll is accumulated once per render frame, so consume it only in
+        // this per-frame gameplay input path. Fixed ticks must not replay it.
+        const float scrollDelta = input->GetMouseScrollDelta();
+        if (scrollDelta != 0.0f)
+            m_Camera->ProcessMouseScroll(scrollDelta);
     }
 
     // Sol tik ile imleci kilitleme mantigi Application.cpp'ye tasindi.

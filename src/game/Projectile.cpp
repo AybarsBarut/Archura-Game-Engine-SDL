@@ -25,12 +25,14 @@ void ProjectileSystem::Update(float deltaTime) {
     m_ProjectilesToDestroy.reserve(10); // Pre-allocate for common case
 
     // Tum mermileri guncelle
-    for (auto& entityPtr : m_Scene->GetEntities()) {
-        auto* projectile = entityPtr->GetComponent<Projectile>();
-        if (projectile) {
-            UpdateProjectile(entityPtr.get(), projectile, deltaTime);
-        }
-    }
+    // Entity creation is allowed by collision effects (decals/particles). Use
+    // Scene's snapshot traversal so a vector reallocation cannot invalidate
+    // the iterator while the projectile pass is running.
+    m_Scene->ForEachEntity([&](Entity& entity) {
+        auto* projectile = entity.GetComponent<Projectile>();
+        if (projectile)
+            UpdateProjectile(&entity, projectile, deltaTime);
+    });
 
     // Vurmus veya suresi dolmus mermileri yok et
     std::sort(m_ProjectilesToDestroy.begin(), m_ProjectilesToDestroy.end(),
@@ -43,15 +45,14 @@ void ProjectileSystem::Update(float deltaTime) {
 
     // Generic Lifecycle System (Simple implementation here for now)
     std::vector<EntityHandle> expiredEntities;
-    for (auto& entityPtr : m_Scene->GetEntities()) {
-        auto* lifetime = entityPtr->GetComponent<Lifetime>();
+    m_Scene->ForEachEntity([&](Entity& entity) {
+        auto* lifetime = entity.GetComponent<Lifetime>();
         if (lifetime) {
             lifetime->remainingTime -= deltaTime;
-            if (lifetime->remainingTime <= 0.0f) {
-                expiredEntities.push_back(entityPtr->GetHandle());
-            }
+            if (lifetime->remainingTime <= 0.0f)
+                expiredEntities.push_back(entity.GetHandle());
         }
-    }
+    });
     for (EntityHandle handle : expiredEntities) m_Scene->DestroyEntity(handle);
 }
 
@@ -70,10 +71,24 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
     if (proj->type == Projectile::ProjectileType::Grenade) {
         proj->fuseTimer -= deltaTime;
         if (proj->fuseTimer <= 0.0f) {
-            // Patla!
-            // std::cout << "BOOM! Grenade exploded." << std::endl;
-            // Alan hasari mantigi burada (basitlestirilmis: sadece yok et)
-            // Gercek bir uygulamada, tum varliklara olan mesafeyi kontrol ederdik
+            // Patla: apply distance-weighted area damage before removing the
+            // projectile. The owner and the grenade itself are excluded.
+            const float radius = std::max(0.001f, proj->explosionRadius);
+            const float radiusSq = radius * radius;
+            m_Scene->ForEachEntity([&](Entity& other) {
+                if (other.GetHandle() == entity->GetHandle() ||
+                    other.GetHandle() == proj->owner) return;
+                auto* health = other.GetComponent<Health>();
+                auto* otherTransform = other.GetComponent<Transform>();
+                if (!health || !otherTransform || health->isDead) return;
+                const glm::vec3 offset = otherTransform->position - transform->position;
+                const float distanceSq = glm::dot(offset, offset);
+                if (distanceSq > radiusSq) return;
+                const float falloff = 1.0f - std::sqrt(distanceSq) / radius;
+                health->current = std::max(0.0f, health->current -
+                    proj->damage * falloff);
+                health->isDead = health->current <= 0.0f;
+            });
             m_ProjectilesToDestroy.push_back(entity->GetHandle());
             return;
         }
@@ -119,6 +134,7 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
 
     if (auto* health = target->GetComponent<Health>()) {
         health->current = std::max(0.0f, health->current - proj->damage);
+        health->isDead = health->current <= 0.0f;
     }
     proj->hasHit = true;
     m_ProjectilesToDestroy.push_back(entity->GetHandle());

@@ -1,5 +1,6 @@
 #include "Window.h"
 #include <SDL.h>
+#include <SDL_vulkan.h>
 #include <cstdio>
 #include <glad/glad.h>
 #include <iostream>
@@ -21,9 +22,11 @@ static void LogStartup(const char *message) {
 
 Window::Window(const WindowProps &props)
     : m_Window(nullptr), m_Context(nullptr), m_Width(props.width),
-      m_Height(props.height), m_VSync(props.vsync), m_DeltaTime(0.0f),
-      m_LastFrameTime(0.0f), m_FPS(0.0f), m_FPSTimer(0.0f), m_FrameCount(0),
-      m_Fullscreen(props.fullscreen), m_ShouldClose(false) {
+      m_Height(props.height), m_VSync(props.vsync),
+      m_Fullscreen(props.fullscreen), m_ShouldClose(false),
+      m_GraphicsAPI(props.graphicsAPI), m_DeltaTime(0.0f),
+      m_LastFrameTime(0.0f), m_FPS(0.0f), m_FPSTimer(0.0f),
+      m_FrameCount(0) {
   Init(props);
 }
 
@@ -50,27 +53,31 @@ void Window::Init(const WindowProps &props) {
     LogStartup("SDL initialized successfully");
   }
 
-  // OpenGL Attributes
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-  SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-  SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-  SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+  if (m_GraphicsAPI == GraphicsAPI::OpenGL) {
+    // OpenGL attributes are invalid for a Vulkan window and must be configured
+    // before SDL_CreateWindow.
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 #ifdef ARCHURA_DEBUG
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 #endif
 
-  // MSAA 4x
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+  }
 
   // Create Window
   LogStartup("Creating SDL window");
 
-  Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
-                 SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
+  Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                 SDL_WINDOW_SHOWN;
+  flags |= m_GraphicsAPI == GraphicsAPI::Vulkan ? SDL_WINDOW_VULKAN
+                                                : SDL_WINDOW_OPENGL;
   if (props.fullscreen) {
     flags |= SDL_WINDOW_FULLSCREEN;
   }
@@ -88,6 +95,16 @@ void Window::Init(const WindowProps &props) {
   }
 
   LogStartup("SDL window created successfully");
+
+  if (m_GraphicsAPI == GraphicsAPI::Vulkan) {
+    // VkInstance/device/swapchain ownership belongs to the Vulkan renderer.
+    // Window only owns SDL state and exposes the native SDL_Window pointer.
+    RefreshDrawableSize();
+    m_LastFrameTime = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+    m_Initialized = true;
+    LogStartup("Vulkan-compatible SDL window created successfully");
+    return;
+  }
 
   // Create OpenGL Context
   LogStartup("Creating OpenGL context");
@@ -182,7 +199,9 @@ void Window::Update() {
   // Polling is done in Application Loop now!
   if (!IsValid()) return;
   RefreshDrawableSize();
-  SDL_GL_SwapWindow(m_Window);
+  if (m_GraphicsAPI == GraphicsAPI::OpenGL) {
+    SDL_GL_SwapWindow(m_Window);
+  }
   UpdateDeltaTime();
 }
 
@@ -205,6 +224,12 @@ void Window::UpdateDeltaTime() {
 bool Window::ShouldClose() const { return m_ShouldClose; }
 
 void Window::SetVSync(bool enabled) {
+  if (m_GraphicsAPI == GraphicsAPI::Vulkan) {
+    // Vulkan applies VSync by selecting a swapchain present mode. The window
+    // stores the requested policy; the backend consumes it on swapchain build.
+    m_VSync = enabled;
+    return;
+  }
   if (!m_Context) return;
   // SDL: 0 immediate, 1 vsync, -1 adaptive
   if (SDL_GL_SetSwapInterval(enabled ? 1 : 0) != 0) {
@@ -253,18 +278,24 @@ void Window::SetResolution(unsigned int width, unsigned int height) {
 }
 
 void Window::RefreshDrawableSize() {
-  if (!m_Window || !m_Context) return;
+  if (!m_Window ||
+      (m_GraphicsAPI == GraphicsAPI::OpenGL && !m_Context)) return;
   int logicalWidth = 0;
   int logicalHeight = 0;
   int drawableWidth = 0;
   int drawableHeight = 0;
   SDL_GetWindowSize(m_Window, &logicalWidth, &logicalHeight);
-  SDL_GL_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+  if (m_GraphicsAPI == GraphicsAPI::Vulkan) {
+    SDL_Vulkan_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+  } else {
+    SDL_GL_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+  }
   m_Width = static_cast<unsigned int>(std::max(logicalWidth, 0));
   m_Height = static_cast<unsigned int>(std::max(logicalHeight, 0));
   m_FramebufferWidth = static_cast<unsigned int>(std::max(drawableWidth, 0));
   m_FramebufferHeight = static_cast<unsigned int>(std::max(drawableHeight, 0));
-  if (drawableWidth > 0 && drawableHeight > 0) {
+  if (m_GraphicsAPI == GraphicsAPI::OpenGL && drawableWidth > 0 &&
+      drawableHeight > 0) {
     glViewport(0, 0, drawableWidth, drawableHeight);
   }
 }

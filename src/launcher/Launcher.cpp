@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "../rendering/GraphicsAPI.h"
+
 // Windows headers must come first with proper guards
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -21,7 +23,49 @@ void SetColor(int color) {
   SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
 }
 
-int main() {
+Archura::GraphicsAPI PromptForGraphicsAPI(
+    Archura::GraphicsAPI currentPreference) {
+  std::cout << std::endl;
+  SetColor(11);
+  std::cout << "Graphics API" << std::endl;
+  SetColor(7);
+  std::cout << "  [1] Auto (recommended)" << std::endl;
+  std::cout << "  [2] Vulkan";
+  if (!Archura::IsGraphicsAPICompiled(Archura::GraphicsAPI::Vulkan)) {
+    std::cout << " (not available in this build; OpenGL fallback)";
+  }
+  std::cout << std::endl;
+  std::cout << "  [3] OpenGL (compatibility)" << std::endl;
+  std::cout << "Current: " << Archura::ToString(currentPreference) << std::endl;
+  std::cout << "Select [Enter keeps current]: ";
+
+  std::string choice;
+  std::getline(std::cin, choice);
+  if (choice.empty())
+    return currentPreference;
+  if (choice == "1")
+    return Archura::GraphicsAPI::Auto;
+  if (choice == "2") {
+    if (!Archura::IsGraphicsAPICompiled(Archura::GraphicsAPI::Vulkan)) {
+      SetColor(14);
+      std::cout << "Vulkan is not available in this build; the engine will "
+                   "use OpenGL fallback."
+                << std::endl;
+      SetColor(7);
+    }
+    return Archura::GraphicsAPI::Vulkan;
+  }
+  if (choice == "3")
+    return Archura::GraphicsAPI::OpenGL;
+
+  SetColor(14);
+  std::cout << "Unknown selection; keeping "
+            << Archura::ToString(currentPreference) << "." << std::endl;
+  SetColor(7);
+  return currentPreference;
+}
+
+int main(int argc, char **argv) {
   SetConsoleTitle("Archura Engine Launcher");
 
   SetColor(11); // Cyan
@@ -48,6 +92,29 @@ int main() {
     std::cerr
         << "Warning: Could not reliably determine project root. Using CWD."
         << std::endl;
+    SetColor(7);
+  }
+
+  Archura::GraphicsLaunchOptions graphicsOptions;
+  std::string graphicsError;
+  const fs::path graphicsPreferencePath = "config/graphics_api.cfg";
+  if (!Archura::ResolveGraphicsLaunchOptions(
+          argc, argv, graphicsPreferencePath, graphicsOptions, graphicsError)) {
+    SetColor(12);
+    std::cerr << "Graphics selection error: " << graphicsError << std::endl;
+    SetColor(7);
+    system("pause");
+    return -1;
+  }
+
+  if (!graphicsOptions.explicitlySelected) {
+    graphicsOptions.requestedAPI =
+        PromptForGraphicsAPI(graphicsOptions.requestedAPI);
+  }
+  if (!Archura::SaveGraphicsPreference(graphicsPreferencePath,
+                                        graphicsOptions.requestedAPI)) {
+    SetColor(14);
+    std::cout << "Warning: graphics preference could not be saved." << std::endl;
     SetColor(7);
   }
 
@@ -128,7 +195,12 @@ int main() {
     std::cout << "Launching Engine: " << exePath << std::endl;
     SetColor(7);
 
-    std::string startCmd = "start \"\" \"" + exePath + "\"";
+    std::string startCmd = "start \"\" \"" + exePath +
+                           "\" --graphics=" +
+                           Archura::ToString(graphicsOptions.requestedAPI);
+    if (!graphicsOptions.allowFallback) {
+      startCmd += " --no-graphics-fallback";
+    }
     RunCommand(startCmd);
   } else {
     SetColor(12); // Red

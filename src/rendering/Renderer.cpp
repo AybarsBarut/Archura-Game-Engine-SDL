@@ -8,8 +8,13 @@
 
 namespace Archura {
 
-bool Renderer::Init() {
+bool Renderer::Init(GraphicsAPI api) {
     if (m_Initialized) return true;
+    m_GraphicsAPI = api;
+    if (m_GraphicsAPI != GraphicsAPI::OpenGL) {
+        ARCH_LOG_ERROR("The Vulkan frame backend has not been initialized");
+        return false;
+    }
     if (glGetString(GL_VERSION) == nullptr) {
         ARCH_LOG_ERROR("Renderer initialization requires a current OpenGL context");
         return false;
@@ -67,6 +72,7 @@ void Renderer::Shutdown() {
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     m_Initialized = false;
+    m_GraphicsAPI = GraphicsAPI::OpenGL;
     RenderThread::Detach();
 }
 

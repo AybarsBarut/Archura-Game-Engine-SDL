@@ -10,6 +10,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <cmath>
+#include <unordered_map>
 
 namespace Archura {
 
@@ -100,7 +101,9 @@ bool RenderSystem::InitShadowMap() {
 
 void RenderSystem::Update(float deltaTime) {
     (void)deltaTime;
+    m_LastFrameCounters = {};
     if (!m_Initialized || !RenderThread::IsCurrent() || !m_Scene || !m_Camera) return;
+    m_LastFrameCounters.available = true;
 
     // --- Shader Hot-Reload (sadece DEBUG modda dosyalar degistiyse yeniden derle) ---
 #ifndef NDEBUG
@@ -143,13 +146,39 @@ void RenderSystem::Update(float deltaTime) {
         glm::vec3 color; // Color override
         std::vector<glm::mat4> instanceMatrices;
     };
+
+    struct BatchKey {
+        Mesh* mesh = nullptr;
+        Shader* shader = nullptr;
+        Texture* texture = nullptr;
+        glm::vec3 color{0.0f};
+    };
+    struct BatchKeyHash {
+        size_t operator()(const BatchKey& key) const noexcept {
+            size_t hash = std::hash<Mesh*>{}(key.mesh);
+            hash ^= std::hash<Shader*>{}(key.shader) + 0x9e3779b9u +
+                    (hash << 6u) + (hash >> 2u);
+            hash ^= std::hash<Texture*>{}(key.texture) + 0x9e3779b9u +
+                    (hash << 6u) + (hash >> 2u);
+            for (float component : {key.color.r, key.color.g, key.color.b}) {
+                hash ^= std::hash<float>{}(component) + 0x9e3779b9u +
+                        (hash << 6u) + (hash >> 2u);
+            }
+            return hash;
+        }
+    };
+    struct BatchKeyEqual {
+        bool operator()(const BatchKey& lhs, const BatchKey& rhs) const noexcept {
+            return lhs.mesh == rhs.mesh && lhs.shader == rhs.shader &&
+                   lhs.texture == rhs.texture && lhs.color == rhs.color;
+        }
+    };
     
     // Basit bir vector kullanalim, her unique (mesh, texture, shader) kombinasyonu icin bir batch
     std::vector<RenderBatch> batches;
-    
-    // Cull edilenler
-    int culledCount = 0;
-    int renderedCount = 0;
+    batches.reserve(m_Scene->GetEntities().size());
+    std::unordered_map<BatchKey, size_t, BatchKeyHash, BatchKeyEqual> batchLookup;
+    batchLookup.reserve(m_Scene->GetEntities().size());
     
     // 1. Collect
     for (const auto& entityPtr : m_Scene->GetEntities()) {
@@ -165,28 +194,21 @@ void RenderSystem::Update(float deltaTime) {
         glm::vec3 entityPos = transform->position;
         float distance = glm::length(entityPos - viewPos);
         if (distance > 1000.0f) {
-            culledCount++;
+            ++m_LastFrameCounters.culledEntities;
             continue;
         }
 
-        // Batch bul veya olustur
+        // Batch bul veya olustur in O(1) average time instead of scanning all
+        // previously created batches for every visible entity.
         Shader* targetShader = meshRenderer->GetShader() ? meshRenderer->GetShader() : m_DefaultShader.get();
         Texture* targetTexture = meshRenderer->GetTexture();
-        
-        bool found = false;
-        for (auto& batch : batches) {
-            if (batch.mesh == renderMesh &&
-                batch.shader == targetShader && 
-                batch.texture == targetTexture &&
-                batch.color == meshRenderer->color) { // Renk de ayni olmali
-                
-                batch.instanceMatrices.push_back(entityPtr->GetWorldTransform());
-                found = true;
-                break;
-            }
-        }
-        
-        if (!found) {
+        const BatchKey key{renderMesh, targetShader, targetTexture,
+                           meshRenderer->color};
+        const auto existing = batchLookup.find(key);
+        if (existing != batchLookup.end()) {
+            batches[existing->second].instanceMatrices.push_back(
+                entityPtr->GetWorldTransform());
+        } else {
             RenderBatch newBatch;
             newBatch.mesh = renderMesh;
             newBatch.shader = targetShader;
@@ -194,7 +216,9 @@ void RenderSystem::Update(float deltaTime) {
             newBatch.color = meshRenderer->color;
             newBatch.instanceMatrices.push_back(entityPtr->GetWorldTransform());
             batches.push_back(newBatch);
+            batchLookup.emplace(key, batches.size() - 1);
         }
+        ++m_LastFrameCounters.visibleInstances;
     }
     
 
@@ -366,11 +390,13 @@ void RenderSystem::Update(float deltaTime) {
              
              // Let's INCREASE AMBIENT first in Lines 326.
              batch.mesh->DrawInstanced(m_DepthShader.get(), batch.instanceMatrices);
+             ++m_LastFrameCounters.shadowBatchSubmissions;
         }
         
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     } else {
-        // No directional light, reset matrix to identity or keep zero
+        // No directional light: keep shadow sampling deterministic.
+        m_LightSpaceMatrix = glm::mat4(1.0f);
         // Maybe clear texture to white (depth 1.0) so everything is lit
         glBindFramebuffer(GL_FRAMEBUFFER, m_DepthMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -447,15 +473,7 @@ void RenderSystem::Update(float deltaTime) {
         
         // Tek seferde ciz (Instanced)
         batch.mesh->DrawInstanced(shader, batch.instanceMatrices);
-        
-        renderedCount += static_cast<int>(batch.instanceMatrices.size());
-    }
-
-    // Hata ayiklama: her 60 karede bir culling istatistiklerini yazdir
-    static int frameCount = 0;
-    if (++frameCount >= 60) {
-        // std::cout << "Rendered: " << renderedCount << " | Culled: " << culledCount << std::endl;
-        frameCount = 0;
+        ++m_LastFrameCounters.mainBatchSubmissions;
     }
 }
 
@@ -520,6 +538,7 @@ void RenderSystem::DrawColliders() {
 }
 
 void RenderSystem::Shutdown() {
+    m_LastFrameCounters = {};
     if (!RenderThread::IsCurrent()) {
         if (m_Initialized || m_DepthMapFBO || m_DepthMapTexture || m_DebugMesh) {
             std::cerr << "RenderSystem::Shutdown must run on the render thread\n";

@@ -36,6 +36,7 @@ struct ServerConfig {
     // Logging
     bool verboseLogging = false;
     std::string logFile = "server.log";
+    bool helpRequested = false;
     
     // Default constructor
     ServerConfig() = default;

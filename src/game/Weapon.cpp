@@ -11,6 +11,14 @@
 
 namespace Archura {
 
+void WeaponSystem::Update(Scene* scene, EntityHandle entity, Input* input,
+                          Camera* camera,
+                          ProjectileSystem* projectileSystem,
+                          float deltaTime) {
+    Update(scene ? scene->GetEntity(entity) : nullptr, input, scene, camera,
+           projectileSystem, deltaTime);
+}
+
 void WeaponSystem::Update(Entity* entity, Input* input, Scene* scene, Camera* camera, ProjectileSystem* projectileSystem, float deltaTime) {
     (void)scene;
     (void)camera;
@@ -45,22 +53,30 @@ void WeaponSystem::Update(Entity* entity, Input* input, Scene* scene, Camera* ca
 
 
 
-    // Manuel sarjor degistirme (R tusu)
-    if (input->IsKeyPressed(SDL_SCANCODE_R)) {
-        if (weapon->stats.currentMag < weapon->stats.magSize && weapon->stats.totalAmmo > 0 && !weapon->isReloading) {
-            Reload(weapon);
+    if (input) {
+        // Manuel sarjor degistirme (R tusu)
+        if (input->IsKeyPressed(SDL_SCANCODE_R)) {
+            if (weapon->stats.currentMag < weapon->stats.magSize && weapon->stats.totalAmmo > 0 && !weapon->isReloading) {
+                Reload(weapon);
+            }
         }
-    }
 
-    // Silah degistirme (1-4 tuslari)
-    if (input->IsKeyPressed(SDL_SCANCODE_1)) weapon->SwitchWeapon(Weapon::WeaponType::Rifle);
-    if (input->IsKeyPressed(SDL_SCANCODE_2)) weapon->SwitchWeapon(Weapon::WeaponType::Pistol);
-    if (input->IsKeyPressed(SDL_SCANCODE_3)) weapon->SwitchWeapon(Weapon::WeaponType::Knife);
-    if (input->IsKeyPressed(SDL_SCANCODE_4)) weapon->SwitchWeapon(Weapon::WeaponType::Grenade);
+        // Silah degistirme (1-4 tuslari)
+        if (input->IsKeyPressed(SDL_SCANCODE_1)) weapon->SwitchWeapon(Weapon::WeaponType::Rifle);
+        if (input->IsKeyPressed(SDL_SCANCODE_2)) weapon->SwitchWeapon(Weapon::WeaponType::Pistol);
+        if (input->IsKeyPressed(SDL_SCANCODE_3)) weapon->SwitchWeapon(Weapon::WeaponType::Knife);
+        if (input->IsKeyPressed(SDL_SCANCODE_4)) weapon->SwitchWeapon(Weapon::WeaponType::Grenade);
+    }
 }
 
-bool WeaponSystem::TryShoot(Weapon* weapon, Entity* entity, Scene* scene, Camera* camera, ProjectileSystem* projectileSystem) {
+bool WeaponSystem::TryShoot(Weapon* weapon, Entity* entity, Scene* scene, Camera* camera,
+                             ProjectileSystem* projectileSystem) {
     if (!weapon) return false;
+
+    // Update() owns reload progression; firing must remain blocked until it
+    // completes, even though the controller evaluates held-fire later in the
+    // same fixed tick.
+    if (weapon->isReloading) return false;
 
     // Ates hizi kontrolu
     if (weapon->timeSinceLastShot < weapon->stats.fireRate) {
@@ -94,13 +110,29 @@ bool WeaponSystem::TryShoot(Weapon* weapon, Entity* entity, Scene* scene, Camera
         glm::vec3 direction = camera->GetFront();
         
         if (weapon->type == Weapon::WeaponType::Knife) {
-            // Bicak Mantigi (Kisa Menzilli Isin Izleme)
-            // YAPILACAK: Duzgun yakin dovus vurus tespiti uygula
-            // std::cout << "SWISH! Knife attack." << std::endl;
-            // Simdilik sadece aninda yok olan kisa menzilli bir "mermi" simule et
-            // Veya daha iyisi, burada dogrudan bir isin izleme mi yapilmali?
-            // Simdilik tutarlilik icin mermi sistemine sadik kalalim, ama gorunmez/kisa omurlu?
-            // Aslinda, simdilik sadece istendigi gibi "Bicak saldirisi" yazdiralim
+            Entity* target = nullptr;
+            float closestDistance = weapon->stats.range;
+            if (scene) {
+                for (const auto& candidatePtr : scene->GetEntities()) {
+                    Entity* candidate = candidatePtr.get();
+                    if (!candidate || candidate == entity) continue;
+                    auto* targetTransform = candidate->GetComponent<Transform>();
+                    if (!candidate->GetComponent<Health>() || !targetTransform) continue;
+                    const glm::vec3 toTarget = targetTransform->position - spawnPos;
+                    const float distance = glm::length(toTarget);
+                    if (distance <= 1.0e-4f || distance > closestDistance) continue;
+                    if (glm::dot(glm::normalize(toTarget), direction) < 0.75f) continue;
+                    target = candidate;
+                    closestDistance = distance;
+                }
+            }
+            if (target) {
+                if (auto* health = target->GetComponent<Health>()) {
+                    health->current = std::max(0.0f,
+                                               health->current - weapon->stats.damage);
+                    health->isDead = health->current <= 0.0f;
+                }
+            }
         } 
         else if (weapon->type == Weapon::WeaponType::Grenade) {
             projectileSystem->SpawnProjectile(

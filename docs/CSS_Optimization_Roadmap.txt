@@ -1,0 +1,338 @@
+ARCHURA GAME ENGINE — CSS/SOURCE ESINLI OPTIMIZASYON YOL HARITASI
+Tarih: 03.09.2026
+
+AMAÇ
+
+Archura'yı ölçülebilir, veri-odaklı ve ölçeklenebilir bir oyun motoruna
+dönüştürmek. CSS/Source kodu mimari fikir kaynağıdır; doğrudan kod veya varlık
+kopyalanmayacaktır.
+
+LİSANS SINIRI
+
+css-community-master/LICENSE.md, Source SDK kullanım ve dağıtımını Valve/Source
+bağlamına ve ücretsiz dağıtıma bağlar; ticari kullanım için Valve ile iletişim
+ister. Archura GPL-3.0'dır. Bu nedenle yalnızca genel tasarım ilkeleri temiz
+biçimde yeniden uygulanmalı; Source dosyalarından kod, makro, veri yapısı veya
+asset taşınmamalıdır. Bu not hukuki görüş değildir.
+
+MEVCUT DURUMUN ÖZETİ
+
+- Uygulama 128 Hz fixed tick ve değişken render kullanıyor; render alpha
+  hesaplanıyor ancak interpolation uygulanmıyor.
+- Telemetri yalnızca geniş bir CPU-work aralığında average/P95/P99 tutuyor.
+  Phase CPU süreleri, GPU pass süreleri, gerçek draw/triangle/upload ve genel
+  allocation sayaçları yok.
+- RenderSystem her kare batch vektörü ve hash map kuruyor; sahneyi renderable,
+  light ve skybox için tekrar tarıyor. Culling yalnızca 1000 birim mesafe.
+- Instance matrisleri shadow ve main pass'te tekrar GPU'ya yükleniyor.
+- PhysicsSystem broadphase proxy'lerini her substep'te yeniden kurup sıralıyor;
+  ray/sweep/character sorguları bütün collider'ları geziyor.
+- SparseSet/SoA ve custom allocator mikrobenchmark'ları umut verici fakat
+  runtime'a bağlı değil.
+- JobSystem runtime'a bağlı değil ve Dispatch her indeks için ayrı std::function
+  işi oluşturuyor.
+- Texture decode ve GPU upload render thread'de senkron.
+- ScriptSystem her tick Scene snapshot'ı ve unordered_set oluşturuyor.
+- Editor Project paneli her render karesinde filesystem enumerate + sort yapıyor.
+- Client build'i her seferinde yaklaşık 500 MB Mono class library ağacı kopyalıyor.
+- Network katmanı TCP framing/handshake düzeyinde; replication/delta/prediction
+  yok.
+
+SOURCE'TAN ALINACAK TASARIM FİKİRLERİ
+
+1. VProf: hiyerarşik scope profiler, bütçe grupları ve frame sayaçları.
+2. ISpatialPartition: generation kontrollü handle, static/dynamic/trigger/render
+   maskeleri, hareket eden elemanı incremental güncelleme, box/sphere/ray query.
+3. ClientLeafSystem: kalıcı render proxy'leri, dirty güncelleme, opaque/translucent
+   grupları ve aynı nesneyi karede bir kez kabul eden dedup işareti.
+4. IDataCache + IMDLCache: byte/item bütçeleri, handle, ref/lock, LRU touch/age,
+   purge, preload ve yükleme/boşaltma bildirimi.
+5. IQueuedLoader: harita yükleme fazları ve Anytime/BeforePlay/Preload öncelikleri.
+6. JobThread: bounded queue, priority, IO/serial ayrımı, batch çalışma, fence/wait
+   sırasında ana thread'in işe yardım etmesi.
+7. NetworkVar/SendTable/Prediction: değişen alanı işaretleme, bit bütçeli typed
+   replication, snapshot delta, client prediction ve reconciliation.
+8. MemAlloc: bütün allocation domainlerini aynı gözlem katmanında raporlama.
+
+HEDEF VE BAŞARI ÖLÇÜTLERİ
+
+Kod GTX 1050 ve 144 FPS yönünü ima ediyor. İlk performans sözleşmesi iki katmanlı
+olmalıdır:
+
+- Zorunlu taban: 1080p/60 Hz, frame budget 16.67 ms.
+- Hedef: 1080p/144 Hz, frame budget 6.94 ms.
+- Her sonuç: warm-up sonrası en az 60 saniye; CPU ve GPU P50/P95/P99 ayrı.
+- Ayrıca: allocation/frame, bytes/frame, draw/pass/batch, instance-upload bytes,
+  visible/culled count, resident CPU/GPU asset bytes ve load stall süreleri.
+- Performans kapısı: hedef senaryoda P95 iyileşmeli; P99 ve deterministik testler
+  gerilememeli. Warm runtime hot path'lerinde hedef 0 genel heap allocation/frame.
+
+Geçici temsilî workload'lar:
+
+- Render: 10.000 static + 2.000 dynamic renderable, 4 ışık, shadow açık.
+- Physics: 5.000 static + 1.000 dynamic collider ve tick başına query yükü.
+- Particle: ayrı CPU ve GPU burst senaryoları.
+- Script: scriptsiz, 100 ve 1.000 aktif script varyantları.
+- Network: loopback, gecikme/kayıp simülasyonu ve artan client sayısı.
+
+Bu sayılar oyunun gerçek hedefi belli olduğunda değiştirilir; ölçüm olmadan sabit
+performans vaadi sayılmaz.
+
+FAZ 0 — DOĞRU ÖLÇÜM VE TEKRARLANABİLİR BASELINE (P0)
+
+0.1 Hiyerarşik profiler
+- Allocation-free RAII scope API oluştur.
+- Statik/intern edilmiş scope ID kullan; hot path'te string/hash/allocation yapma.
+- Thread başına sabit halkalar; Render, Physics, Script, Audio, Network, Editor,
+  Jobs, FileSystem budget grupları.
+- Frame başına çağrı sayısı, toplam/öz süre ve P50/P95/P99 raporu.
+
+0.2 GPU telemetrisi
+- GL_TIME_ELAPSED query'lerini shadow, main, HUD, editor, post-process başına koy.
+- Sonucu 2-3 kare gecikmeli oku; render thread'i query sonucu için bekletme.
+- GPU upload bytes, draw, triangle, program/texture/VAO bind sayaçlarını gerçek
+  submit noktalarında besle.
+
+0.3 Allocation ve workload harness
+- Genel debug allocation hook'u ile domain/tag, count/bytes ve high-water ölç.
+- Sabit seed'li headless/smoke benchmark sahneleri oluştur.
+- Sonucu JSON/CSV yaz; git revision, build config, GPU/CPU ve ayarları ekle.
+
+Çıkış kapısı:
+- Aynı sahne üç koşuda yakın sonuç verir.
+- Debug overlay ve dosya raporu uydurma değer içermez.
+- Release-With-Debug-Info profil build'i bulunur.
+
+FAZ 1 — DÜŞÜK RİSKLİ SICAK-YOL TEMİZLİĞİ (P0/P1)
+
+1.1 Editor Project panel cache'i
+- DirectorySnapshot {path, name, type, mtime} oluştur.
+- Yalnızca klasör değişimi, Refresh veya file-watcher olayıyla yenile.
+- Her kare directory_iterator, is_directory ve sort yapma.
+
+1.2 Script registry
+- ScriptComponent add/remove ve entity destroy olaylarını Scene'den yayınla.
+- ScriptSystem yalnızca aktif dense handle listesini güncellesin.
+- Tick başına Scene snapshot + unordered_set yeniden yapımını kaldır.
+
+1.3 Render frame scratch
+- Batch/render-item yapılarını sınıf üyesi kalıcı kapasite veya frame linear arena
+  üzerinde tut; her kare heap map/vector oluşturma.
+- Işık/sun/skybox referanslarını structural eventlerle cache'le.
+- Renk değerini batch key'den çıkar; per-instance color verisine taşı.
+
+1.4 Küçük I/O ve geliştirme döngüsü
+- Shader timestamp kontrolünü 250-500 ms rate-limit et veya watcher kullan.
+- Yapay splash sleep'lerini kaldır; gerçek progress göster.
+- Mono/assets post-build staging'i ayrı deploy target + manifest/hash tabanlı yap.
+- CMake source glob ve monolitik target'ı kademeli static library target'larına böl.
+
+Çıkış kapısı:
+- Editor idle durumda filesystem çağrısı/frame = 0.
+- Scriptsiz ve stabil scriptli sahnede registry allocation/frame = 0.
+- Render-list hazırlığında genel heap allocation/frame = 0 (kapasite aşımları
+  ayrıca sayaçlanır).
+
+FAZ 2 — ORTAK SPATIAL DATABASE (P1, EN YÜKSEK MİMARİ GETİRİ)
+
+2.1 SpatialWorld API
+- Generation kontrollü SpatialHandle.
+- Katman maskeleri: RenderStatic, RenderDynamic, PhysicsStatic, PhysicsDynamic,
+  Trigger, Audio, NetworkRelevant.
+- Insert/Remove/Move ve QueryAABB/QuerySphere/QueryRay/QueryFrustum.
+- Static dünya için BVH; hareketli dünya için benchmark sonucuna göre dynamic AABB
+  tree veya hashed grid. BSP/PVS'yi doğrudan kopyalama.
+
+2.2 Dirty propagation
+- Transform değişince yalnız ilgili proxy dirty olur.
+- Static ve dynamic proxy'leri ayır; değişmeyen collider/renderable için AABB ve
+  world matrix tekrar hesaplama.
+- Query sonucu EntityHandle döndürür; raw pointer saklamaz.
+
+2.3 Ortak kullanım
+- RenderSystem görünür adayları SpatialWorld'den alır.
+- Physics broadphase, ray/sweep ve character query aynı spatial katmanı kullanır.
+- Network interest management daha sonra aynı katman maskesine bağlanır.
+
+Çıkış kapısı:
+- Query sonuçları brute-force oracle ile property/fuzz testte aynı.
+- 10k static sahnede render/physics query maliyeti toplam entity sayısıyla doğrusal
+  büyümez.
+- Entity silme/handle reuse ve transform mutation testleri geçer.
+
+FAZ 3 — RENDER PROXY, MATERIAL VE GPU SUBMISSION (P1)
+
+3.1 Kalıcı RenderProxy
+- Entity component hash lookup yerine dense RenderProxy listesi kullan.
+- Mesh/material/bounds/world transform/flags/generation alanları.
+- Structural/asset/transform değişimlerinde proxy güncelle; her kare scene tarama.
+
+3.2 Görünürlük ve queue
+- Kamera plane'leriyle gerçek sphere/AABB frustum culling.
+- Opaque: pipeline/material/mesh anahtarıyla state-minimizing sort.
+- Transparent: ayrı queue, depth sort; opaque batch ile karıştırma.
+- ShadowCaster flag, shadow-frustum culling ve shadow LOD/distance.
+- Occlusion/HZB yalnız frustum + spatial sonuçları ölçüldükten sonra.
+
+3.3 Material ve uniform yolu
+- MaterialHandle/PipelineState oluştur; shader+texture+blend+depth+cull tek key.
+- Per-frame kamera/ışık değerlerini UBO'ya bir kez yaz.
+- Uniform isimlerini initialization/hot-reload anında resolve et; draw sırasında
+  string üretme.
+
+3.4 Instance streaming
+- Tüm pass'ler için instance verisini kare başına tek staging akışına yaz.
+- OpenGL 3.3 için triple/orphan ring fallback; GL 4.4 varsa persistent mapping
+  capability yolu. GL 3.3 tabanını bozmama.
+- Shadow ve main aynı transform upload'ını kullansın; pass command'leri yalnız
+  offset/count referansı taşısın.
+
+3.5 LOD ve mesh optimizasyonu
+- Screen-space LOD, distance hysteresis ve mesh bounds.
+- Offline vertex/index optimize, 16-bit index mümkünse kullan, mip/anisotropy
+  ayarını capability ve kalite cvar'ına bağla.
+
+Çıkış kapısı:
+- Brute-force visible set ile frustum result aynı.
+- Instance upload bytes gölge+main nedeniyle iki katına çıkmaz.
+- GL validation ve renderer ownership testleri geçer.
+- Aynı görüntü için draw/bind sayısı düşer; CPU render prep P95 iyileşir.
+
+FAZ 4 — ECS VERİ YERELLİĞİ VE TRANSFORM GRAPH (P1/P2)
+
+4.1 Canonical dense storage
+- Mevcut SparseSet/ComponentStorage'ı deneysel kopya yerine canonical native
+  storage'a dönüştür.
+- Entity yalnız handle + component mask/index tutsun; hot sistemler typed view ile
+  dense iteration yapsın.
+- Eski Entity::GetComponent API'si geçiş adaptörü olarak kalsın.
+
+4.2 Event tabanlı senkron
+- Add/Remove/Create/Destroy olayları RenderProxy, SpatialWorld, ScriptRegistry ve
+  NetworkReplication tablolarını güncellesin.
+- Her kare RebuildFromScene/SyncBackToScene yapılmasın.
+
+4.3 Transform graph
+- Local/world transform için dirty bit ve parent-version cache.
+- Parent önce, child sonra düz iteration listesi; recursive mat4 üretimini yalnız
+  dirty entity'lere indir.
+- Previous/current transform snapshot'ı tanımlandıktan sonra render alpha ile
+  interpolation ekle.
+
+Çıkış kapısı:
+- Mevcut API/regresyon testleri geçer.
+- Transform/rigidbody hot loop SoA üzerinde tek canonical yazım yapar.
+- Structural değişiklik dışındaki fixed tick'te ECS heap allocation = 0.
+
+FAZ 5 — İŞ SİSTEMİ VE PARALEL FRAME GRAPH (P2)
+
+5.1 JobSystem v2
+- Her indeks için std::function yerine chunk/range job.
+- Sabit kapasiteli task storage, küçük callable inline storage veya function
+  pointer + context.
+- Fence/counter, priority (High/Normal/Low), IO ve serial lane.
+- Worker-local deque + work stealing; Wait sırasında ana thread bağımsız işlere
+  yardım eder. Queue overflow görünür sayaç/hata üretir.
+
+5.2 Güvenli entegrasyon
+- İlk işler: asset decode, animation pose, particle sim, spatial dirty update ve
+  visibility chunk'ları.
+- OpenGL upload/submit, Mono invocation ve Scene structural mutation owner thread
+  üzerinde kalır.
+- Aşamalar arası açık fence: simulation -> transform publish -> visibility ->
+  render submit.
+
+Çıkış kapısı:
+- 0/1/N worker deterministik sonuç testi.
+- Shutdown/exception/queue-full/dependency/fence stres testleri.
+- Küçük workload'da paralellik zorlanmaz; threshold cvar ile seri fast path.
+
+FAZ 6 — BÜTÇELİ ASSET CACHE VE ASYNC STREAMING (P2)
+
+6.1 ResourceHandle ve durum makinesi
+- Path'i canonicalize edip AssetID'ye intern et.
+- Unloaded -> Queued -> Decoding -> UploadPending -> Ready/Failed durumları.
+- Generation handle ve fallback asset; renderer raw resource pointer saklamaz.
+
+6.2 QueuedLoader
+- Preload, BeforePlay, Anytime öncelikleri.
+- Worker'da file read/decode; render thread'de bütçeli GPU upload queue.
+- Frame başına upload byte/time bütçesi; loading screen'de daha geniş bütçe.
+
+6.3 Cache bütçesi
+- Texture/Mesh/Audio/Script domainleri için max bytes/items.
+- Ref/pin/frame-lock, LRU touch/age, purge ve load/unload notification.
+- CPU resident, GPU resident, pending ve eviction sayaçları.
+
+Çıkış kapısı:
+- Asset decode render thread'i bloke etmez.
+- Aynı asset tek inflight iş üretir; cancel/map unload güvenli.
+- Bütçe aşımı kontrollü eviction yapar; kullanım sonrası raw dangling pointer yok.
+
+FAZ 7 — FİZİK SICAK YOLU (P2)
+
+- Broadphase proxy/cache'i persistent yap; yalnız dirty collider güncellensin.
+- Static/dynamic partition ve sleeping body listesi kullan.
+- Ray/sweep/character query SpatialWorld adaylarıyla çalışsın.
+- Contact pair/event buffer'larını frame arena veya reusable vector üzerinde tut.
+- Önce motion integration SoA; sonra profiler gerek gösterirse bağımsız collision
+  island'larını job'lara böl. Contact sırasını handle ile deterministik tut.
+- CCD yalnız hızlı/küçük body için; adaptive substep global bütün dünyayı tekrar
+  çözmeye zorlamasın.
+
+Çıkış kapısı:
+- Mevcut fizik contract testleri + deterministik state hash geçer.
+- Sparse sahnede broadphase/query P95 belirgin düşer.
+- Static body sayısı arttıkça dynamic step maliyeti doğrusal artmaz.
+
+FAZ 8 — NETWORK REPLICATION (P3, TRANSPORT DOĞRU ÇALIŞTIKTAN SONRA)
+
+- Control/reliable trafik ile sequenced state trafik kanallarını ayır; gerçek
+  zamanlı state için UDP tabanlı transport değerlendir.
+- Typed replication schema: EntityHandle + component/field ID + quantization.
+- Networked field yazımında dirty bit; client başına baseline ve delta snapshot.
+- SpatialWorld ile per-client interest set.
+- Local input command history, tick/ack, prediction, server correction ve replay.
+- Tekrarlanan asset/class adları için bağlantı başında intern edilmiş string IDs.
+- Bandwidth/client, packet loss, resend, snapshot size ve reconciliation sayacı.
+
+Çıkış kapısı:
+- Loopback + latency/jitter/loss testleri.
+- Eski/geç/tekrar paketlerde deterministik davranış.
+- Client sayısıyla CPU/bandwidth ölçek eğrisi ve açık limitler.
+
+İLK UYGULAMA SIRASI
+
+1. Phase-profiler + gerçek GPU/draw/allocation sayaçları.
+2. Tekrarlanabilir render/physics/script workload harness.
+3. Editor Project panel cache.
+4. Script registry'nin event tabanlı hale gelmesi.
+5. Render frame scratch ve uniform string üretiminin kaldırılması.
+6. Ortak SpatialWorld prototipi + brute-force oracle benchmark.
+7. RenderProxy + gerçek frustum culling.
+8. Physics query ve broadphase'in SpatialWorld'e geçirilmesi.
+9. MaterialHandle + tek instance staging akışı.
+10. JobSystem v2 ve yalnız güvenli CPU işlerinin entegrasyonu.
+11. Asset handle/cache/queued loader.
+12. Canonical ECS/SoA ve transform graph geçişi.
+13. Network delta/prediction.
+
+ŞİMDİLİK YAPILMAMASI GEREKENLER
+
+- Source SDK kodunu veya assetlerini doğrudan kopyalamak.
+- Ölçüm olmadan bütün motoru yeniden yazmak ya da her şeye custom allocator
+  bağlamak.
+- OpenGL hot path'i ölçmeden Vulkan'a geçmek.
+- Spatial workload kanıtı olmadan BSP/PVS veya occlusion sistemi kurmak.
+- OpenGL/Mono/Scene owner-thread sınırlarını dikkate almadan paralelleştirmek.
+- Sadece ortalama FPS'e bakarak optimizasyon kabul etmek; P95/P99 ve stutter esas.
+
+HER İŞ PAKETİNİN ZORUNLU ŞABLONU
+
+1. Hipotez ve ölçülen sorun.
+2. Tek temsilî workload ve correctness oracle.
+3. Önce ölçüm: CPU/GPU/allocation/counter.
+4. Küçük, geri alınabilir uygulama.
+5. Aynı koşulda sonra ölçüm.
+6. Regresyon ve determinism testleri.
+7. Kazanç yoksa geri al veya yeni kanıt topla.

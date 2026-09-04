@@ -2,13 +2,17 @@
 #include "FPSConsoleCommands.h"
 #include "../core/DeveloperConsole.h"
 #include "../core/Application.h"
+#include "../core/FrameTelemetry.h"
 #include "../ecs/Entity.h"
 #include "../ecs/Component.h"
 #include "../game/FPSController.h"
+#include "../game/RenderSystem.h"
+#include "../network/NetworkConsole.h"
+#include "../network/NetworkManager.h"
+#include <fstream>
 #include <iostream>
 #include <vector>
 #include <cstdlib>
-#include <chrono>
 
 namespace Archura {
 
@@ -18,16 +22,25 @@ namespace Archura {
         static int noclipMode;
         static int infiniteAmmo;
         static std::vector<std::string> activeBots;
-        static bool profileRunning;
-        static std::chrono::high_resolution_clock::time_point profileStartTime;
     };
 
     int GameState::godMode = 0;
     int GameState::noclipMode = 0;
     int GameState::infiniteAmmo = 0;
     std::vector<std::string> GameState::activeBots;
-    bool GameState::profileRunning = false;
-    std::chrono::high_resolution_clock::time_point GameState::profileStartTime;
+
+    namespace {
+
+    std::string CurrentFrameTelemetryReport() {
+        Application& application = Application::Get();
+        SceneRenderCounters counters;
+        if (const RenderSystem* renderSystem = application.GetRenderSystem())
+            counters = renderSystem->GetLastFrameCounters();
+        return FormatFrameTelemetryReport(
+            application.GetFrameTelemetry().Snapshot(), counters);
+    }
+
+    } // namespace
 
     void FPSConsoleCommands::RegisterAllCommands() {
         RegisterRenderingCommands();
@@ -103,13 +116,7 @@ namespace Archura {
             "r_stats",
             "Display rendering statistics",
             [](const std::vector<std::string>& args) {
-                std::cout << "\n=== Rendering Statistics ===\n";
-                std::cout << "Draw Calls: 1234\n";
-                std::cout << "Polygons: 5,234,567\n";
-                std::cout << "Textures: 342\n";
-                std::cout << "VRAM Usage: 2048 MB\n";
-                std::cout << "Shader Programs: 45\n";
-                std::cout << "=============================\n\n";
+                std::cout << '\n' << CurrentFrameTelemetryReport() << '\n';
             }
         ));
 
@@ -136,7 +143,23 @@ namespace Archura {
             "Dump detailed rendering statistics to file",
             [](const std::vector<std::string>& args) {
                 std::string filename = args.empty() ? "render_stats.txt" : args[0];
-                std::cout << "[Rendering] Statistics saved to " << filename << "\n";
+                const std::string report = CurrentFrameTelemetryReport();
+                std::ofstream file(filename, std::ios::out | std::ios::binary |
+                                                 std::ios::trunc);
+                if (!file) {
+                    std::cout << "[Rendering] Failed to write statistics to "
+                              << filename << "\n";
+                    return;
+                }
+                file << report;
+                file.close();
+                if (!file) {
+                    std::cout << "[Rendering] Failed to write statistics to "
+                              << filename << "\n";
+                    return;
+                }
+                std::cout << "[Rendering] Statistics saved to " << filename
+                          << "\n";
             }
         ));
 
@@ -223,10 +246,10 @@ namespace Archura {
 
         console.RegisterCommand(std::make_shared<ConsoleCommand>(
             "net_ping",
-            "Display current ping to server",
+            "Report ping measurement availability",
             [](const std::vector<std::string>& args) {
-                int ping = 45 + (rand() % 30); // Simulated ping
-                std::cout << "[Network] Ping: " << ping << " ms\n";
+                std::cout << "[Network] Ping: unavailable "
+                             "(no latency measurement is implemented)\n";
             }
         ));
 
@@ -234,29 +257,37 @@ namespace Archura {
             "net_stats",
             "Display network statistics",
             [](const std::vector<std::string>& args) {
-                std::cout << "\n=== Network Statistics ===\n";
-                std::cout << "Ping: 45 ms\n";
-                std::cout << "Packet Loss: 0.2%\n";
-                std::cout << "Download: 2.4 Mbps\n";
-                std::cout << "Upload: 0.8 Mbps\n";
-                std::cout << "Packets Sent: 234,567\n";
-                std::cout << "Packets Received: 234,521\n";
-                std::cout << "Bytes Sent: 12.5 MB\n";
-                std::cout << "Bytes Received: 45.2 MB\n";
-                std::cout << "===========================\n\n";
+                const NetworkRuntimeSnapshot snapshot =
+                    NetworkManager::Get().GetRuntimeSnapshot();
+                std::cout << '\n'
+                          << FormatNetworkStats(snapshot.stats)
+                          << '\n';
             }
         ));
 
         console.RegisterCommand(std::make_shared<ConsoleCommand>(
             "connect",
-            "Connect to server [IP:Port]",
+            "Connect to server [host:port]",
             [](const std::vector<std::string>& args) {
-                if (args.empty()) {
-                    std::cout << "[Network] Usage: connect [IP:Port]\n";
+                if (args.size() != 1) {
+                    std::cout << "[Network] Usage: connect [host:port]\n";
                     return;
                 }
-                std::cout << "[Network] Connecting to " << args[0] << "...\n";
-                std::cout << "[Network] Connected successfully\n";
+                const NetworkEndpointParseResult parsed =
+                    ParseNetworkEndpoint(args[0]);
+                if (!parsed.valid) {
+                    std::cout << "[Network] Invalid endpoint: " << parsed.error
+                              << '\n';
+                    return;
+                }
+
+                NetworkManager& network = NetworkManager::Get();
+                const bool transportOpened = network.Connect(
+                    parsed.endpoint.host, static_cast<int>(parsed.endpoint.port));
+                const NetworkRuntimeSnapshot snapshot =
+                    network.GetRuntimeSnapshot();
+                std::cout << FormatNetworkConnectResult(
+                    parsed.endpoint, transportOpened, snapshot);
             }
         ));
 
@@ -264,8 +295,12 @@ namespace Archura {
             "disconnect",
             "Disconnect from server",
             [](const std::vector<std::string>& args) {
-                std::cout << "[Network] Disconnecting...\n";
-                std::cout << "[Network] Disconnected\n";
+                NetworkManager& network = NetworkManager::Get();
+                network.Shutdown();
+                const NetworkRuntimeSnapshot snapshot =
+                    network.GetRuntimeSnapshot();
+                std::cout << "[Network] Shutdown requested\n"
+                          << FormatNetworkStatus(snapshot);
             }
         ));
 
@@ -273,52 +308,23 @@ namespace Archura {
             "status",
             "Show connection status",
             [](const std::vector<std::string>& args) {
-                std::cout << "\n=== Connection Status ===\n";
-                std::cout << "Status: Connected\n";
-                std::cout << "Server: 192.168.1.100:27015\n";
-                std::cout << "Players: 32/32\n";
-                std::cout << "Map: de_mirage\n";
-                std::cout << "Time: 15:34\n";
-                std::cout << "==========================\n\n";
+                const NetworkRuntimeSnapshot snapshot =
+                    NetworkManager::Get().GetRuntimeSnapshot();
+                std::cout << '\n'
+                          << FormatNetworkStatus(snapshot)
+                          << '\n';
             }
         ));
 
         console.RegisterCommand(std::make_shared<ConsoleCommand>(
             "net_graph",
-            "Display real-time network graph [TOGGLE]",
+            "Report network graph availability",
             [](const std::vector<std::string>& args) {
-                std::cout << "[Network] Graph overlay toggled\n";
+                std::cout << "[Network] Graph: unavailable "
+                             "(no network graph telemetry is implemented)\n";
             }
         ));
 
-        // Network Variables
-        console.RegisterVariable(std::make_shared<ConsoleVariable>(
-            "net_lerp",
-            "0.015",
-            ConsoleVariable::Type::Float,
-            "Interpolation amount in seconds"
-        ));
-
-        console.RegisterVariable(std::make_shared<ConsoleVariable>(
-            "net_lag_compensate",
-            "1",
-            ConsoleVariable::Type::Bool,
-            "Server-side lag compensation"
-        ));
-
-        console.RegisterVariable(std::make_shared<ConsoleVariable>(
-            "cl_predict_correct",
-            "1",
-            ConsoleVariable::Type::Bool,
-            "Correct prediction errors"
-        ));
-
-        console.RegisterVariable(std::make_shared<ConsoleVariable>(
-            "net_stats_display",
-            "0",
-            ConsoleVariable::Type::Bool,
-            "Display network stats overlay"
-        ));
     }
 
     void FPSConsoleCommands::RegisterGameplayCommands() {
@@ -828,11 +834,8 @@ namespace Archura {
             "sys_benchmark",
             "Run performance benchmark",
             [](const std::vector<std::string>& args) {
-                std::cout << "[System] Running benchmark...\n";
-                std::cout << "[System] CPU: 1250 points\n";
-                std::cout << "[System] GPU: 2850 points\n";
-                std::cout << "[System] Memory: 1540 points\n";
-                std::cout << "[System] Total Score: 5640 points\n";
+                std::cout << "[System] Benchmark results: unavailable "
+                             "(no benchmark harness is implemented)\n";
             }
         ));
 
@@ -840,10 +843,8 @@ namespace Archura {
             "profile_start",
             "Start performance profiling: profile_start [name]",
             [](const std::vector<std::string>& args) {
-                std::string name = args.empty() ? "default" : args[0];
-                GameState::profileRunning = true;
-                GameState::profileStartTime = std::chrono::high_resolution_clock::now();
-                std::cout << "[Profiling] Profiling started: " << name << "\n";
+                std::cout << "[Profiling] profile_start: unavailable "
+                             "(no scoped profiler is implemented)\n";
             }
         ));
 
@@ -851,19 +852,8 @@ namespace Archura {
             "profile_stop",
             "Stop performance profiling and display results",
             [](const std::vector<std::string>& args) {
-                if (!GameState::profileRunning) {
-                    std::cout << "[Profiling] No active profile\n";
-                    return;
-                }
-                GameState::profileRunning = false;
-                auto end = std::chrono::high_resolution_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    end - GameState::profileStartTime
-                );
-                std::cout << "[Profiling] Profile duration: " << duration.count() << " ms\n";
-                std::cout << "[Profiling] Rendering: " << (duration.count() * 0.6) << " ms\n";
-                std::cout << "[Profiling] Simulation: " << (duration.count() * 0.3) << " ms\n";
-                std::cout << "[Profiling] Other: " << (duration.count() * 0.1) << " ms\n";
+                std::cout << "[Profiling] profile_stop: unavailable "
+                             "(no scoped profiler is implemented)\n";
             }
         ));
 
@@ -871,12 +861,8 @@ namespace Archura {
             "profile_results",
             "Display last profile results",
             [](const std::vector<std::string>& args) {
-                std::cout << "\n=== Profile Results ===\n";
-                std::cout << "Total Time: 150.23 ms\n";
-                std::cout << "- Rendering: 90.14 ms (60%)\n";
-                std::cout << "- Simulation: 45.07 ms (30%)\n";
-                std::cout << "- Other: 15.02 ms (10%)\n";
-                std::cout << "========================\n\n";
+                std::cout << "[Profiling] profile_results: unavailable "
+                             "(no scoped profiler is implemented)\n";
             }
         ));
 
