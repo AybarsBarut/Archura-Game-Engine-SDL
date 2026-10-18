@@ -38,6 +38,7 @@ enum class DisconnectReason : std::uint8_t {
 };
 
 struct NetworkLimits {
+    bool authoritativeInputOnly = false;
     std::size_t maxClients = 64;
     std::size_t maxQueuedBytesPerPeer = 512U * 1024U;
     std::uint32_t handshakeTimeoutMs = 10'000;
@@ -81,6 +82,9 @@ public:
     std::string GetLastError() const;
     NetworkStats GetStats() const;
     NetworkRuntimeSnapshot GetRuntimeSnapshot() const;
+    std::uint32_t GetLocalPeerId() const;
+    std::vector<std::uint32_t> GetConnectedPeerIds() const;
+    bool DisconnectPeer(std::uint32_t id);
 
     bool SetLimits(const NetworkLimits& limits);
 
@@ -96,6 +100,8 @@ public:
     bool SendPlayerUpdate(const PlayerUpdatePacket& packet);
     bool SendPlayerShoot(const PlayerShootPacket& packet);
     bool SendWorldState(const std::vector<std::uint8_t>& payload);
+    bool SendPlayerInput(const Net::PlayerInputPacket& input);
+    void SetOnPlayerInput(std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> callback);
 
     void SetOnPlayerUpdate(std::function<void(const PlayerUpdatePacket&)> callback);
     void SetOnPlayerShoot(std::function<void(const PlayerShootPacket&)> callback);

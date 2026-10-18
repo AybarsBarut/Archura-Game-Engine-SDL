@@ -10,10 +10,10 @@ namespace Archura::Net {
 
 // Wire format (all integers and IEEE-754 float bit patterns are big endian):
 // magic:u32, version:u16, type:u16, flags:u16, payloadLength:u32, sequence:u32.
-// No flags are defined in protocol v1. Receivers reject unknown bits instead of
+// No flags are defined in protocol v2. Receivers reject unknown bits instead of
 // silently interpreting an extension differently on each endpoint.
 constexpr std::uint32_t kProtocolMagic = 0x41524348U; // "ARCH"
-constexpr std::uint16_t kProtocolVersion = 1;
+constexpr std::uint16_t kProtocolVersion = 2;
 constexpr std::uint16_t kKnownFrameFlags = 0;
 constexpr std::size_t kFrameHeaderSize = 18;
 constexpr std::size_t kMaxPayloadSize = 256U * 1024U;
@@ -26,7 +26,8 @@ enum class PacketType : std::uint16_t {
     PlayerShoot = 4,
     WorldState = 5,
     ConnectAck = 6,
-    Heartbeat = 7
+    Heartbeat = 7,
+    PlayerInput = 8
 };
 
 enum class ProtocolError {
@@ -62,6 +63,18 @@ struct PlayerUpdatePacket {
     float yaw = 0.0F;
     float pitch = 0.0F;
 };
+
+// No client position, entity ID, elapsed time or speed is accepted as input.
+struct PlayerInputPacket {
+    std::uint32_t sequence = 0;
+    float moveX = 0.0F;
+    float moveZ = 0.0F;
+};
+bool ValidPlayerInput(const PlayerInputPacket& input) noexcept;
+std::vector<std::uint8_t> SerializePlayerInput(const PlayerInputPacket& input);
+bool DeserializePlayerInput(const std::vector<std::uint8_t>& payload, PlayerInputPacket& input) noexcept;
+std::vector<std::uint8_t> SerializeWelcome(std::uint64_t token, std::uint32_t peerID);
+bool DeserializeWelcome(const std::vector<std::uint8_t>& payload, std::uint64_t& token, std::uint32_t& peerID) noexcept;
 
 struct PlayerShootPacket {
     std::uint32_t id = 0;

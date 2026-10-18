@@ -1,0 +1,7 @@
+SDL2_net 2.2.0, official Visual C++ development archive (Windows x64 subset).
+Upstream: https://www.libsdl.org/projects/SDL_net/release/SDL2_net-devel-2.2.0-VC.zip
+Archive SHA256: f364e55babb44e47b41d039a43c640aa1f76615b726855591b555321c7d870dd
+Retrieved 2026-10-18 over HTTPS. Files copied unmodified: include/SDL_net.h,
+lib/x64/SDL2_net.lib, lib/x64/SDL2_net.dll, LICENSE.txt.
+Pinned for the bundled SDL 2.30.9/MSVC x64 stack; this does not claim to be the
+newest SDL_net release. See LICENSE.txt for the upstream zlib license.
