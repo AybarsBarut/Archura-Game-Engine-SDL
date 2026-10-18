@@ -1,6 +1,8 @@
 #include "Terrain.h"
 #include "Shader.h"
+#include "RenderThread.h"
 #include "../core/Logger.h"
+#include "../core/ResourceManager.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -12,31 +14,41 @@ namespace Archura {
 
 // ---------------------------------------------------------------------------
 Terrain::~Terrain() {
-    if (m_VAO) glDeleteVertexArrays(1, &m_VAO);
-    if (m_VBO) glDeleteBuffers(1, &m_VBO);
-    if (m_EBO) glDeleteBuffers(1, &m_EBO);
+    if (RenderThread::IsCurrent()) {
+        if (m_VAO) glDeleteVertexArrays(1, &m_VAO);
+        if (m_VBO) glDeleteBuffers(1, &m_VBO);
+        if (m_EBO) glDeleteBuffers(1, &m_EBO);
+    }
+    m_VAO = 0;
+    m_VBO = 0;
+    m_EBO = 0;
 }
 
 // ---------------------------------------------------------------------------
 Terrain* Terrain::CreateFlat(float widthWorld, float depthWorld, int gridSize) {
+    gridSize = std::max(2, gridSize);
     auto* t = new Terrain();
     t->m_WorldWidth = widthWorld;
     t->m_WorldDepth = depthWorld;
     t->m_MaxHeight  = 0.0f;
     t->m_MinHeight  = 0.0f;
     t->m_GridSize   = gridSize;
+    t->m_Cols       = gridSize;
+    t->m_Rows       = gridSize;
 
     // Tum yukseklikler sifir
-    int total = gridSize * gridSize;
-    std::vector<float> heights(total, 0.0f);
+    const int total = gridSize * gridSize;
+    std::vector<float> heights(static_cast<size_t>(total), 0.0f);
 
     t->BuildMesh(heights, gridSize, gridSize);
 
-    // Shader yükle
-    t->m_Shader = std::make_unique<Shader>();
-    if (!t->m_Shader->LoadFromFile("assets/shaders/terrain.vert",
-                                    "assets/shaders/terrain.frag")) {
-        ARCH_LOG_ERROR("[Terrain] terrain shader yuklenemedi!");
+    // Shader yükle (sadece aktif OpenGL context/render thread varsa)
+    if (RenderThread::IsCurrent()) {
+        t->m_Shader = std::make_unique<Shader>();
+        if (!t->m_Shader->LoadFromFile("assets/shaders/terrain.vert",
+                                        "assets/shaders/terrain.frag")) {
+            ARCH_LOG_ERROR("[Terrain] terrain shader yuklenemedi!");
+        }
     }
 
     ARCH_LOG_INFO("[Terrain] Duz arazi olusturuldu. Grid=" + std::to_string(gridSize)
@@ -48,37 +60,48 @@ Terrain* Terrain::CreateFlat(float widthWorld, float depthWorld, int gridSize) {
 // ---------------------------------------------------------------------------
 Terrain* Terrain::LoadFromHeightmap(const std::string& heightmapPath,
                                      float widthWorld, float depthWorld, float maxHeight) {
-    auto* t = new Terrain();
-    t->m_WorldWidth = widthWorld;
-    t->m_WorldDepth = depthWorld;
-    t->m_MaxHeight  = maxHeight;
-    t->m_MinHeight  = 0.0f;
+    const std::filesystem::path resolvedPath =
+        ResourceManager::Get().ResolveAssetPath(heightmapPath);
+    const std::string loadPath =
+        resolvedPath.empty() ? heightmapPath : resolvedPath.string();
 
-    // STB ile greyscale goruntu yukle
-    int w, h, channels;
+    // STB ile greyscale goruntu yukle (Terrain nesnesini basarili yuklemeden once tahsis etme!)
+    int w = 0, h = 0, channels = 0;
     stbi_set_flip_vertically_on_load_thread(0);
-    unsigned char* data = stbi_load(heightmapPath.c_str(), &w, &h, &channels, 1); // 1 kanal = greyscale
+    unsigned char* data = stbi_load(loadPath.c_str(), &w, &h, &channels, 1); // 1 kanal = greyscale
 
-    if (!data) {
+    if (!data || w < 2 || h < 2) {
+        if (data) {
+            stbi_image_free(data);
+        }
         ARCH_LOG_ERROR("[Terrain] Heightmap yuklenemedi: " + heightmapPath
                        + " — Duz arazi olusturuluyor.");
         return CreateFlat(widthWorld, depthWorld, 64);
     }
 
-    t->m_GridSize = std::min(w, h); // Kare olarak kes
+    auto* t = new Terrain();
+    t->m_WorldWidth = widthWorld;
+    t->m_WorldDepth = depthWorld;
+    t->m_MaxHeight  = maxHeight;
+    t->m_MinHeight  = 0.0f;
+    t->m_Cols       = w;
+    t->m_Rows       = h;
+    t->m_GridSize   = std::min(w, h);
 
-    std::vector<float> heights(w * h);
+    std::vector<float> heights(static_cast<size_t>(w) * static_cast<size_t>(h));
     for (int i = 0; i < w * h; ++i) {
-        heights[i] = (data[i] / 255.0f) * maxHeight;
+        heights[static_cast<size_t>(i)] = (data[i] / 255.0f) * maxHeight;
     }
     stbi_image_free(data);
 
     t->BuildMesh(heights, w, h);
 
-    t->m_Shader = std::make_unique<Shader>();
-    if (!t->m_Shader->LoadFromFile("assets/shaders/terrain.vert",
-                                    "assets/shaders/terrain.frag")) {
-        ARCH_LOG_ERROR("[Terrain] terrain shader yuklenemedi!");
+    if (RenderThread::IsCurrent()) {
+        t->m_Shader = std::make_unique<Shader>();
+        if (!t->m_Shader->LoadFromFile("assets/shaders/terrain.vert",
+                                        "assets/shaders/terrain.frag")) {
+            ARCH_LOG_ERROR("[Terrain] terrain shader yuklenemedi!");
+        }
     }
 
     ARCH_LOG_INFO("[Terrain] Heightmap'ten arazi olusturuldu: " + heightmapPath);
@@ -87,6 +110,11 @@ Terrain* Terrain::LoadFromHeightmap(const std::string& heightmapPath,
 
 // ---------------------------------------------------------------------------
 void Terrain::BuildMesh(const std::vector<float>& heights, int cols, int rows) {
+    cols = std::max(2, cols);
+    rows = std::max(2, rows);
+    m_Cols = cols;
+    m_Rows = rows;
+    m_GridSize = std::min(cols, rows);
     m_Heights.assign(heights.begin(), heights.end());
 
     // Min/Max hesapla
@@ -98,15 +126,15 @@ void Terrain::BuildMesh(const std::vector<float>& heights, int cols, int rows) {
     // Vertex yapisi: position(3) + normal(3) + texcoord(2)
     // Toplam float sayisi: cols*rows * 8
     std::vector<float> verts;
-    verts.reserve(cols * rows * 8);
+    verts.reserve(static_cast<size_t>(cols) * static_cast<size_t>(rows) * 8u);
 
-    float cellW = m_WorldWidth / (cols - 1);
-    float cellD = m_WorldDepth / (rows - 1);
+    const float cellW = m_WorldWidth / static_cast<float>(cols - 1);
+    const float cellD = m_WorldDepth / static_cast<float>(rows - 1);
 
     auto heightAt = [&](int c, int r) -> float {
         c = std::clamp(c, 0, cols - 1);
         r = std::clamp(r, 0, rows - 1);
-        return heights[r * cols + c];
+        return heights[static_cast<size_t>(r) * static_cast<size_t>(cols) + static_cast<size_t>(c)];
     };
 
     for (int r = 0; r < rows; ++r) {
@@ -122,8 +150,8 @@ void Terrain::BuildMesh(const std::vector<float>& heights, int cols, int rows) {
             float hU = heightAt(c, r + 1);
             glm::vec3 nx = glm::normalize(glm::vec3(hL - hR, 2.0f * cellW, hD - hU));
 
-            float u = (float)c / (cols - 1);
-            float v = (float)r / (rows - 1);
+            float u = static_cast<float>(c) / static_cast<float>(cols - 1);
+            float v = static_cast<float>(r) / static_cast<float>(rows - 1);
 
             // Pozisyon
             verts.push_back(x); verts.push_back(y); verts.push_back(z);
@@ -136,12 +164,12 @@ void Terrain::BuildMesh(const std::vector<float>& heights, int cols, int rows) {
 
     // Indeksler (quad -> 2 ucgen)
     std::vector<unsigned int> indices;
-    indices.reserve((cols - 1) * (rows - 1) * 6);
+    indices.reserve(static_cast<size_t>(cols - 1) * static_cast<size_t>(rows - 1) * 6u);
     for (int r = 0; r < rows - 1; ++r) {
         for (int c = 0; c < cols - 1; ++c) {
-            unsigned int tl = r * cols + c;
+            unsigned int tl = static_cast<unsigned int>(r * cols + c);
             unsigned int tr = tl + 1;
-            unsigned int bl = (r + 1) * cols + c;
+            unsigned int bl = static_cast<unsigned int>((r + 1) * cols + c);
             unsigned int br = bl + 1;
             // Ucgen 1
             indices.push_back(tl); indices.push_back(bl); indices.push_back(tr);
@@ -150,6 +178,10 @@ void Terrain::BuildMesh(const std::vector<float>& heights, int cols, int rows) {
         }
     }
     m_IndexCount = static_cast<unsigned int>(indices.size());
+
+    if (!RenderThread::IsCurrent()) {
+        return;
+    }
 
     // GPU'ya yukle
     glGenVertexArrays(1, &m_VAO);
@@ -187,7 +219,7 @@ void Terrain::Draw(const glm::mat4& view,
                    const glm::vec3& lightColor,
                    float            lightIntensity,
                    const glm::vec3& viewPos) {
-    if (!m_Shader || m_VAO == 0) return;
+    if (!RenderThread::IsCurrent() || !m_Shader || m_VAO == 0) return;
 
     m_Shader->Bind();
 
@@ -207,8 +239,8 @@ void Terrain::Draw(const glm::mat4& view,
     m_Shader->SetVec3("uViewPos", viewPos);
 
     // Yukseklik bilgisi (doku karismasi icin)
-    m_Shader->SetFloat("uMinHeight", m_MinHeight + position.y);
-    m_Shader->SetFloat("uMaxHeight", m_MaxHeight + position.y);
+    m_Shader->SetFloat("uMinHeight", m_MinHeight * scale.y + position.y);
+    m_Shader->SetFloat("uMaxHeight", m_MaxHeight * scale.y + position.y);
     m_Shader->SetFloat("uTexScale", m_TexScale);
 
     // Doku birimlerine atama
@@ -217,8 +249,6 @@ void Terrain::Draw(const glm::mat4& view,
         glBindTexture(GL_TEXTURE_2D, id ? id : fallback);
     };
 
-    // Yedek: varsayilan beyaz doku (OpenGL 0 ID = gecersiz)
-    // Eger doku yoksa sadece birim renk kullaniriz
     bindTex(m_TexGrass, 0, 0);
     bindTex(m_TexRock,  1, 0);
     bindTex(m_TexSnow,  2, 0);
@@ -242,37 +272,51 @@ void Terrain::Draw(const glm::mat4& view,
 
 // ---------------------------------------------------------------------------
 float Terrain::GetHeightAt(float worldX, float worldZ) const {
-    if (m_Heights.empty()) return 0.0f;
+    const int cols = m_Cols;
+    const int rows = m_Rows;
+    if (m_Heights.empty() || cols < 2 || rows < 2 ||
+        static_cast<size_t>(cols) * static_cast<size_t>(rows) > m_Heights.size()) {
+        return 0.0f;
+    }
+    if (std::abs(scale.x) <= 1.0e-6f || std::abs(scale.z) <= 1.0e-6f ||
+        m_WorldWidth <= 1.0e-6f || m_WorldDepth <= 1.0e-6f) {
+        return 0.0f;
+    }
 
-    // Dunya koordinatini grid koordinatina cevir
-    float localX = worldX - position.x + m_WorldWidth  * 0.5f;
-    float localZ = worldZ - position.z + m_WorldDepth  * 0.5f;
+    // Dunya koordinatini yatay olcek (scale.x, scale.z) dikkate alarak yerel arazi uzayina cevir
+    const float unscaledX = (worldX - position.x) / scale.x;
+    const float unscaledZ = (worldZ - position.z) / scale.z;
+    const float localX = unscaledX + m_WorldWidth * 0.5f;
+    const float localZ = unscaledZ + m_WorldDepth * 0.5f;
 
-    int cols = m_GridSize;
-    int rows = (int)m_Heights.size() / cols;
+    // Arazi siniri disindaysa 0.0f doner
+    if (localX < 0.0f || localX > m_WorldWidth ||
+        localZ < 0.0f || localZ > m_WorldDepth) {
+        return 0.0f;
+    }
 
-    float cellW = m_WorldWidth / (cols - 1);
-    float cellD = m_WorldDepth / (rows - 1);
+    const float cellW = m_WorldWidth / static_cast<float>(cols - 1);
+    const float cellD = m_WorldDepth / static_cast<float>(rows - 1);
 
-    float gc = localX / cellW;
-    float gr = localZ / cellD;
+    const float gc = std::clamp(localX / cellW, 0.0f, static_cast<float>(cols - 1));
+    const float gr = std::clamp(localZ / cellD, 0.0f, static_cast<float>(rows - 1));
 
-    int c0 = std::clamp((int)gc, 0, cols - 2);
-    int r0 = std::clamp((int)gr, 0, rows - 2);
-    int c1 = c0 + 1;
-    int r1 = r0 + 1;
+    const int c0 = std::clamp(static_cast<int>(gc), 0, cols - 2);
+    const int r0 = std::clamp(static_cast<int>(gr), 0, rows - 2);
+    const int c1 = c0 + 1;
+    const int r1 = r0 + 1;
 
-    float tx = gc - c0;
-    float tz = gr - r0;
+    const float tx = std::clamp(gc - static_cast<float>(c0), 0.0f, 1.0f);
+    const float tz = std::clamp(gr - static_cast<float>(r0), 0.0f, 1.0f);
 
     // Bilinear interpolasyon
-    float h00 = m_Heights[r0 * cols + c0];
-    float h10 = m_Heights[r0 * cols + c1];
-    float h01 = m_Heights[r1 * cols + c0];
-    float h11 = m_Heights[r1 * cols + c1];
+    const float h00 = m_Heights[static_cast<size_t>(r0) * static_cast<size_t>(cols) + static_cast<size_t>(c0)];
+    const float h10 = m_Heights[static_cast<size_t>(r0) * static_cast<size_t>(cols) + static_cast<size_t>(c1)];
+    const float h01 = m_Heights[static_cast<size_t>(r1) * static_cast<size_t>(cols) + static_cast<size_t>(c0)];
+    const float h11 = m_Heights[static_cast<size_t>(r1) * static_cast<size_t>(cols) + static_cast<size_t>(c1)];
 
-    float h0 = h00 + tx * (h10 - h00);
-    float h1 = h01 + tx * (h11 - h01);
+    const float h0 = h00 + tx * (h10 - h00);
+    const float h1 = h01 + tx * (h11 - h01);
     return (h0 + tz * (h1 - h0)) * scale.y + position.y;
 }
 

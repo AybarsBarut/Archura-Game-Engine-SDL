@@ -218,6 +218,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/game/GameModeManager.cpp"
     "src/rendering/Terrain.cpp"
     "src/rendering/PostProcess.cpp"
+    "src/editor/PlayModeSession.cpp"
     "src/editor/*.cpp"
 )
 
@@ -461,6 +462,38 @@ if(BUILD_TESTING)
     add_test(NAME Archura.Rendering.GraphicsAPISelection
              COMMAND ArchuraGraphicsAPISelectionTests)
 
+    add_executable(ArchuraEditorPlayStopTests
+        tests/EditorPlayStopLifecycleTests.cpp
+        src/editor/PlayModeSession.cpp
+        src/ecs/Component.cpp
+        src/ecs/Entity.cpp
+        src/game/PhysicsSystem.cpp
+        src/game/FPSController.cpp
+        src/game/Weapon.cpp
+        src/game/Projectile.cpp
+        src/game/ProjectileSystem.cpp
+        src/game/ParticleSystem.cpp
+        src/input/Input.cpp
+        src/rendering/Camera.cpp
+        src/rendering/Mesh.cpp
+        src/rendering/Shader.cpp
+        src/rendering/Texture.cpp
+        src/core/ResourceManager.cpp
+        src/core/Logger.cpp
+    )
+    target_include_directories(ArchuraEditorPlayStopTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+        ${SDL2_INCLUDE_DIR}
+    )
+    target_link_libraries(ArchuraEditorPlayStopTests PRIVATE
+        glad ufbx fast_obj
+    )
+    add_test(NAME Archura.Editor.PlayStopLifecycle
+             COMMAND ArchuraEditorPlayStopTests)
+
     add_executable(ArchuraWeaponProgressionTests
         tests/WeaponProgressionTests.cpp
         src/ecs/Component.cpp
@@ -493,6 +526,8 @@ if(BUILD_TESTING)
         src/core/Logger.cpp
         src/ecs/Component.cpp
         src/ecs/Entity.cpp
+        src/core/ResourceManager.cpp
+        src/rendering/Camera.cpp
     )
     target_include_directories(ArchuraProjectSerializerTests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -506,9 +541,9 @@ if(BUILD_TESTING)
         tests/GameSaveManagerTests.cpp src/core/GameSaveManager.cpp
         src/rendering/Mesh.cpp src/rendering/Texture.cpp
         src/rendering/Shader.cpp src/core/Logger.cpp
-        src/ecs/Component.cpp src/ecs/Entity.cpp)
-    target_include_directories(ArchuraGameSaveManagerTests PRIVATE src external/glm external/stb)
-    target_link_libraries(ArchuraGameSaveManagerTests PRIVATE glad ufbx fast_obj)
+        src/ecs/Component.cpp src/ecs/Entity.cpp src/core/ResourceManager.cpp src/rendering/Camera.cpp src/rendering/Terrain.cpp src/core/AudioSystem.cpp src/editor/GameBuilderPanel.cpp)
+    target_include_directories(ArchuraGameSaveManagerTests PRIVATE src external/glm external/stb external/imgui ${SDL2_INCLUDE_DIR})
+    target_link_libraries(ArchuraGameSaveManagerTests PRIVATE glad ufbx fast_obj imgui SDL2)
     add_test(NAME Archura.Core.GameSaveManager COMMAND ArchuraGameSaveManagerTests)
 
     add_executable(ArchuraServerConfigTests

@@ -7,6 +7,8 @@
 #include "rendering/Camera.h"
 #include "game/RenderSystem.h"
 #include "game/AudioSource.h"
+#include "core/AudioSystem.h"
+#include "ecs/components/AudioSourceComponent.h"
 #include "core/DeveloperConsole.h"
 // #include "input/Input.h" 
 
@@ -140,8 +142,9 @@ namespace Archura {
             return entity->HasComponent<RigidBody>();
         if (componentName == "MeshRenderer")
             return entity->HasComponent<MeshRenderer>();
-        if (componentName == "AudioSource")
-            return entity->HasComponent<AudioSource>();
+        // Support both runtime AudioSource and serialized AudioSourceComponent
+        if (componentName == "AudioSource" || componentName == "AudioSourceComponent")
+            return entity->HasComponent<AudioSource>() || entity->HasComponent<AudioSourceComponent>();
         if (componentName == "BoxCollider")
             return entity->HasComponent<BoxCollider>();
         if (componentName == "Light" || componentName == "LightComponent")
@@ -299,7 +302,12 @@ namespace Archura {
         if (scene) {
             Entity* entity = ResolveEntity(entityID);
             if (entity && entity->HasComponent<AudioSource>()) {
-                entity->GetComponent<AudioSource>()->isPlaying = true;
+                auto* src = entity->GetComponent<AudioSource>();
+                src->isPlaying = true;
+                AudioSystem::Get().Play(src, "sound_" + std::to_string(entity->GetID()));
+            }
+            if (entity && entity->HasComponent<AudioSourceComponent>()) {
+                entity->GetComponent<AudioSourceComponent>()->playing = true;
             }
         }
     }

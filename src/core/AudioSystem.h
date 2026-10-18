@@ -29,14 +29,14 @@ public:
 
     /**
      * @brief Arkaplan muzigi cal (MP3)
-     * @param filename assets/audio/ klasorundeki dosya adi
+     * @param filename assets/audio/ klasorundeki dosya adi veya yol
      * @param loop Donguye alinsin mi?
      */
     void PlayMusic(const std::string& filename, bool loop = true);
 
     /**
      * @brief Ses efekti cal (MP3/WAV)
-     * @param filename assets/audio/ klasorundeki dosya adi
+     * @param filename assets/audio/ klasorundeki dosya adi veya yol
      */
     void PlayOneShot(const std::string& filename);
 
@@ -49,6 +49,12 @@ public:
     // Play/Stop AudioSource
     void Play(struct AudioSource* source, const std::string& alias);
     void Stop(struct AudioSource* source);
+    void StopAllSceneAudio(Scene* scene);
+
+    /**
+     * @brief Ses dosya yolunu cift on-ek ("assets/audio/assets/audio/...") olmadan cozumler.
+     */
+    static std::string ResolveAudioPath(const std::string& filename);
 
     // Ses Ayarlari (0.0f - 1.0f)
     void SetMasterVolume(float volume);

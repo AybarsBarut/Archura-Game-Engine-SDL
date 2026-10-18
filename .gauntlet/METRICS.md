@@ -1,5 +1,74 @@
 # Metrics
 
+## GAUNTLET Loops 4 & 5 — Resource budgets, project-root resolution, ASSET-01, AUD-01/02, REND-01 & TERR-01, 2026-10-18
+
+- Implemented `SceneReconstructionBudget` (`maxEntities`, `maxTotalMeshVertices`,
+  `maxTotalMeshIndices`, `maxTotalMeshBytes`, `maxTotalTextureBytes`,
+  `maxSingleAssetFileBytes`) in `GameSaveManager` and `ProjectSerializer`, plus
+  `ResourceManager::SetProjectRoot`, `IsSafeAssetPath`, `ResolveAssetPath`, and
+  `CanonicalAssetKey`.
+- Updated `TextureManager` and `ResourceManager` to index textures by canonical
+  path so same-stem textures in different folders (`wood/albedo.bmp` vs
+  `metal/albedo.bmp`) never collide, and enabled CPU-side `stbi_load` dimension
+  validation in `Texture::LoadFromFile` when `RenderThread::IsCurrent()` is false.
+- Fixed `GameSaveManager::LoadEntities` to use `std::as_const(*mesh).GetVertices()`
+  and `std::as_const(*mesh).GetIndices()` when computing vertex/index budgets so
+  loaded `MeshSource` metadata is not invalidated to `Custom`.
+- Fixed `GameBuilderPanel` (`ASSET-01`, `AUD-02`) to resolve `.obj` models from
+  `assets/models` when `assets/objects` is absent and pass unprefixed clip names to
+  `AudioSystem::PlayOneShot`.
+- Implemented `AudioSystem::ResolveAudioPath` (collapsing duplicate `assets/audio/`
+  prefixes and rejecting `..` traversal), runtime alias opening in
+  `AudioSystem::Update`, and `AudioSource` + `AudioSourceComponent` support in
+  `ScriptGlue` (`AUD-01`, `AUD-02`).
+- Fixed `RenderSystem::Update` (`REND-01`) to use world-space positions
+  (`glm::vec3(entityPtr->GetWorldTransform()[3])`) for distance culling and light
+  positions.
+- Fixed `Terrain` (`TERR-01`): eliminated `new Terrain()` memory leak on missing
+  heightmap files before fallback `CreateFlat`, stored rectangular `m_Cols`/`m_Rows`
+  dimensions, guarded OpenGL calls with `RenderThread::IsCurrent()`, and applied
+  horizontal `scale.x`/`scale.z` and bounds checks in `Terrain::GetHeightAt`.
+- Final Debug all-target build exited 0; CTest 23/23 passed, 2.02 s
+  (`Archura.Core.ProjectSerializer` 0.17 s, `Archura.Core.GameSaveManager` 0.15 s,
+  `Archura.Editor.PlayStopLifecycle` 0.05 s, `Archura.Startup.OpenGL` 0.85 s).
+- Final Release all-target build/staging exited 0; CTest 23/23 passed, 1.65 s
+  (`Archura.Core.ProjectSerializer` 0.12 s, `Archura.Core.GameSaveManager` 0.14 s,
+  `Archura.Editor.PlayStopLifecycle` 0.03 s, `Archura.Startup.OpenGL` 0.75 s).
+- Commands: `cmake --build build-codex-graphics-api --config <Debug|Release> --parallel`
+  and `ctest --test-dir build-codex-graphics-api -C <Debug|Release> --output-on-failure`.
+- No frame-time performance claim, live audio hardware output certification, or
+  standalone packaging claim is made.
+
+## GAUNTLET Loop 3 — Editor selection lifetime & Play/Stop boundary, 2026-10-18
+
+- Implemented `EditorSelectionState` (`EntityHandle` + `Scene` lifetime token +
+  `Scene::OwnsEntityPointer`), handle-validated `RenderSystem::m_IsolationTarget`,
+  persistent-ID rebinding in `TransformUndoHistory`, Edit-mode simulation gating,
+  and `PlayModeSession` in-memory authored-scene snapshot and transactional
+  `Scene::CommitEntityReplacement` restore on Stop.
+- Fixed null-input dereference in `FPSController::Update` (`input->IsCursorLocked()`)
+  when running headless/without an `Input` instance.
+- Added `Archura.Editor.PlayStopLifecycle` (`tests/EditorPlayStopLifecycleTests.cpp`)
+  covering:
+  1. Selection lifetime across single/multi-select deletion, slot recycling, and
+     `Scene` destruction (`EditorSelectionState` + `RenderSystem` isolation).
+  2. Edit-mode simulation gating (transforms, physics, weapons, projectiles,
+     particles, scripts, and audio remain stationary in Edit mode).
+  3. Play/Stop restoration of authored transforms, components, hierarchy,
+     procedural/edited mesh geometry + `MeshSource`, camera, controller, Player
+     persistent ID, selection, and `TransformUndoHistory`, plus removal of
+     runtime-spawned entities/projectiles/particles.
+  4. 20-cycle Play/Stop stress regression with runtime spawns, deletions,
+     pause/resume, weapon fire, physics velocity/contacts, and selection changes.
+- Final Debug all-target build exited 0; CTest 23/23 passed, 2.61 s
+  (`Archura.Editor.PlayStopLifecycle` 0.06 s, `Archura.Startup.OpenGL` 1.19 s).
+- Final Release all-target build/staging exited 0; CTest 23/23 passed, 2.37 s
+  (`Archura.Editor.PlayStopLifecycle` 0.04 s, `Archura.Startup.OpenGL` 0.91 s).
+- Commands: `cmake --build build-codex-graphics-api --config <Debug|Release> --parallel 4`
+  and `ctest --test-dir build-codex-graphics-api -C <Debug|Release> --output-on-failure`.
+- No frame-time performance claim, live OpenAL/MCI audio hardware verification,
+  or standalone packaging claim is made.
+
 ## GAUNTLET Loop 2 — Weapon persistence, 2026-10-18
 
 - Reproduced failure on Loop 1: authored Weapon save returned Unsupported

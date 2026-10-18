@@ -4,63 +4,61 @@ Updated 2026-10-18. Record actual executions in `.gauntlet/METRICS.md`; this pla
 
 ## Current execution
 
-Debug and Release builds passed, each latest CTest run passed 22/22 (20 contracts,
-two startup checks). Added coverage: Release logger diagnostics; async directory
-cache; deletion-safe undo; primitive/OBJ/FBX identity and moves; shared scene
-codec; malformed/Unicode/schema input; legacy formats; hierarchy; audio config;
-failed construction rollback; save rejection/backup preservation. Startup creates
-a real OpenGL context, renders 16 frames and shuts down; unsupported-backend
-failure is also checked. Missing-backend headless-server failure was observed
-separately. Interactive acceptance below remains pending.
-
-Ownership follow-up extends both existing codec executables: authored Player/Floor
-names and hierarchy survive saves; arbitrary renamed engine services survive
-content loads; repeated reloads replace authored objects rather than accumulating
-names; `.project` restores ownership; legacy records become authored; invalid or
-promoted engine ownership in `.scene` rejects without changing the scene.
+Debug and Release builds passed, each latest CTest run passed 23/23 (21 contracts,
+two startup checks; Debug 2.02 s, Release 1.65 s). Added coverage: Release logger
+diagnostics; async directory cache; deletion-safe undo; editor selection lifetime
+and 20-cycle Play/Stop authored-state restoration; primitive/OBJ/FBX identity and
+moves; shared scene codec; configurable aggregate `SceneReconstructionBudget`
+(`maxEntities`, `maxTotalMeshVertices`, `maxTotalMeshIndices`, `maxTotalMeshBytes`,
+`maxTotalTextureBytes`, `maxSingleAssetFileBytes`); project-root asset path
+resolution and `..` traversal rejection; canonical texture identity for same-stem
+textures in different directories (`ASSET-01`); `GameBuilderPanel` `assets/models`
+fallback discovery and spawn (`ASSET-01`); `AudioSystem::ResolveAudioPath` and
+runtime alias assignment (`AUD-01`, `AUD-02`); `Terrain` missing-heightmap
+fallback, rectangular heightmap grid dimensions, and scaled bounds-checked
+`GetHeightAt` (`TERR-01`); malformed/Unicode/schema input; legacy formats;
+hierarchy; audio config; failed construction rollback; save rejection/backup
+preservation. Startup creates a real OpenGL context, renders 16 frames and shuts
+down; unsupported-backend failure is also checked.
 
 ## Automated layers
+
+Loops 4 & 5 extend `Archura.Core.ProjectSerializer` and
+`Archura.Core.GameSaveManager` to cover:
+- Aggregate `SceneReconstructionBudget` rejection for entity count, mesh vertex
+  totals, texture byte totals, and single-asset file size while preserving live
+  scene state and handles.
+- Parent directory traversal (`..`) rejection in model, texture and audio paths.
+- Project-root asset resolution from an unrelated working directory (`unrelated_cwd`)
+  and preservation of authored relative `model_path` and `texture` paths across
+  save/load.
+- Distinct canonical texture caching for same-stem textures in different folders
+  (`assets/textures/wood/albedo.bmp` vs `assets/textures/metal/albedo.bmp`).
+- `GameBuilderPanel` discovery and spawning of `.obj` models from `assets/models`
+  when `assets/objects` is absent.
+- `AudioSystem::ResolveAudioPath` collapsing duplicate `assets/audio/` prefixes
+  and `AudioSystem::Update` assigning `sound_<id>` runtime aliases when
+  `AudioSource::isPlaying` is true.
+- `Terrain::LoadFromHeightmap` missing-file flat fallback without memory leak,
+  rectangular 4x2 heightmap column/row preservation, and `Terrain::GetHeightAt`
+  interpolation with horizontal `scale.x`/`scale.z` and out-of-bounds `0.0f` return.
+
+Loop 3 adds `Archura.Editor.PlayStopLifecycle`: single/multi-select handle
+validation across deletion, slot recycling and `Scene` destruction;
+`RenderSystem` isolation handle validation; Edit-mode simulation gating across
+gameplay/physics/weapon/projectile/particle/script/audio systems; Play/Stop
+authored-scene restoration (transforms, components, hierarchy, procedural and
+edited mesh geometry + `MeshSource`, camera, controller, Player persistent ID,
+selection and `TransformUndoHistory`); and a 20-cycle Play/Stop stress test with
+runtime spawns, deletions, pause/resume and selection changes.
 
 Weapon loop adds `Archura.Core.WeaponSerialization`: default and initialized
 inventory, all six types, independent active/stored stats, precise float and
 4096-offset boundary round-trips, transient reset, malformed enum/field/array,
 duplicate inventory, ammo/rate bounds and failed-read destination preservation.
-Both project/content integrations persist Weapon; invalid saves preserve the
-preceding file and malformed loads preserve the live handle. Existing fixed-tick
-progression tests are required to stay green. With all options22 tests register
-(20 contracts, two real startup checks).
 
 Persistent-ID loop adds v2 identity/hierarchy determinism, repeated same-ID
 replacement, v1 numeric hierarchy migration, retained-service collision rollback,
 pending-destroy lookup, duplicate/malformed IDs and 128/129-node depth boundaries.
-ECS tests inject allocation failures during commit preflight and validate both
-runtime and persistent indexes before/after commit. MSVC Debug iterator-proxy-sized
-allocations are excluded because the vendor STL handles those inside noexcept
-constructors; Release injects all allocation sizes. This is not complete
-OS/driver/Mono low-memory coverage. Automated CRT failures must not open dialogs.
 
-| Layer | Existing coverage inspected | Required follow-up |
-|---|---|---|
-| Unit/contracts | ECS core, physics core, weapon progression, gameplay scroll, mouse edges, telemetry, job system, graphics selection, server config, network framing/no-backend/console, basic ProjectSerializer, and Project directory cache snapshots/invalidation/polling/navigation/errors/shutdown. Renderer ownership is opt-in. | Build every registered executable before CTest; inspect `ctest --test-dir <build> -N`. A discovered test is not necessarily built. |
-| Scene integration | Basic quoted name and Transform project round-trip; malformed-file scene preservation. | Both save entry points: empty/multiple entities, nested hierarchy, duplicates/renames, stable IDs, UTF-8/control escapes, models/primitives/textures/materials/lights/colliders/bodies/scripts/audio and supported gameplay config. |
-| Failure/data integrity | Selected malformed network/config/project inputs. | Invalid/truncated JSON, unknown schema/component/asset, unsafe paths, failed construction/write/replace and backup recovery. Assert old scene/config/file unchanged on failure. Legacy migration must be explicit and deterministic. |
-| Startup/headless | No application/server end-to-end smoke certified by this audit. | Finite startup/exit switches with nonzero failures; no-backend server must fail informatively; real backend server must accept and stop cleanly. |
-| Graphics | Ownership contracts; no image baseline certified. | Shader failure retains previous program; GL debug log, FBO resize/minimize/restore, post-process state, hierarchy visibility, terrain samples, shadows/color/gamma reference images. |
-| Performance | Telemetry/statistics contracts and opt-in allocator/ECS microbenchmarks. | Reproducible representative gameplay scene; average/P95/P99, CPU phases, memory, startup and actual submissions. GPU results only with timer-query evidence. |
-
-Run Debug and Release independently using the commands in [BUILD_GUIDE.md](BUILD_GUIDE.md). Preserve logs and explicitly report optional SDL_net/OpenAL availability. Run `ctest --test-dir <build> --output-on-failure -C <config>` after a successful build. Renderer tests need their own enabled option; benchmarks are not functional acceptance tests.
-
-## Manual/system scenarios still requiring real execution
-
-1. **A / editor lifecycle:** Open, create/move/rename, save, close, reopen; verify properties and hierarchy. Move/delete/undo and script deletion must not dereference stale selection.
-2. **B / scene integrity:** Persist representative scene through both APIs and restart. Missing assets must report their paths and preserve references, not silently substitute cubes.
-3. **C / gameplay boundary:** Play, move/collide/fire, pause/resume, Stop; runtime entities disappear and authored state returns. Repeat 20 cycles with selections and scripts.
-4. **D / resources:** Repeated scene load/unload and burst projectiles/audio; track process memory plus live native/GL/Mono/audio ownership. A rising allocator high-water mark alone is not proof of a leak.
-5. **E / networking:** Launch one dedicated server and two separate clients with actual backend. Verify distinct identity, spawn, authoritative movement, snapshots, disconnect, reconnect and rejection of malformed/oversized/unauthorized input. Protocol unit tests alone do not fulfill this scenario.
-6. **F / distribution:** Package sample game; launch in clean deployment directory from unrelated CWD with source/build paths unavailable. Verify startup scene, controls, assets, managed code and dependency diagnostics.
-7. **G / failure recovery:** Corrupt config/save/shader/script, remove an asset/SDK, deny save destination; errors and exit status must reflect real failure, with old state/data intact.
-8. **H / timing/performance:** Same deterministic input/seed at 30/60/120/144/240 rendering FPS plus stalls; compare gameplay time, shots, jumps and trajectories. Capture same workload before/after optimizations.
-
-## Completion evidence
-
-Each repaired defect links its audit ID to a focused regression or a concrete testing limitation, the exact configure/build/test command, exit status, test count and runtime artifacts where applicable. Record sanitizers/Windows diagnostic tool availability explicitly. Interactive/audio/two-process/image tests remain pending until performed; do not convert source inspection into runtime PASS.
+Run Debug and Release independently using the commands in [BUILD_GUIDE.md](BUILD_GUIDE.md). Preserve logs and explicitly report optional SDL_net/OpenAL availability. Run `ctest --test-dir <build> --output-on-failure -C <config>` after a successful build.
