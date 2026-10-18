@@ -36,6 +36,8 @@ uniform float uShininess;
 // Shadow map
 uniform sampler2DShadow uShadowMap;
 uniform mat4      uLightSpaceMatrix;
+uniform float     uShadowFadeStart;
+uniform float     uShadowDistance;
 
 // ── Shadow PCF 3x3 with normal-based bias ────────────────────────────────────
 float ShadowCalculation(vec4 fragPosLS, vec3 norm, vec3 lightDir) {
@@ -64,7 +66,9 @@ float ShadowCalculation(vec4 fragPosLS, vec3 norm, vec3 lightDir) {
             shadow += 1.0 - visibility;
         }
     }
-    return shadow / 9.0;
+    float fade = 1.0 - smoothstep(uShadowFadeStart, uShadowDistance,
+                                  distance(uViewPos, FragPos));
+    return (shadow / 9.0) * fade;
 }
 
 void main() {

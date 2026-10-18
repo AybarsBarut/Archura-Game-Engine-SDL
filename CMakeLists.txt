@@ -462,6 +462,20 @@ if(BUILD_TESTING)
     add_test(NAME Archura.Rendering.GraphicsAPISelection
              COMMAND ArchuraGraphicsAPISelectionTests)
 
+    add_executable(ArchuraDirectionalShadowTests tests/DirectionalShadowTests.cpp)
+    target_include_directories(ArchuraDirectionalShadowTests PRIVATE src external/glm)
+    add_test(NAME Archura.Rendering.DirectionalShadow COMMAND ArchuraDirectionalShadowTests)
+
+    add_executable(ArchuraDevConsoleInputTests
+        tests/DevConsoleInputTests.cpp src/game/DevConsole.cpp
+        src/core/DeveloperConsole.cpp src/input/Input.cpp)
+    target_include_directories(ArchuraDevConsoleInputTests PRIVATE src external/glm)
+    target_link_libraries(ArchuraDevConsoleInputTests PRIVATE imgui)
+    add_custom_command(TARGET ArchuraDevConsoleInputTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SDL2_BasePath}/lib/x64/SDL2.dll" "$<TARGET_FILE_DIR:ArchuraDevConsoleInputTests>/SDL2.dll")
+    add_test(NAME Archura.Editor.DevConsoleInput COMMAND ArchuraDevConsoleInputTests)
+
     add_executable(ArchuraEditorPlayStopTests
         tests/EditorPlayStopLifecycleTests.cpp
         src/editor/PlayModeSession.cpp

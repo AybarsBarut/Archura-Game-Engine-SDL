@@ -1,8 +1,5 @@
 #include "DevConsole.h"
-#include "../core/Application.h"
-#include "../core/AudioSystem.h"
 #include "../input/Input.h"
-#include "CommandRegistry.h"
 #include "../core/DeveloperConsole.h" // Logic System
 #include <imgui.h>
 
@@ -100,9 +97,9 @@ void DevConsole::Render() {
   // Input area
   ImGui::Separator();
   bool reclaim_focus = false;
-  ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue |
-                                    ImGuiInputTextFlags_CallbackCompletion |
-                                    ImGuiInputTextFlags_CallbackHistory;
+  // Callback flags require an actual handler when the input gains focus.
+  // Suggestions below are rendered directly; no completion/history handler exists.
+  const ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue;
 
   ImGui::TextDisabled("Command");
   ImGui::SameLine();

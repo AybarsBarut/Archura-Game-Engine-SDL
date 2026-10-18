@@ -6,6 +6,7 @@
 #include "../rendering/Mesh.h"
 #include "../rendering/Texture.h"
 #include "../rendering/RenderThread.h"
+#include "../rendering/DirectionalShadow.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
@@ -68,7 +69,7 @@ bool RenderSystem::InitShadowMap() {
     
     glGenTextures(1, &m_DepthMapTexture);
     glBindTexture(GL_TEXTURE_2D, m_DepthMapTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
                  SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     
     // Bilinear percentage-closer filtering prevents visible square texels.
@@ -309,21 +310,12 @@ void RenderSystem::Update(float deltaTime) {
     // En yakin directional isigi bul (Gunes)
     // Simdilik list'teki type=0 olan ilk isigi alalim
     
-    glm::vec3 lightPos = glm::vec3(0.0f);
     glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
     bool hasDirLight = false;
     
     for (const auto& l : lights) {
         if (l.type == 0) { // Directional
-             // "Sun" moves securely with the player to keep shadows high-res implies "Cascaded Shadow Maps"
-             // But here we use a simple large ortho map.
-             // Position is important for the View Matrix of the light.
-             lightPos = l.position;
              lightDirection = l.direction;
-             // Ensure the "Light Position" is far enough back along the inverse direction vector
-             // so it doesn't clip scene objects behind it if we use it as "Eye" pos.
-             // But for Ortho, Z matters less except for Near/Far plane clipping.
-             // We'll keep l.position as the "Virtual Source".
              hasDirLight = true;
              break;
         }
@@ -338,49 +330,23 @@ void RenderSystem::Update(float deltaTime) {
         glBindFramebuffer(GL_FRAMEBUFFER, m_DepthMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
         
-        // Light Space Matrix
-        constexpr float near_plane = 1.0f;
-        constexpr float far_plane = 140.0f;
-        // Preserve useful texel density around the active camera.
-        constexpr float orthoSize = 45.0f;
-        glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, near_plane, far_plane);
-        
-        // Build a non-degenerate directional-light view. Using the entity
-        // position as the eye and world-up directly produced NaNs whenever the
-        // sun sat above the origin (forward parallel to up).
-        if (glm::dot(lightDirection, lightDirection) < 1.0e-8f) {
-            lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
-        } else {
-            lightDirection = glm::normalize(lightDirection);
-        }
-        const glm::mat4 inverseView = glm::inverse(view);
-        glm::vec3 cameraForward = -glm::vec3(inverseView[2]);
-        if (glm::dot(cameraForward, cameraForward) < 1.0e-8f)
-            cameraForward = glm::vec3(0.0f, 0.0f, -1.0f);
-        else
-            cameraForward = glm::normalize(cameraForward);
-        const glm::vec3 shadowCenter = viewPos + cameraForward * 12.0f;
-        lightPos = shadowCenter - lightDirection * 65.0f;
-        const glm::vec3 up = std::abs(glm::dot(lightDirection, glm::vec3(0, 1, 0))) > 0.99f
-                                 ? glm::vec3(0, 0, 1)
-                                 : glm::vec3(0, 1, 0);
-        glm::mat4 lightView = glm::lookAt(lightPos, shadowCenter, up);
-        
-        m_LightSpaceMatrix = lightProjection * lightView;
+        m_LightSpaceMatrix = BuildDirectionalShadowMatrix(
+            viewPos, lightDirection, SHADOW_WIDTH, SHADOW_HEIGHT);
 
-        // Stabilize the map so sub-texel camera motion cannot make shadows crawl.
-        glm::vec4 shadowOrigin = m_LightSpaceMatrix * glm::vec4(0, 0, 0, 1);
-        shadowOrigin *= static_cast<float>(SHADOW_WIDTH) * 0.5f;
-        const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
-        glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) *
-                                (2.0f / static_cast<float>(SHADOW_WIDTH));
-        roundOffset.z = 0.0f;
-        roundOffset.w = 0.0f;
-        lightProjection[3] += roundOffset;
-        m_LightSpaceMatrix = lightProjection * lightView;
-        
         m_DepthShader->Bind();
         m_DepthShader->SetMat4("lightSpaceMatrix", m_LightSpaceMatrix);
+
+        // PCF compares neighboring texels on the same sloped surface. A small
+        // constant receiver bias alone cannot cover their depth difference.
+        // Offset casters by two depth slopes to cover the 3x3 + bilinear PCF
+        // footprint without increasing the receiver bias for every surface.
+        const GLboolean offsetWasEnabled = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+        GLfloat previousOffsetFactor = 0.0f;
+        GLfloat previousOffsetUnits = 0.0f;
+        glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &previousOffsetFactor);
+        glGetFloatv(GL_POLYGON_OFFSET_UNITS, &previousOffsetUnits);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(2.0f, 4.0f);
         
         // Tum sahneyi depth icin render et
         // Batch mantigini burada da kullanabiliriz ama basitlik icin direkt loop
@@ -410,6 +376,8 @@ void RenderSystem::Update(float deltaTime) {
              ++m_LastFrameCounters.shadowBatchSubmissions;
         }
         
+        glPolygonOffset(previousOffsetFactor, previousOffsetUnits);
+        if (!offsetWasEnabled) glDisable(GL_POLYGON_OFFSET_FILL);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     } else {
         // No directional light: keep shadow sampling deterministic.
@@ -453,6 +421,8 @@ void RenderSystem::Update(float deltaTime) {
         // Shadow Map Uniforms
         shader->SetMat4("uLightSpaceMatrix", m_LightSpaceMatrix);
         shader->SetInt("uShadowMap", 1); // Texture Unit 1
+        shader->SetFloat("uShadowFadeStart", DirectionalShadowFadeStart);
+        shader->SetFloat("uShadowDistance", DirectionalShadowDistance);
         
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, m_DepthMapTexture);
