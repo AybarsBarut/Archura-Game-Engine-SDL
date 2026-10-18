@@ -9,7 +9,7 @@ cannot read version 2; `.bak` retains the preceding save when replacing a file.
 
 The codec supports names, local transforms, hierarchy, mesh source recipes
 (cube, plane, sphere, capsule, stairs, ramp, OBJ/FBX), texture paths/color,
-colliders, lights, rigid bodies, health, script class names, spawn points, skybox
+colliders, lights, rigid bodies, health, Weapon configuration, script class names, spawn points, skybox
 face paths, both existing audio source component configurations and surface type.
 Runtime script instance IDs and audio playback handles/state are reset. Asset
 paths retain existing working-directory-relative semantics; packaging/relocation
@@ -43,11 +43,25 @@ of writing an unreadable file. Data already omitted by older saves cannot be
 recovered by this migration.
 
 Unknown serialized component names and unhandled live component types are
-rejected. This includes Weapon/Projectile/Particle/Lifetime and custom component
+rejected. This includes Projectile/Particle/Lifetime and custom component
 types until dedicated codecs exist. Edited/custom geometry, assigned shaders and
 textures without source paths also fail saving explicitly. Rejection leaves the
 previous destination intact. Materials beyond the existing color/texture fields
 are not supported.
+
+Weapon records contain the selected type (all six defined enum values), active
+stats and up to six independent inventory entries. Active stats are preserved
+independently because the component updates the stored inventory on switching.
+Damage, fire rate, range, magazine/current/reserve ammo, reload duration, recoil
+amount, automatic mode and per-shot pitch/yaw offsets round-trip. Recoil patterns
+are limited to 4096 finite vec2 entries; duplicate inventory types, invalid enums,
+missing/wrongly typed fields, negative values and magazine overflow reject.
+Knife zero-size magazines and zero reload duration remain supported.
+
+Authored loads reset cooldown, in-progress reload, current recoil and shot index;
+they preserve configured/current ammo. This is an authoring codec, not a runtime
+checkpoint/resume mechanism or Play/Stop snapshot implementation. Standalone
+WeaponSerializationTests plus project/content integration tests cover it.
 
 JSON parsing validates the complete document, Unicode escapes/UTF-8, duplicate
 keys, numeric grammar and finite values. Files are capped at 32 MiB, entities at

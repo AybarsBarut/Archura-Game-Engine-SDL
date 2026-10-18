@@ -1,5 +1,14 @@
 # Regressions
 
+## Weapon persistence loop — verified
+
+Authored Weapon save rejection was reproduced before integration. The complete
+codec now passes dedicated strict-schema tests and both project/content round
+trips. Invalid ammo writes preserve the previous save; malformed loads preserve
+the old runtime handle. Independent inventory/active stats and recoil patterns
+persist; transient firing state resets. All 22 tests pass in Debug and Release,
+including unchanged fixed-tick weapon progression and actual startup/shutdown.
+
 ## Persistent identity loop — intermediate failure and correction
 
 - New save/load/save identity regression failed on d1e8a80 before implementation.

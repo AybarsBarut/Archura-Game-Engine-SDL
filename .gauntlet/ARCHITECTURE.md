@@ -15,7 +15,21 @@
 - `Scene` uniquely owns entities; entities uniquely own components. Hierarchy pointers are non-owning and constrained to a Scene.
 - Resource caches mix shared assets with legacy raw-pointer ownership. Application teardown destroys OpenGL owners before the context.
 
-## Actual frame pipeline
+## Scene persistence
+
+- Both save entry points share SceneData/WeaponData and complete bounded JSON
+  validation. New version-2 files persist independent 128-bit entity identities
+  and parent identities; v1 numeric hierarchy references migrate on next save.
+- Runtime handles never revive after load. Scene indexes runtime and persistent
+  identities separately; commit prepares final uniqueness/index state before
+  deleting old entities and finishes with nonthrowing swaps.
+- Content loads retain explicitly engine-owned services; ownership is independent
+  of names. Project loads replace all entities. Cross-boundary content hierarchy
+  edges and unsupported data reject rather than disappearing.
+- Weapon active/inventory stats, ammo and recoil patterns persist; transient
+  firing/reload state resets. Authored persistence is not a runtime snapshot.
+
+## Actual frame pipeline (unchanged)
 
 ```text
 SDL / ImGui events and frame-sampled input

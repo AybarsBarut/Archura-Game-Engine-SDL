@@ -30,7 +30,11 @@ and parent references, v1/unversioned files migrate, final index uniqueness is
 validated before replacing the live scene. Runtime handles remain fresh.
 Debug/Release full21/21 gates include rollback fault injection and depth bounds.
 
-Remaining P0: gameplay component coverage; broader selection lifetime and Play/Stop restoration;
+GAUNTLET Loop 2 added real Weapon configuration persistence and strict component
+validation; both full builds now pass 22/22 tests. Other runtime-only component
+codecs remain explicitly unsupported. No Play/Stop restoration is implied.
+
+Remaining P0: broader selection lifetime and Play/Stop restoration;
 standalone packaging; authoritative server simulation. Per-file/entity/mesh
 limits do not establish an aggregate allocation budget. Full interactive reopen,
 texture rendering, managed callbacks, audio and resource-growth acceptance remain

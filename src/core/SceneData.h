@@ -1,5 +1,6 @@
 #pragma once
 #include "SerializationJson.h"
+#include "WeaponData.h"
 #include "../ecs/Entity.h"
 #include "../game/AudioSource.h"
 #include "../ecs/components/AudioSourceComponent.h"
@@ -25,6 +26,7 @@ struct EntityData {
     std::optional<AudioSource> audio;
     std::optional<AudioSourceComponent> audioComponent;
     std::optional<SurfaceProperty> surface;
+    std::optional<Weapon> weapon;
 };
 inline void Vec(std::ostream& out, const glm::vec3& v) { out << '[' << v.x << ',' << v.y << ',' << v.z << ']'; }
 inline bool HasOnlySupportedComponents(Entity* entity) {
@@ -34,16 +36,21 @@ inline bool HasOnlySupportedComponents(Entity* entity) {
         entity->HasComponent<Health>() + entity->HasComponent<ScriptComponent>() +
         entity->HasComponent<SpawnPoint>() + entity->HasComponent<SkyboxComponent>() +
         entity->HasComponent<AudioSource>() + entity->HasComponent<AudioSourceComponent>() +
-        entity->HasComponent<SurfaceProperty>();
+        entity->HasComponent<SurfaceProperty>() + entity->HasComponent<Weapon>();
     return known == entity->GetComponentCount();
 }
-inline void WriteComponents(std::ostream& out, Entity* entity) {
+inline bool WriteComponents(std::ostream& out, Entity* entity) {
     out << ",\n      \"engine_owned\":" << (entity->IsEngineOwned() ? "true" : "false");
     out << ",\n      \"persistent_id\":\"" << entity->GetPersistentID()
         << "\",\"parent_persistent_id\":\""
         << (entity->GetParent() ? entity->GetParent()->GetPersistentID() : "")
         << "\",\"components\":{";
     bool first = true;
+    if (auto* weapon = entity->GetComponent<Weapon>()) {
+        out << "\"weapon\":";
+        if (!WriteWeapon(out, *weapon)) return false;
+        first = false;
+    }
     auto key = [&](const char* name) { if (!first) out << ','; first = false; out << '"' << name << "\":{"; };
     if (auto* c = entity->GetComponent<BoxCollider>()) { key("collider"); out << "\"size\":"; Vec(out,c->size);out << ",\"center\":";Vec(out,c->center);out << ",\"shape\":" << static_cast<int>(c->shape) << ",\"trigger\":" << (c->isTrigger?"true":"false") << '}'; }
     if (auto* c = entity->GetComponent<LightComponent>()) { key("light"); out << "\"type\":" << static_cast<int>(c->type) << ",\"color\":";Vec(out,c->color);out << ",\"intensity\":" << c->intensity << ",\"range\":" << c->range << '}'; }
@@ -56,6 +63,7 @@ inline void WriteComponents(std::ostream& out, Entity* entity) {
     if (auto* c = entity->GetComponent<AudioSourceComponent>()) { key("audio_source");out << "\"clip\":\"" << Escape(c->clip_path) << "\",\"gain\":" << c->gain << ",\"pitch\":" << c->pitch << ",\"ref_distance\":" << c->ref_distance << ",\"loop\":" << (c->looping?"true":"false") << '}'; }
     if (auto* c = entity->GetComponent<SurfaceProperty>()) { key("surface");out << "\"type\":" << static_cast<int>(c->type) << '}'; }
     out << '}';
+    return static_cast<bool>(out);
 }
 inline bool IDField(const Json& data, const char* name, EntityID& id) {
     const Json* value=data.Find(name);if(!value)return true;
@@ -77,6 +85,12 @@ inline bool ReadComponents(const Json& data, EntityData& result) {
     for(const auto& pair:components->object){
         const auto& key=pair.first;const auto& c=pair.second;
         if(c.kind!=Json::Kind::Object)return false;
+        if (key == "weapon") {
+            Weapon weapon;
+            if (!ReadWeapon(c, weapon)) return false;
+            result.weapon = std::move(weapon);
+            continue;
+        }
         if(key=="collider") { BoxCollider v;int shape=0;if(!Vec3Field(c,"size",v.size)||!Vec3Field(c,"center",v.center)||!IntField(c,"shape",shape)||shape<0||shape>1||!BoolField(c,"trigger",v.isTrigger))return false;v.shape=static_cast<BoxCollider::Shape>(shape);result.collider=v; }
         else if(key=="light") { LightComponent v;int type=1;if(!Vec3Field(c,"color",v.color)||!FloatField(c,"intensity",v.intensity)||!FloatField(c,"range",v.range)||!IntField(c,"type",type)||type<0||type>2||v.intensity<0||v.range<0)return false;v.type=static_cast<LightComponent::Type>(type);result.light=v; }
         else if(key=="rigid_body") { RigidBody v;if(!Vec3Field(c,"velocity",v.velocity)||!Vec3Field(c,"force",v.force)||!FloatField(c,"mass",v.mass)||!FloatField(c,"drag",v.drag)||!FloatField(c,"restitution",v.restitution)||!FloatField(c,"friction",v.friction)||!BoolField(c,"gravity",v.useGravity)||!BoolField(c,"kinematic",v.isKinematic)||!BoolField(c,"continuous",v.continuous))return false;result.rigidBody=v; }
@@ -93,6 +107,7 @@ inline bool ReadComponents(const Json& data, EntityData& result) {
 }
 inline void ApplyComponents(Entity* entity, const EntityData& data) {
     entity->SetOwnership(data.engineOwned ? EntityOwnership::Engine : EntityOwnership::Authored);
+    if(data.weapon)*entity->AddComponent<Weapon>()=*data.weapon;
     if(data.collider)*entity->AddComponent<BoxCollider>()=*data.collider;
     if(data.light)*entity->AddComponent<LightComponent>()=*data.light;
     if(data.rigidBody)*entity->AddComponent<RigidBody>()=*data.rigidBody;

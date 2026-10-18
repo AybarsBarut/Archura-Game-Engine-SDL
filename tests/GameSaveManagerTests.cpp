@@ -3,6 +3,7 @@
 #include "rendering/Mesh.h"
 #include "rendering/Shader.h"
 #include "rendering/Texture.h"
+#include "game/Weapon.h"
 #include <filesystem>
 #include <chrono>
 #include <fstream>
@@ -131,6 +132,50 @@ int main(){
         const auto migratedID = loaded.GetEntities()[1]->GetPersistentID();
         Check(saves.SaveProject("migrated", &loaded) && saves.LoadProject("saves/migrated.scene", &loaded), "migrated scene saves and reloads as version two");
         Check(loaded.GetEntities()[1]->GetPersistentID() == migratedID, "migrated identity stabilizes after its first version-two save");
+    }
+    {
+        Archura::Scene armed;
+        auto* player = armed.CreateEntity("authored armed Player");
+        auto* weapon = player->AddComponent<Archura::Weapon>();
+        weapon->InitInventory();
+        weapon->stats.damage = 42.5f;
+        weapon->stats.currentMag = 7;
+        weapon->stats.pattern.offsets = {{1.25f, -2.5f}, {0.5f, 3.0f}};
+        weapon->isReloading = true;
+        weapon->reloadTimer = 0.75f;
+        const bool saved = saves.SaveProject("armed", &armed);
+        Check(saved, "authored Weapon configuration must be saveable");
+        if (saved) {
+            Archura::Scene loaded;
+            const bool success = saves.LoadProject("saves/armed.scene", &loaded);
+            Check(success && loaded.GetEntities().size() == 1, "armed scene round trips");
+            if (success && !loaded.GetEntities().empty()) {
+                const auto* restoredWeapon = loaded.GetEntities()[0]->GetComponent<Archura::Weapon>();
+                Check(restoredWeapon && restoredWeapon->stats.damage == 42.5f && restoredWeapon->stats.currentMag == 7,
+                      "weapon active stats survive scene save");
+                Check(restoredWeapon && restoredWeapon->stats.pattern.offsets == weapon->stats.pattern.offsets &&
+                      restoredWeapon->inventory.size() == weapon->inventory.size(), "weapon inventory and recoil pattern survive scene save");
+                Check(restoredWeapon && !restoredWeapon->isReloading && restoredWeapon->reloadTimer == 0,
+                      "transient reload state resets on authored scene load");
+                auto readArmed = [] { std::ifstream f("saves/armed.scene", std::ios::binary); std::ostringstream out; out << f.rdbuf(); return out.str(); };
+                const auto goodSave = readArmed();
+                weapon->stats.currentMag = weapon->stats.magSize + 1;
+                Check(!saves.SaveProject("armed", &armed) && readArmed() == goodSave,
+                      "invalid weapon ammo rejects without overwriting the preceding save");
+                weapon->stats.currentMag = 7;
+                const auto oldArmedHandle = loaded.GetEntities()[0]->GetHandle();
+                std::string malformedWeapon = goodSave;
+                const std::string key = "\"current_mag\":7";
+                const auto position = malformedWeapon.find(key);
+                Check(position != std::string::npos, "fixture contains active magazine count");
+                if (position != std::string::npos) {
+                    malformedWeapon.replace(position, key.size(), "\"current_mag\":-1");
+                    write(malformedWeapon);
+                    Check(!saves.LoadProject("input.scene", &loaded) && loaded.IsAlive(oldArmedHandle),
+                          "malformed weapon scene preserves original live handle");
+                }
+            }
+        }
     }
     std::filesystem::current_path(original);
     // This unique directory was created exclusively by this test.

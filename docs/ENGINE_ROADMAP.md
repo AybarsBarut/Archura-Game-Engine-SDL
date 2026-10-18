@@ -11,14 +11,16 @@ survive content loads, project ownership round-trips and legacy records migrate.
 
 ## Next implementation queue
 
-GAUNTLET Loop1 completed: persistent scene IDs, v2 records/v1 migration,
-prepared final identity index and runtime-handle invalidation passed all21 tests
-in Debug and Release. Execution plan and actual gates: `.gauntlet/LOOP_PLAN.md`.
+GAUNTLET Loop 1 completed: persistent scene IDs, v2 records/v1 migration,
+prepared final identity index and runtime-handle invalidation passed all 21 tests
+in Debug and Release. Loop 2 added real Weapon persistence and strict validation;
+both configurations now pass 22/22. Execution gates: `.gauntlet/LOOP_PLAN.md`.
 
 | Priority | Concrete change / affected files | Acceptance |
 |---|---|---|
 | Done, Loop1 | Independent persistent IDs and transactional final index; v2 schema with legacy migration. | Debug/Release21/21; identity/hierarchy/determinism/collision/allocator/depth regressions pass. |
-| P0 | Serialize Weapon gameplay configuration, then implement the authored Play/Stop boundary in Application/Editor/ScriptSystem. Clear selection/history and transient audio/physics/script ownership at the boundary. | Default authored game scene saves; Edit does not simulate; repeated Play/Stop restores all authored values and removes runtime-only entities. |
+| Done, Loop 2 | Real Weapon active/inventory/ammo/recoil configuration codec with transient reset. | Both save APIs and dedicated malformed/boundary tests pass; existing 128 Hz progression stays green. |
+| P0, next | Authored Play/Stop boundary in Application/Editor/ScriptSystem, rebinding runtime references through persistent IDs. Clear selection/history and transient audio/physics/script ownership at the boundary. | Edit does not simulate; repeated Play/Stop restores authored values and removes runtime-only entities. |
 | P1 | Add configurable aggregate mesh/texture reconstruction budgets and project-root asset resolution in the shared codec/ResourceManager. | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation and duplicate filenames are tested. |
 | P0/P1 | Extract standalone runtime startup and implement a manifest-driven builder with required dependencies. | A sample game launches from a clean directory outside the repository without opening the editor. |
 | P0 | Enable real SDL_net validation, then authoritative input/world/snapshot modules and client consumption. | One dedicated server and two separate clients replicate movement/spawn/despawn and reject invalid input. |
