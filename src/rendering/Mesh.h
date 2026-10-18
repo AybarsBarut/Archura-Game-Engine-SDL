@@ -77,6 +77,7 @@ public:
     static Mesh* CreateRamp(float width = 1.0f, float height = 1.0f, float depth = 1.0f);
     
     const MeshSource& GetSource() const noexcept { return m_Source; }
+    void SetSourcePath(const std::string& path) { m_Source.path = path; }
     // Returns nullptr for custom or invalid recipes and unavailable model files.
     static std::shared_ptr<Mesh> CreateFromSource(const MeshSource& source);
 
@@ -111,6 +112,9 @@ public:
     
     void UpdateVertices(); // Re-upload vertices to GPU
     void RecalculateNormals(); // Recalculate normals based on current positions
+    void RestoreGeometrySnapshot(const std::vector<Vertex>& vertices,
+                                 const std::vector<unsigned int>& indices,
+                                 const MeshSource& source);
 
 private:
     std::vector<Vertex> m_Vertices;

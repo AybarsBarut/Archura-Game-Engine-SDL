@@ -27,6 +27,7 @@ FPSController::FPSController(Camera* camera)
 }
 
 void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem, PhysicsSystem* physicsSystem) {
+    if (!m_Camera) return;
     // Mouse Look is now handled externally in Application::ProcessInput()
         
     HandleMovement(input, deltaTime, physicsSystem);
@@ -99,7 +100,7 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
     }
 
     // --- OBJECT GRABBING LOGIC ---
-    if (physicsSystem && input->IsCursorLocked()) {
+    if (physicsSystem && scene && input && input->IsCursorLocked()) {
         // We will use Right Mouse Button (SDL_BUTTON_RIGHT is usually 3) or E key for grabbing
         bool grabInput = input->IsMouseButtonDown(3) || input->IsKeyDown(SDL_SCANCODE_E);
         
@@ -231,6 +232,7 @@ void FPSController::AirAccelerate(const glm::vec3& wishDir, const MoveParams& pa
 
 void FPSController::HandleMovement(Input* input, float deltaTime,
                                    PhysicsSystem* physicsSystem) {
+    if (!input || !m_Camera) return;
     // 1. Durum Kontrolu (Grounded?)
     // Basit raycast kontrolu Update sonunda yapiliyor, burada flag kullaniyoruz.
     
@@ -421,6 +423,7 @@ void FPSController::HandleMovement(Input* input, float deltaTime,
 }
 
 void FPSController::HandleMouseLook(Input* input, float deltaTime) {
+    if (!input || !m_Camera) return;
     (void)deltaTime;
     // Imlec kilitli ise (FPS modu) kamerayi dondur
     if (input->IsCursorLocked()) {

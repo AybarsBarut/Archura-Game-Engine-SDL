@@ -12,9 +12,9 @@ public:
     bool Capture(const Entity& entity) {
         const auto* transform = entity.GetComponent<Transform>();
         if (!transform) return false;
-        Snapshot snapshot{entity.GetScene(), entity.GetHandle(), transform->position,
-                          transform->rotation, transform->scale};
-        m_History.push_back(snapshot);
+        Snapshot snapshot{entity.GetScene(), entity.GetHandle(), entity.GetPersistentID(),
+                          transform->position, transform->rotation, transform->scale};
+        m_History.push_back(std::move(snapshot));
         if (m_History.size() > 50) m_History.pop_front();
         return true;
     }
@@ -34,12 +34,24 @@ public:
         return entity;
     }
 
+    // Rebinds handles for snapshots belonging to `scene` after a transactional
+    // Play/Stop scene restoration where persistent IDs are preserved.
+    void RebindRestoredScene(const Scene& scene) {
+        for (Snapshot& snapshot : m_History) {
+            if (snapshot.owner != &scene || snapshot.persistentID.empty()) continue;
+            if (const Entity* restored = scene.GetEntityByPersistentID(snapshot.persistentID)) {
+                snapshot.handle = restored->GetHandle();
+            }
+        }
+    }
+
     void Clear() { m_History.clear(); }
 
 private:
     struct Snapshot {
         const Scene* owner;
         EntityHandle handle;
+        std::string persistentID;
         glm::vec3 position, rotation, scale;
     };
     std::deque<Snapshot> m_History;

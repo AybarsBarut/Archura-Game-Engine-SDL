@@ -71,6 +71,7 @@ public:
   EntityHandle GetHandle() const noexcept { return m_Handle; }
   const std::string& GetPersistentID() const noexcept { return m_PersistentID; }
   static bool IsValidPersistentID(std::string_view value) noexcept;
+  Scene* GetScene() noexcept { return m_Owner; }
   const Scene* GetScene() const noexcept { return m_Owner; }
   const std::string &GetName() const noexcept { return m_Name; }
   void SetName(std::string name) { m_Name = std::move(name); }
@@ -154,12 +155,30 @@ private:
 class Scene final {
 public:
   explicit Scene(std::string name = "Default Scene");
-  ~Scene() = default;
+  ~Scene() noexcept {
+    if (m_LifetimeToken)
+      *m_LifetimeToken = nullptr;
+  }
 
   Scene(const Scene &) = delete;
   Scene &operator=(const Scene &) = delete;
   Scene(Scene &&) = delete;
   Scene &operator=(Scene &&) = delete;
+
+  std::weak_ptr<Scene *> GetLifetimeToken() const noexcept {
+    return m_LifetimeToken;
+  }
+
+  bool OwnsEntityPointer(const Entity *candidate) const noexcept {
+    AssertOwnerThread();
+    if (!candidate)
+      return false;
+    for (const auto &entity : m_Entities) {
+      if (entity.get() == candidate)
+        return !IsPendingDestroy(entity->GetHandle());
+    }
+    return false;
+  }
 
   Entity *CreateEntity(const std::string &name = "Entity");
   // Prepared replacement commits only after final persistent-ID uniqueness is
@@ -230,6 +249,7 @@ private:
   std::string m_Name;
   EntityID m_NextEntityID = 1;
   const std::thread::id m_OwnerThread;
+  std::shared_ptr<Scene *> m_LifetimeToken = std::make_shared<Scene *>(this);
   std::vector<std::unique_ptr<Entity>> m_Entities;
   std::unordered_map<EntityID, Entity *> m_EntityIndex;
   std::unordered_map<std::string, Entity *> m_PersistentIndex;

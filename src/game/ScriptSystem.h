@@ -15,6 +15,10 @@ namespace Archura {
     public:
         ~ScriptSystem() noexcept { Shutdown(); }
         void Init(Scene* scene);
+        void StartRuntime(Scene* scene);
+        void StopRuntime();
+        void SetScene(Scene* scene) noexcept { m_Scene = scene; }
+        bool IsRuntimeActive() const noexcept { return m_RuntimeActive; }
         void Update(float deltaTime);
         void Shutdown();
 
@@ -22,10 +26,8 @@ namespace Archura {
 
     private:
         Scene* m_Scene = nullptr;
+        bool m_RuntimeActive = false;
         std::unordered_set<uint64_t> m_ActiveScriptEntities;
-        
-        // In a real implementation, this would hold the Mono Domain / Assembly
-        // void* m_MonoDomain; 
     };
 
 } // namespace Archura
