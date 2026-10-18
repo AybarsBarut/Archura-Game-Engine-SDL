@@ -91,3 +91,59 @@ With `ARCHURA_BUILD_STARTUP_TESTS=ON`, CTest includes
 This skips the splash, renders 16 frames and verifies two actual Editor/Application
 Play/Stop cycles and shutdown. It opens an OpenGL window and needs a graphics
 session. Normal `--smoke-test` still checks startup/shutdown without entering Play.
+
+## Standalone game packages (Loop 7)
+
+Build the engine, then create a new output directory from a game manifest:
+
+```powershell
+cmake --preset windows-x64
+cmake --build --preset windows-release
+python tools/package_game.py --manifest samples/standalone/game.json --runtime-dir build/windows-x64/bin/Release --output ../ArchuraStandaloneSample
+& ../ArchuraStandaloneSample/ArchuraGame.exe
+```
+
+Python 3.9+ is required to build packages and run packaging tests, not to play a
+packaged game. The output must be new and outside the project-content and staged
+runtime directories. Existing outputs are refused. Copy failures remove only the
+private staging directory; publishing renames it into place after all copies.
+
+The version-1 `game.json` declares `title`, `scene`, `player_id` and `content`.
+Paths use forward slashes relative to the manifest. Include the scene and every
+referenced model, texture, skybox face and audio clip in `content`; absolute paths,
+parent traversal, duplicate/case-colliding destinations and undeclared scene assets
+are rejected. Content belongs under `scenes/`, `assets/` or `Resources/Scripts/`;
+engine `assets/shaders/` are reserved and copied from the runtime build.
+The scene uses the existing version-2 `.scene` schema and must contain exactly one
+entity named `Player`, matching `player_id`. That entity's world position initializes
+the camera spawn; its local rotation.x/y initialize camera pitch/yaw in degrees. Scene load errors fail startup rather than
+opening a default demo. The supplied four-entity example includes an imported OBJ.
+
+`ArchuraGame.exe` automatically finds `game.json` beside itself even when launched
+from another working directory. The original binary also accepts
+`ArchuraEngine.exe --game <manifest>`. Standalone startup constructs no Editor,
+disables developer mode/console bindings, and retains the 128 Hz tick, runtime
+systems, HUD and a small Escape pause/resume/quit menu. `--smoke-test` verifies
+16 rendered frames and orderly shutdown. Editor and game share the native binary;
+this is not yet a smaller editor-free linkage target or an editor export button.
+
+Packages contain staged DLLs, engine shaders, Mono's 4.5 runtime profile and
+ScriptCore. A project may declare its own compiled
+`Resources/Scripts/net472/ScriptCore.dll` in content; separate user assemblies and
+arbitrary managed dependency graphs are not discovered automatically. Declared
+missing script classes fail startup. The sample has no configured managed script;
+its smoke test verifies Mono/ScriptCore initialization, not custom C# behavior.
+
+Target machines need Windows x64, OpenGL 3.3 and the Microsoft Visual C++
+2015-2022 x64 runtime. Use Release for distribution; Debug relies on developer
+runtime libraries. No clean-Windows VM or installer prerequisite deployment has
+been certified. Optional SDL_net/OpenAL DLLs must already be staged beside the
+engine when those backends are enabled; this cycle uses neither backend.
+
+To enable all native package/startup checks on a fresh preset:
+
+```powershell
+cmake --preset windows-x64 -DARCHURA_BUILD_STARTUP_TESTS=ON
+cmake --build --preset windows-release
+ctest --preset windows-release
+```

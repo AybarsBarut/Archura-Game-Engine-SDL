@@ -239,3 +239,5 @@ compile_commands.json
 .clangd
 
 .ai/
+__pycache__/
+*.pyc
