@@ -25,8 +25,12 @@ ownership. The regression first reproduced lost authored Player/Floor entities;
 it now verifies their transforms/hierarchy, renamed engine services, repeated
 loads, project ownership metadata and legacy/malformed input policies.
 
-Remaining P0: persistent identifiers instead of runtime-ID remapping;
-broader selection lifetime and Play/Stop restoration;
+GAUNTLET Loop1 repaired persistent identity: schema v2 stores independent IDs
+and parent references, v1/unversioned files migrate, final index uniqueness is
+validated before replacing the live scene. Runtime handles remain fresh.
+Debug/Release full21/21 gates include rollback fault injection and depth bounds.
+
+Remaining P0: gameplay component coverage; broader selection lifetime and Play/Stop restoration;
 standalone packaging; authoritative server simulation. Per-file/entity/mesh
 limits do not establish an aggregate allocation budget. Full interactive reopen,
 texture rendering, managed callbacks, audio and resource-growth acceptance remain

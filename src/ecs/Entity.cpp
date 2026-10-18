@@ -2,11 +2,49 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <mutex>
+#include <random>
+#include <unordered_set>
 
 namespace Archura {
 
+namespace {
+std::string NewPersistentID() {
+  // Random identity is distinct from predictable runtime handles. It conveys
+  // no authorization; scenes validate collisions explicitly on creation/commit.
+  static std::mt19937_64 random([] {
+    std::random_device entropy;
+    std::seed_seq seed{entropy(), entropy(), entropy(), entropy(),
+                       entropy(), entropy(), entropy(), entropy()};
+    return std::mt19937_64(seed);
+  }());
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
+  constexpr char hex[] = "0123456789abcdef";
+  std::string result(32, '0');
+  do {
+    for (size_t part = 0; part < 2; ++part) {
+      const uint64_t bits = random();
+      for (size_t digit = 0; digit < 16; ++digit)
+        result[part * 16 + digit] = hex[(bits >> (4 * (15 - digit))) & 15];
+    }
+  } while (!Entity::IsValidPersistentID(result));
+  return result;
+}
+} // namespace
+
+bool Entity::IsValidPersistentID(std::string_view value) noexcept {
+  if (value.size() != 32) return false;
+  bool nonzero = false;
+  for (char digit : value) {
+    if (!((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f'))) return false;
+    nonzero |= digit != '0';
+  }
+  return nonzero;
+}
+
 Entity::Entity(EntityHandle handle, std::string name, Scene *owner)
-    : m_Handle(handle), m_Owner(owner), m_Name(std::move(name)) {
+    : m_Handle(handle), m_PersistentID(NewPersistentID()), m_Owner(owner), m_Name(std::move(name)) {
   if (!m_Handle)
     throw std::invalid_argument("Entity requires a non-zero handle");
   AddComponent<Transform>();
@@ -76,21 +114,77 @@ Entity *Scene::CreateEntity(const std::string &name) {
 
   const EntityHandle handle{m_NextEntityID, 1};
   auto entity = std::make_unique<Entity>(handle, name, this);
+  while (m_PersistentIndex.count(entity->GetPersistentID()))
+    entity->m_PersistentID = NewPersistentID();
   Entity *result = entity.get();
 
   // Reserve both insertions before publishing either. A failed allocation does
   // not leak the entity or expose a partially indexed object.
   m_Entities.reserve(m_Entities.size() + 1);
   m_EntityIndex.reserve(m_EntityIndex.size() + 1);
+  m_PersistentIndex.reserve(m_PersistentIndex.size() + 1);
   m_Entities.push_back(std::move(entity));
   try {
     m_EntityIndex.emplace(handle.id, result);
+    m_PersistentIndex.emplace(result->GetPersistentID(), result);
   } catch (...) {
+    m_EntityIndex.erase(handle.id);
+    m_PersistentIndex.erase(result->GetPersistentID());
     m_Entities.pop_back();
     throw;
   }
   ++m_NextEntityID;
   return result;
+}
+
+Entity* Scene::GetEntityByPersistentID(const std::string& id) noexcept {
+  return const_cast<Entity*>(static_cast<const Scene&>(*this).GetEntityByPersistentID(id));
+}
+
+const Entity* Scene::GetEntityByPersistentID(const std::string& id) const noexcept {
+  AssertOwnerThread();
+  const auto found = m_PersistentIndex.find(id);
+  return found == m_PersistentIndex.end() || IsPendingDestroy(found->second->GetHandle())
+      ? nullptr : found->second;
+}
+
+bool Scene::CommitEntityReplacement(const std::vector<EntityHandle>& replaced,
+                                    const std::vector<EntityHandle>& staged,
+                                    const std::vector<std::string>& persistentIDs) {
+  AssertOwnerThread();
+  if (IsIterating() || persistentIDs.size() != staged.size()) return false;
+  // MSVC Debug vector move construction allocates an iterator proxy inside a
+  // noexcept constructor. Take a reference and copy in this throwing preflight
+  // scope so allocation failure is recoverable rather than std::terminate.
+  std::vector<std::string> preparedIDs(persistentIDs);
+  std::unordered_set<EntityID> oldIDs;
+  for (auto handle : replaced)
+    if (!GetEntity(handle) || !oldIDs.insert(handle.id).second) return false;
+  std::unordered_set<EntityID> newIDs;
+  for (auto handle : staged)
+    if (!GetEntity(handle) || oldIDs.count(handle.id) || !newIDs.insert(handle.id).second) return false;
+
+  // Include every retained entity. Imported identities may equal old replaced
+  // identities, but must never alias a retained service or another staged item.
+  std::unordered_map<std::string, Entity*> finalIndex;
+  finalIndex.reserve(m_Entities.size() - replaced.size());
+  for (const auto& entity : m_Entities)
+    if (!oldIDs.count(entity->GetID()) && !newIDs.count(entity->GetID()))
+      if (!finalIndex.emplace(entity->GetPersistentID(), entity.get()).second) return false;
+  for (size_t i = 0; i < staged.size(); ++i) {
+    if (preparedIDs[i].empty()) preparedIDs[i] = GetEntity(staged[i])->GetPersistentID();
+    if (!Entity::IsValidPersistentID(preparedIDs[i]) ||
+        !finalIndex.emplace(preparedIDs[i], GetEntity(staged[i])).second) return false;
+  }
+
+  // All allocating/validating work is finished. Handles of removed entities
+  // remain invalid; persistent identity never changes their runtime generation.
+  for (auto handle : replaced) DestroyEntityImmediate(handle);
+  for (size_t i = 0; i < staged.size(); ++i)
+    GetEntity(staged[i])->m_PersistentID.swap(preparedIDs[i]);
+  static_assert(noexcept(m_PersistentIndex.swap(finalIndex)), "Scene identity commit must not throw");
+  m_PersistentIndex.swap(finalIndex);
+  return true;
 }
 
 bool Scene::DestroyEntity(EntityHandle handle) {
@@ -126,6 +220,7 @@ bool Scene::DestroyEntityImmediate(EntityHandle handle) noexcept {
   assert(it != m_Entities.end());
   if (it == m_Entities.end())
     return false;
+  m_PersistentIndex.erase(target->GetPersistentID());
   m_EntityIndex.erase(indexed);
   m_Entities.erase(it);
   return true;

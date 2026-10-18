@@ -8,6 +8,37 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <cstdlib>
+#include <new>
+#ifdef _MSC_VER
+#include <crtdbg.h>
+#endif
+
+namespace AllocationFailure {
+thread_local int after = -1;
+}
+// Test-only allocator fault injection; production code has no test switches.
+void* operator new(std::size_t size) {
+  bool injectable = true;
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
+  // MSVC's Debug STL allocates these inside noexcept _Hash_vec/vector
+  // constructors. Test payload allocation rollback, not vendor proxy OOM aborts.
+  // This size exclusion is test-only; Release injects every allocation size.
+  injectable = size != sizeof(std::_Container_proxy);
+#endif
+  if (injectable && AllocationFailure::after == 0) {
+    AllocationFailure::after = -1;
+    throw std::bad_alloc();
+  }
+  if (injectable && AllocationFailure::after > 0) --AllocationFailure::after;
+  if (void* memory = std::malloc(size ? size : 1)) return memory;
+  throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return ::operator new(size); }
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -47,6 +78,90 @@ void TestHandlesAndLifetime() {
   Archura::Entity *next = scene.CreateEntity("next");
   CHECK(next->GetID() != handle.id);
   CHECK(scene.GetEntity(handle) == nullptr);
+}
+
+void TestPersistentIdentityCommit() {
+  Archura::Scene scene;
+  auto* old = scene.CreateEntity("old");
+  const auto oldHandle = old->GetHandle();
+  const auto persistent = old->GetPersistentID();
+  CHECK(Archura::Entity::IsValidPersistentID(persistent));
+  CHECK(!Archura::Entity::IsValidPersistentID(std::string(32, '0')));
+  CHECK(!Archura::Entity::IsValidPersistentID(std::string(32, 'A')));
+  CHECK(!Archura::Entity::IsValidPersistentID("short"));
+  auto* staged = scene.CreateEntity("staged");
+  const auto stagedHandle = staged->GetHandle();
+  const auto generated = staged->GetPersistentID();
+  CHECK(generated != persistent);
+  CHECK(!scene.CommitEntityReplacement({oldHandle}, {stagedHandle}, {"bad"}));
+  CHECK(scene.GetEntity(oldHandle) == old && staged->GetPersistentID() == generated);
+  CHECK(!scene.CommitEntityReplacement({oldHandle, oldHandle}, {stagedHandle}, {persistent}));
+  CHECK(!scene.CommitEntityReplacement({oldHandle}, {oldHandle}, {persistent}));
+  CHECK(scene.CommitEntityReplacement({oldHandle}, {stagedHandle}, {persistent}));
+  CHECK(!scene.IsAlive(oldHandle));
+  CHECK(scene.GetEntity(stagedHandle) == staged);
+  CHECK(scene.GetEntityByPersistentID(persistent) == staged);
+  CHECK(scene.GetEntityByPersistentID(generated) == nullptr);
+
+  auto* next = scene.CreateEntity("next");
+  const auto nextHandle = next->GetHandle();
+  const auto nextIdentity = next->GetPersistentID();
+  CHECK(nextIdentity != persistent);
+  CHECK(!scene.CommitEntityReplacement({}, {nextHandle}, {persistent}));
+  CHECK(next->GetPersistentID() == nextIdentity && scene.IsAlive(stagedHandle));
+  scene.ForEachEntity([&](Archura::Entity&) {
+    CHECK(!scene.CommitEntityReplacement({stagedHandle}, {nextHandle}, {persistent}));
+  });
+  CHECK(scene.GetEntities().size() == 2);
+  scene.ForEachEntity([&](Archura::Entity& entity) {
+    if (entity.GetHandle() == nextHandle) {
+      scene.DestroyEntity(nextHandle);
+      CHECK(!scene.GetEntityByPersistentID(nextIdentity));
+    }
+  });
+  CHECK(!scene.GetEntityByPersistentID(nextIdentity));
+}
+
+void TestIdentityCommitAllocationFailures() {
+  bool reachedCommit = false;
+  int injectedFailures = 0;
+  for (int allocation = 0; allocation < 100 && !reachedCommit; ++allocation) {
+    Archura::Scene scene;
+    auto* oldParent = scene.CreateEntity("old parent");
+    auto* oldChild = scene.CreateEntity("old child");
+    oldChild->TrySetParent(oldParent);
+    auto* retained = scene.CreateEntity("retained");
+    auto* newParent = scene.CreateEntity("new parent");
+    auto* newChild = scene.CreateEntity("new child");
+    newChild->TrySetParent(newParent);
+    const auto parentID = oldParent->GetPersistentID(), childID = oldChild->GetPersistentID();
+    const auto generated = newParent->GetPersistentID();
+    const auto oldHandle = oldParent->GetHandle(), retainedHandle = retained->GetHandle();
+    std::vector<Archura::EntityHandle> old{oldParent->GetHandle(), oldChild->GetHandle()};
+    std::vector<Archura::EntityHandle> staged{newParent->GetHandle(), newChild->GetHandle()};
+    std::vector<std::string> identities{parentID, childID};
+    bool failed = false;
+    AllocationFailure::after = allocation;
+    try { reachedCommit = scene.CommitEntityReplacement(old, staged, identities); }
+    catch (const std::bad_alloc&) { failed = true; ++injectedFailures; }
+    AllocationFailure::after = -1;
+    if (failed) {
+      CHECK(scene.GetEntities().size() == 5 && scene.IsAlive(oldHandle));
+      CHECK(oldChild->GetParent() == oldParent && oldParent->GetChildren().size() == 1);
+      CHECK(oldParent->GetPersistentID() == parentID && oldChild->GetPersistentID() == childID);
+      CHECK(newParent->GetPersistentID() == generated);
+      CHECK(scene.GetEntityByPersistentID(parentID) == oldParent);
+      CHECK(scene.GetEntityByPersistentID(generated) == newParent);
+    } else {
+      CHECK(reachedCommit && scene.GetEntities().size() == 3);
+      CHECK(!scene.IsAlive(oldHandle) && scene.IsAlive(retainedHandle));
+      CHECK(scene.GetEntityByPersistentID(parentID) == newParent);
+      CHECK(scene.GetEntityByPersistentID(childID) == newChild);
+      CHECK(newChild->GetParent() == newParent);
+    }
+  }
+  CHECK(reachedCommit && injectedFailures > 0);
+  std::cout << "Identity commit rollback verified at " << injectedFailures << " allocation failure points\n";
 }
 
 void TestComponentOwnership() {
@@ -189,7 +304,18 @@ void TestRigidBodyStorageRoundTrip() {
 } // namespace
 
 int main() {
+#ifdef _MSC_VER
+  // Automated failures must produce stderr/status, never block on a CRT dialog.
+  _set_error_mode(_OUT_TO_STDERR);
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+  _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
   TestHandlesAndLifetime();
+  TestPersistentIdentityCommit();
+  TestIdentityCommitAllocationFailures();
   TestComponentOwnership();
   TestHierarchyIntegrity();
   TestMutationSafeSceneIteration();

@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <typeindex>
@@ -25,9 +26,9 @@ class Scene;
 // the application explicitly marks a bootstrap/runtime service entity.
 enum class EntityOwnership : uint8_t { Authored, Engine };
 
-// A serializable, generation-checked entity reference. EntityID remains available
-// for legacy native call sites, but persistent/external references must use this
-// handle so that a destroyed entity can never alias a later entity.
+// Generation-checked runtime reference. EntityID remains available to legacy
+// call sites, but long-lived live references use this handle. Serialized scene
+// references use Entity::GetPersistentID instead; loading never revives handles.
 struct EntityHandle final {
   EntityID id = 0;
   EntityGeneration generation = 0;
@@ -68,6 +69,8 @@ public:
 
   EntityID GetID() const noexcept { return m_Handle.id; }
   EntityHandle GetHandle() const noexcept { return m_Handle; }
+  const std::string& GetPersistentID() const noexcept { return m_PersistentID; }
+  static bool IsValidPersistentID(std::string_view value) noexcept;
   const Scene* GetScene() const noexcept { return m_Owner; }
   const std::string &GetName() const noexcept { return m_Name; }
   void SetName(std::string name) { m_Name = std::move(name); }
@@ -130,10 +133,12 @@ public:
   }
 
 private:
+  friend class Scene;
   bool IsAncestorOf(const Entity *candidate) const noexcept;
   void DetachHierarchy() noexcept;
 
   EntityHandle m_Handle;
+  std::string m_PersistentID;
   Scene *m_Owner = nullptr;
   std::string m_Name;
   EntityOwnership m_Ownership = EntityOwnership::Authored;
@@ -157,6 +162,15 @@ public:
   Scene &operator=(Scene &&) = delete;
 
   Entity *CreateEntity(const std::string &name = "Entity");
+  // Prepared replacement commits only after final persistent-ID uniqueness is
+  // validated. Empty imported IDs retain generated IDs (legacy migration).
+  // Validation may allocate/throw; after deletion begins commit cannot throw.
+  bool CommitEntityReplacement(const std::vector<EntityHandle>& replaced,
+                               const std::vector<EntityHandle>& staged,
+                               const std::vector<std::string>& persistentIDs);
+  Entity* GetEntityByPersistentID(const std::string& id) noexcept;
+  const Entity* GetEntityByPersistentID(const std::string& id) const noexcept;
+  bool IsIterating() const noexcept { return m_IterationDepth != 0; }
   bool DestroyEntity(EntityHandle handle);
   bool DestroyEntity(EntityID id);
   Entity *GetEntity(EntityHandle handle) noexcept;
@@ -218,6 +232,7 @@ private:
   const std::thread::id m_OwnerThread;
   std::vector<std::unique_ptr<Entity>> m_Entities;
   std::unordered_map<EntityID, Entity *> m_EntityIndex;
+  std::unordered_map<std::string, Entity *> m_PersistentIndex;
   size_t m_IterationDepth = 0;
   std::vector<EntityHandle> m_PendingDestroy;
 };

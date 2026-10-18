@@ -11,9 +11,13 @@ survive content loads, project ownership round-trips and legacy records migrate.
 
 ## Next implementation queue
 
+GAUNTLET Loop1 completed: persistent scene IDs, v2 records/v1 migration,
+prepared final identity index and runtime-handle invalidation passed all21 tests
+in Debug and Release. Execution plan and actual gates: `.gauntlet/LOOP_PLAN.md`.
+
 | Priority | Concrete change / affected files | Acceptance |
 |---|---|---|
-| P0, next | Separate persistent scene IDs from runtime handles in Entity/Scene and SceneData. Stage ID restoration without colliding with the old live scene; migrate legacy numeric hierarchy references. | Save/load/save preserves persistent IDs and hierarchy; new creations never collide; old runtime handles remain invalid; duplicate IDs reject transactionally. |
+| Done, Loop1 | Independent persistent IDs and transactional final index; v2 schema with legacy migration. | Debug/Release21/21; identity/hierarchy/determinism/collision/allocator/depth regressions pass. |
 | P0 | Serialize Weapon gameplay configuration, then implement the authored Play/Stop boundary in Application/Editor/ScriptSystem. Clear selection/history and transient audio/physics/script ownership at the boundary. | Default authored game scene saves; Edit does not simulate; repeated Play/Stop restores all authored values and removes runtime-only entities. |
 | P1 | Add configurable aggregate mesh/texture reconstruction budgets and project-root asset resolution in the shared codec/ResourceManager. | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation and duplicate filenames are tested. |
 | P0/P1 | Extract standalone runtime startup and implement a manifest-driven builder with required dependencies. | A sample game launches from a clean directory outside the repository without opening the editor. |

@@ -21,6 +21,15 @@ promoted engine ownership in `.scene` rejects without changing the scene.
 
 ## Automated layers
 
+Persistent-ID loop adds v2 identity/hierarchy determinism, repeated same-ID
+replacement, v1 numeric hierarchy migration, retained-service collision rollback,
+pending-destroy lookup, duplicate/malformed IDs and 128/129-node depth boundaries.
+ECS tests inject allocation failures during commit preflight and validate both
+runtime and persistent indexes before/after commit. MSVC Debug iterator-proxy-sized
+allocations are excluded because the vendor STL handles those inside noexcept
+constructors; Release injects all allocation sizes. This is not complete
+OS/driver/Mono low-memory coverage. Automated CRT failures must not open dialogs.
+
 | Layer | Existing coverage inspected | Required follow-up |
 |---|---|---|
 | Unit/contracts | ECS core, physics core, weapon progression, gameplay scroll, mouse edges, telemetry, job system, graphics selection, server config, network framing/no-backend/console, basic ProjectSerializer, and Project directory cache snapshots/invalidation/polling/navigation/errors/shutdown. Renderer ownership is opt-in. | Build every registered executable before CTest; inspect `ctest --test-dir <build> -N`. A discovered test is not necessarily built. |

@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-18
 
+## Active GAUNTLET loops (starting d1e8a80)
+
+- Plan: LOOP_PLAN.md. Fresh baseline Debug/Release 21/21 passed.
+- Loop 1 implemented: independent persistent identity, schema v2 with v1 migration,
+  final uniqueness validation / prepared persistent index before replacement,
+  deterministic save/load/save and malformed/collision/depth/allocator regressions.
+- Loop 1 gate PASS: Debug full build and 21/21 tests (2.81 s); Release full
+  build/staging and 21/21 tests (3.27 s), including real startup/shutdown.
+- Intermediate global allocator injection opened an MSVC Debug abort dialog;
+  stack diagnosis and test/API correction are recorded in REGRESSIONS. Debug ECS
+  now passes 19 injected payload failure points in each configuration.
+- Loop 2 Weapon codec is prepared separately and can now integrate after the
+  passing Loop 1 gate. Play/Stop and the broader queue remain incomplete.
+
 ## Current status
 
 - Phase: bounded stabilization cycle verified; broader engine work incomplete
@@ -48,9 +62,9 @@ Last updated: 2026-10-18
 
 ## Next queue
 
-1. Add persistent scene identifiers independent of runtime handles, preserving
-   legacy hierarchy migration, transactional staging and live handle validity.
-2. Cover gameplay configuration (Weapon etc.), editable geometry/shader materials;
+1. Persistent scene identity is implemented and verified (Loop 1); preserve its
+   v2 migration, collision, rollback and old-handle invalidation regressions.
+2. Cover gameplay configuration (Weapon next), editable geometry/shader materials;
    add aggregate resource budgets and project-relative asset resolution.
 3. Validate all editor selections; implement authored-state Play/Stop restoration,
    including runtime script/audio/physics cleanup and stable Player references.

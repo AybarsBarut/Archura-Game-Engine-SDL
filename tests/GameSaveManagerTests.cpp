@@ -46,6 +46,14 @@ int main(){
     Check(source.type==Archura::MeshSourceType::Sphere && source.radius==2.5f && source.segments==12,"mesh type and dimensions survive roundtrip");
     Check(restored.GetEntities()[2]->GetParent()==restored.GetEntities()[1].get(),"hierarchy survives roundtrip");
     Check(restored.GetEntities()[2]->GetComponent<Archura::ScriptComponent>()->className=="Example.Script","script config survives roundtrip");
+    const auto persistentParent = restored.GetEntities()[1]->GetPersistentID();
+    Check(persistentParent == scene.GetEntities()[0]->GetPersistentID(), "content restores persistent identity");
+    const auto previousAuthoredHandle = restored.GetEntities()[1]->GetHandle();
+    Check(saves.LoadProject("saves/roundtrip.scene", &restored), "same content persistent IDs can replace their old instances");
+    Check(!restored.IsAlive(previousAuthoredHandle) && restored.GetEntityByPersistentID(persistentParent), "runtime handles invalidate while content identity survives");
+    const auto beforeCollision = restored.GetEntities().size();
+    write("{\"format_version\":2,\"entities\":[{\"name\":\"collision\",\"has_mesh_renderer\":false,\"persistent_id\":\"" + system->GetPersistentID() + "\",\"parent_persistent_id\":\"\"}]}");
+    Check(!saves.LoadProject("input.scene", &restored) && restored.GetEntities().size() == beforeCollision && restored.IsAlive(systemHandle) && restored.GetEntityByPersistentID(persistentParent), "retained engine identity collision rejects and rolls back without losing content");
     const auto oldCount=restored.GetEntities().size();
     write(R"({"entities":[{"name":"missing","mesh_type":"obj","model_path":"missing.obj"}]})");
     Check(!saves.LoadProject("input.scene",&restored) && restored.GetEntities().size()==oldCount,"missing model rejects without changing scene");
@@ -117,6 +125,12 @@ int main(){
         Check(!saves.LoadProject("input.scene", &loaded), "ownership metadata requires a boolean");
         write(R"({"entities":[{"name":"Player","has_mesh_renderer":false},{"name":"Floor","has_mesh_renderer":false}]})");
         Check(saves.LoadProject("input.scene", &loaded) && loaded.GetEntities().size() == 3, "legacy scene system-like names migrate as authored content");
+        write(R"({"format_version":1,"entities":[{"name":"legacy parent","id":41,"has_mesh_renderer":false},{"name":"legacy child","id":42,"parent_id":41,"has_mesh_renderer":false}]})");
+        Check(saves.LoadProject("input.scene", &loaded), "version-one numeric hierarchy migrates");
+        Check(loaded.GetEntities()[2]->GetParent() == loaded.GetEntities()[1].get(), "numeric parent references survive migration");
+        const auto migratedID = loaded.GetEntities()[1]->GetPersistentID();
+        Check(saves.SaveProject("migrated", &loaded) && saves.LoadProject("saves/migrated.scene", &loaded), "migrated scene saves and reloads as version two");
+        Check(loaded.GetEntities()[1]->GetPersistentID() == migratedID, "migrated identity stabilizes after its first version-two save");
     }
     std::filesystem::current_path(original);
     // This unique directory was created exclusively by this test.

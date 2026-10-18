@@ -2,8 +2,10 @@
 
 Both public entry points use one scene codec: `GameSaveManager::WriteEntities` /
 `LoadEntities`. The `.project` wrapper retains project metadata; `.scene` retains
-project-name/timestamp metadata. New files declare `format_version: 1`; unversioned
-legacy files remain readable. Future format versions are rejected.
+project-name/timestamp metadata. New files declare `format_version: 2`; version-1
+and unversioned legacy files remain readable and migrate on the next save.
+Future versions are rejected. Older engine versions supporting only version 1
+cannot read version 2; `.bak` retains the preceding save when replacing a file.
 
 The codec supports names, local transforms, hierarchy, mesh source recipes
 (cube, plane, sphere, capsule, stairs, ramp, OBJ/FBX), texture paths/color,
@@ -13,9 +15,21 @@ Runtime script instance IDs and audio playback handles/state are reset. Asset
 paths retain existing working-directory-relative semantics; packaging/relocation
 is not implemented. Texture cache keys use the canonical complete path.
 
-File IDs establish hierarchy references and are remapped to fresh runtime entity
-handles on load. They are not persistent UUIDs across loads. Hierarchies deeper
-than 127 links, missing parents, duplicate IDs and cycles are rejected.
+Every entity has a separate persistent identity: 32 lowercase hexadecimal digits
+encoding a nonzero random 128-bit value. Version-2 records use `persistent_id`
+and `parent_persistent_id` (empty for roots); runtime numeric handles are not
+written. IDs and hierarchy survive save/load/save unchanged. Numeric runtime
+handles are always fresh, so old native/managed references never revive. Scene
+maintains a persistent-ID hash index for collision checks and explicit lookups;
+commit prepares its final replacement index before deleting old entities.
+
+Legacy numeric `id`/`parent_id` references still reconstruct hierarchy, then new
+persistent IDs are assigned. Those become stable after the first version-2 save.
+Version-2 input requires persistent identity fields and rejects mixed legacy
+numeric identity fields. Missing/duplicate/malformed/zero identities, missing
+parents, cycles and hierarchies deeper than 127 links reject transactionally.
+New identities are generated independently of names and runtime handles and
+checked for collisions; identities are references, not authorization tokens.
 
 Entities default to authored ownership. Application bootstrap explicitly marks
 its Player, Skybox, Sun, AmbientLight, Floor and boundary walls as engine-owned.
@@ -42,8 +56,12 @@ paths are validated before load mutation or save replacement.
 
 Loads construct all new components/resources and hierarchy while retaining the
 old entities. Any reconstruction failure removes only the new entities. Commit
-then destroys the old replaceable entities. Failed attempts can consume runtime
-entity IDs, but preserve existing handles and project metadata.
+uses `Scene::CommitEntityReplacement` to validate final identity uniqueness,
+including retained engine services, before deleting old replaceable entities and
+swapping in persistent identities. Replacing the same saved identities is valid;
+colliding with retained services is rejected. Loads during Scene iteration reject
+before staging. Failed attempts can consume runtime IDs, but preserve existing
+handles, persistent identities and project metadata.
 
 Saves write a sibling temporary file, flush and close it, copy the preceding
 destination to `.bak`, then atomically replace the destination (Windows
