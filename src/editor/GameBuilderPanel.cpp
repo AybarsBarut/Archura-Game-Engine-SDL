@@ -8,8 +8,10 @@
 #include "../rendering/Mesh.h"
 #include "../rendering/Texture.h"
 #include "../core/AudioSystem.h"
+#include "../core/ResourceManager.h"
 
 #include <imgui.h>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 
@@ -20,6 +22,9 @@ namespace Archura {
 // ---------------------------------------------------------------------------
 void GameBuilderPanel::Draw(Scene* scene, Entity* selectedEntity) {
     if (!m_Open) return;
+    if (selectedEntity && (!scene || !scene->OwnsEntityPointer(selectedEntity))) {
+        selectedEntity = nullptr;
+    }
 
     ImGui::SetNextWindowSize(ImVec2(500, 550), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Game Builder", &m_Open)) {
@@ -152,7 +157,8 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
     ImGui::Separator();
 
     // Custom .obj dosyaları
-    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "3D Modeller (assets/objects/)");
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                       ("3D Modeller (" + m_ActiveModelDir + "/)").c_str());
     ImGui::Separator();
 
     if (ImGui::Button("Listeyi Yenile", ImVec2(-1, 0))) {
@@ -164,32 +170,97 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
     }
 
     if (m_ModelFiles.empty()) {
-        ImGui::TextDisabled("assets/objects/ klasorunde .obj dosyasi bulunamadi.");
+        ImGui::TextDisabled("assets/objects/ veya assets/models/ klasorunde .obj dosyasi bulunamadi.");
         ImGui::TextDisabled("Kendi modellerinizi buraya ekleyin.");
     } else {
         for (const auto& modelFile : m_ModelFiles) {
             if (ImGui::Button((modelFile + "  [OBJ]").c_str(), ImVec2(-1, 32))) {
-                if (scene) {
-                    std::string fullPath = "assets/objects/" + modelFile;
-                    std::string stem = std::filesystem::path(fullPath).stem().string();
-                    Entity* e = scene->CreateEntity("Model_" + stem);
-                    auto* mr  = e->AddComponent<MeshRenderer>();
-                    mr->SetMeshAsset(Mesh::LoadFromOBJShared(fullPath));
-                    mr->color = glm::vec3(1.f);
-                    e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
-                    auto* t = e->GetComponent<Transform>();
-                    if (t) t->position = glm::vec3(0, 2, 0);
-                    std::cout << "[GameBuilder] Model yuklendi: " << fullPath << std::endl;
-                }
+                SpawnModelEntity(scene, modelFile);
             }
         }
     }
+}
+
+std::string GameBuilderPanel::ResolveModelSpawnPath(const std::string& modelFile) const {
+    if (modelFile.empty() || !ResourceManager::IsSafeAssetPath(modelFile)) {
+        return {};
+    }
+
+    const std::string activeCandidate = m_ActiveModelDir + "/" + modelFile;
+    const std::filesystem::path resolvedActive =
+        ResourceManager::Get().ResolveAssetPath(activeCandidate);
+    if (!resolvedActive.empty()) {
+        return resolvedActive.string();
+    }
+
+    for (const char* fallbackDir : {"assets/objects", "assets/models"}) {
+        const std::string candidate = std::string(fallbackDir) + "/" + modelFile;
+        const std::filesystem::path resolved =
+            ResourceManager::Get().ResolveAssetPath(candidate);
+        if (!resolved.empty()) {
+            return resolved.string();
+        }
+    }
+    return {};
+}
+
+Entity* GameBuilderPanel::SpawnModelEntity(Scene* scene, const std::string& modelFile) {
+    if (!scene) return nullptr;
+    const std::string fullPath = ResolveModelSpawnPath(modelFile);
+    if (fullPath.empty()) {
+        return nullptr;
+    }
+    auto mesh = Mesh::LoadFromOBJShared(fullPath);
+    if (!mesh) {
+        return nullptr;
+    }
+    const std::string stem = std::filesystem::path(modelFile).stem().string();
+    Entity* e = scene->CreateEntity("Model_" + stem);
+    auto* mr = e->AddComponent<MeshRenderer>();
+    mr->SetMeshAsset(std::move(mesh));
+    mr->color = glm::vec3(1.f);
+    e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
+    auto* t = e->GetComponent<Transform>();
+    if (t) t->position = glm::vec3(0, 2, 0);
+    std::cout << "[GameBuilder] Model yuklendi: " << fullPath << std::endl;
+    return e;
+}
+
+bool GameBuilderPanel::AssignTextureToEntity(Entity* selectedEntity,
+                                             const std::string& textureFile) {
+    if (!selectedEntity || textureFile.empty() ||
+        !ResourceManager::IsSafeAssetPath(textureFile)) {
+        return false;
+    }
+    auto* mr = selectedEntity->GetComponent<MeshRenderer>();
+    if (!mr) {
+        std::cout << "[GameBuilder] Secili entity'de MeshRenderer yok!" << std::endl;
+        return false;
+    }
+    const std::string relativePath = "assets/textures/" + textureFile;
+    const std::filesystem::path resolvedPath =
+        ResourceManager::Get().ResolveAssetPath(relativePath);
+    if (resolvedPath.empty()) {
+        return false;
+    }
+    const std::string resolvedStr = resolvedPath.string();
+    const std::string canonicalKey =
+        ResourceManager::Get().CanonicalAssetKey(resolvedStr);
+    auto tex = TextureManager::Get().LoadShared(canonicalKey, resolvedStr);
+    if (!tex) {
+        return false;
+    }
+    tex->SetPath(relativePath);
+    mr->SetTextureAsset(std::move(tex));
+    std::cout << "[GameBuilder] Texture atandi: " << relativePath << std::endl;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
 // Textures Tab
 // ---------------------------------------------------------------------------
 void GameBuilderPanel::DrawTexturesTab(Scene* scene, Entity* selectedEntity) {
+    (void)scene;
     if (m_TexturesDirty) {
         RefreshTextureList();
         m_TexturesDirty = false;
@@ -214,22 +285,7 @@ void GameBuilderPanel::DrawTexturesTab(Scene* scene, Entity* selectedEntity) {
             const bool selected = (m_SelectedTextureIdx == i);
             if (ImGui::Selectable(m_TextureFiles[i].c_str(), selected)) {
                 m_SelectedTextureIdx = i;
-
-                // Seçili entity'ye texture ata
-                if (selectedEntity) {
-                    auto* mr = selectedEntity->GetComponent<MeshRenderer>();
-                    if (mr) {
-                        std::string path = "assets/textures/" + m_TextureFiles[i];
-                        std::string stem = std::filesystem::path(path).stem().string();
-                        auto tex = TextureManager::Get().LoadShared(stem, path);
-                        if (tex) {
-                            mr->SetTextureAsset(std::move(tex));
-                            std::cout << "[GameBuilder] Texture atandi: " << path << std::endl;
-                        }
-                    } else {
-                        std::cout << "[GameBuilder] Secili entity'de MeshRenderer yok!" << std::endl;
-                    }
-                }
+                AssignTextureToEntity(selectedEntity, m_TextureFiles[i]);
             }
             if (selected) ImGui::SetItemDefaultFocus();
         }
@@ -274,11 +330,11 @@ void GameBuilderPanel::DrawAudioTab() {
 
     ImGui::Spacing();
     if (m_SelectedAudioIdx >= 0 && m_SelectedAudioIdx < (int)m_AudioFiles.size()) {
-        std::string path = "assets/audio/" + m_AudioFiles[m_SelectedAudioIdx];
-        ImGui::Text("Secilen: %s", m_AudioFiles[m_SelectedAudioIdx].c_str());
+        const std::string& audioFile = m_AudioFiles[m_SelectedAudioIdx];
+        ImGui::Text("Secilen: %s", audioFile.c_str());
         if (ImGui::Button("Ses Cal (Test)", ImVec2(-1, 36))) {
-            AudioSystem::Get().PlayOneShot(path);
-            std::cout << "[GameBuilder] Ses caliniyor: " << path << std::endl;
+            AudioSystem::Get().PlayOneShot(audioFile);
+            std::cout << "[GameBuilder] Ses caliniyor: " << audioFile << std::endl;
         }
     }
 }
@@ -288,11 +344,17 @@ void GameBuilderPanel::DrawAudioTab() {
 // ---------------------------------------------------------------------------
 void GameBuilderPanel::RefreshTextureList() {
     m_TextureFiles.clear();
-    std::string dir = "assets/textures";
-    if (!std::filesystem::exists(dir)) return;
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
+    const std::filesystem::path dir =
+        ResourceManager::Get().ResolveAssetPath("assets/textures");
+    const std::filesystem::path scanRoot =
+        dir.empty() ? std::filesystem::path("assets/textures") : dir;
+    std::error_code ec;
+    if (!std::filesystem::exists(scanRoot, ec)) return;
+    for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
         std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" ||
             ext == ".tga" || ext == ".bmp") {
             m_TextureFiles.push_back(entry.path().filename().string());
@@ -302,11 +364,17 @@ void GameBuilderPanel::RefreshTextureList() {
 
 void GameBuilderPanel::RefreshAudioList() {
     m_AudioFiles.clear();
-    std::string dir = "assets/audio";
-    if (!std::filesystem::exists(dir)) return;
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
+    const std::filesystem::path dir =
+        ResourceManager::Get().ResolveAssetPath("assets/audio");
+    const std::filesystem::path scanRoot =
+        dir.empty() ? std::filesystem::path("assets/audio") : dir;
+    std::error_code ec;
+    if (!std::filesystem::exists(scanRoot, ec)) return;
+    for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
         std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") {
             m_AudioFiles.push_back(entry.path().filename().string());
         }
@@ -315,17 +383,35 @@ void GameBuilderPanel::RefreshAudioList() {
 
 void GameBuilderPanel::RefreshModelList() {
     m_ModelFiles.clear();
-    std::string dir = "assets/objects";
-    if (!std::filesystem::exists(dir)) {
-        dir = "assets/models";
-        if (!std::filesystem::exists(dir)) return;
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
-        std::string ext = entry.path().extension().string();
-        if (ext == ".obj" || ext == ".OBJ") {
-            m_ModelFiles.push_back(entry.path().filename().string());
+    m_ActiveModelDir = "assets/objects";
+    std::error_code ec;
+
+    auto collectModels = [&](const std::string& relativeDir) -> bool {
+        const std::filesystem::path resolvedDir =
+            ResourceManager::Get().ResolveAssetPath(relativeDir);
+        const std::filesystem::path scanRoot =
+            resolvedDir.empty() ? std::filesystem::path(relativeDir) : resolvedDir;
+        if (!std::filesystem::exists(scanRoot, ec)) {
+            return false;
         }
+        std::vector<std::string> found;
+        for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
+            std::string ext = entry.path().extension().string();
+            if (ext == ".obj" || ext == ".OBJ") {
+                found.push_back(entry.path().filename().string());
+            }
+        }
+        if (found.empty()) {
+            return false;
+        }
+        m_ActiveModelDir = relativeDir;
+        m_ModelFiles = std::move(found);
+        return true;
+    };
+
+    if (!collectModels("assets/objects")) {
+        collectModels("assets/models");
     }
 }
 

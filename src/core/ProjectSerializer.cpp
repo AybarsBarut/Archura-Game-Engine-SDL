@@ -1,7 +1,9 @@
 #include "ProjectSerializer.h"
 #include "SerializationJson.h"
 #include "GameSaveManager.h"
+#include "ResourceManager.h"
 #include "AtomicFile.h"
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -26,8 +28,10 @@ bool ProjectSerializer::SaveProject(const std::string& path, const ProjectConfig
     // Reject NaN/infinity and invalid UTF-8 before replacing a previous save.
     Serialization::Json validation;
     const std::string content = file.str();
+    const std::filesystem::path docRoot = std::filesystem::path(path).parent_path();
     return Serialization::JsonParser(content).Parse(validation) &&
-        GameSaveManager::LoadEntities(validation, scene, false, true) && Serialization::AtomicWrite(path, content);
+        GameSaveManager::LoadEntities(validation, scene, false, true, docRoot) &&
+        Serialization::AtomicWrite(path, content);
 }
 
 bool ProjectSerializer::LoadProject(const std::string& path, ProjectConfig& outConfig, Scene* scene) {
@@ -44,12 +48,17 @@ bool ProjectSerializer::LoadProject(const std::string& path, ProjectConfig& outC
     if (!Serialization::IntField(root, "format_version", version) || (version != 1 && version != 2)) return false;
     const auto* project = root.Find("project");
     const auto* entities = root.Find("entities");
-    if (!project || project->kind != Serialization::Json::Kind::Object || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+    const auto budget = GameSaveManager::GetReconstructionBudget();
+    if (!project || project->kind != Serialization::Json::Kind::Object || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > budget.maxEntities) return false;
     ProjectConfig config;
     if (!Serialization::StringField(*project, "name", config.name, true) || config.name.empty() ||
         !Serialization::StringField(*project, "version", config.version) ||
         !Serialization::StringField(*project, "start_scene", config.startScene)) return false;
-    if (!GameSaveManager::LoadEntities(root, scene, false)) { std::cerr << "[ProjectSerializer] Scene validation or reconstruction failed: " << path << "; previous scene retained\n"; return false; }
+    const std::filesystem::path docRoot = std::filesystem::path(path).parent_path();
+    if (!GameSaveManager::LoadEntities(root, scene, false, false, docRoot)) { std::cerr << "[ProjectSerializer] Scene validation or reconstruction failed: " << path << "; previous scene retained\n"; return false; }
+    if (!docRoot.empty()) {
+        ResourceManager::Get().SetProjectRoot(docRoot);
+    }
     // Swapping strings cannot fail after committing the scene.
     outConfig.name.swap(config.name);
     outConfig.version.swap(config.version);

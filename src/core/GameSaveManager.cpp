@@ -2,6 +2,7 @@
 #include "SerializationJson.h"
 #include "SceneData.h"
 #include "AtomicFile.h"
+#include "ResourceManager.h"
 #include <limits>
 #include <locale>
 #include "../ecs/Entity.h"
@@ -22,6 +23,22 @@
 #include <cstdlib>
 
 namespace Archura {
+
+namespace {
+SceneReconstructionBudget g_ReconstructionBudget{};
+} // namespace
+
+void GameSaveManager::SetReconstructionBudget(const SceneReconstructionBudget& budget) noexcept {
+    g_ReconstructionBudget = budget;
+}
+
+SceneReconstructionBudget GameSaveManager::GetReconstructionBudget() noexcept {
+    return g_ReconstructionBudget;
+}
+
+void GameSaveManager::ResetReconstructionBudget() noexcept {
+    g_ReconstructionBudget = SceneReconstructionBudget{};
+}
 
 // ---------------------------------------------------------------------------
 // Ctor
@@ -142,7 +159,7 @@ void GameSaveManager::RefreshProjects() {
         Serialization::Json root;
         if (!Serialization::JsonParser(content).Parse(root)) continue;
         const auto* entities = root.Find("entities");
-        if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) continue;
+        if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > GetReconstructionBudget().maxEntities) continue;
         ProjectSave proj;
         proj.filePath = entry.path().string();
         if (!Serialization::StringField(root, "project_name", proj.name) ||
@@ -170,7 +187,8 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
 
     const std::string& actualName = projectName.empty() ? "Unnamed" : projectName;
     std::string safeName = MakeSafeFileName(actualName);
-    std::string path     = "saves/" + safeName + ".scene";
+    std::string path = (actualName.find('/') != std::string::npos || actualName.find('\\') != std::string::npos || (actualName.size() > 6 && actualName.substr(actualName.size() - 6) == ".scene")) ? actualName : ("saves/" + safeName + ".scene");
+    if (const auto parent = std::filesystem::path(path).parent_path(); !parent.empty()) std::filesystem::create_directories(parent, ec);
     std::string ts       = GetTimestamp();
 
     std::ostringstream file;
@@ -188,7 +206,8 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
     file << "\n  ]\n}\n";
     Serialization::Json validation;
     const auto content = file.str();
-    if (!Serialization::JsonParser(content).Parse(validation) || !LoadEntities(validation, scene, true, true) || !Serialization::AtomicWrite(path, content)) return false;
+    const std::filesystem::path docRoot = std::filesystem::path(path).parent_path();
+    if (!Serialization::JsonParser(content).Parse(validation) || !LoadEntities(validation, scene, true, true, docRoot) || !Serialization::AtomicWrite(path, content)) return false;
 
     std::cout << "[SaveManager] Proje kaydedildi: " << path << std::endl;
     RefreshProjects();
@@ -341,9 +360,11 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
     int version = 1;
     if (!Serialization::IntField(root, "format_version", version) || (version != 1 && version != 2)) return false;
     const auto* entities = root.Find("entities");
-    if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+    const auto budget = GetReconstructionBudget();
+    if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > budget.maxEntities) return false;
 
-    if (!LoadEntities(root, scene, true)) {
+    const std::filesystem::path docRoot = std::filesystem::path(filePath).parent_path();
+    if (!LoadEntities(root, scene, true, false, docRoot)) {
         std::cerr << "[SaveManager] Scene validation or reconstruction failed: " << filePath << "; previous scene retained\n"; return false;
     }
 
@@ -351,18 +372,32 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
     return true;
 }
 
-bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene, bool keepSystem, bool validateOnly) {
+bool GameSaveManager::LoadEntities(const Serialization::Json& root,
+                                   Scene* scene,
+                                   bool keepSystem,
+                                   bool validateOnly,
+                                   const std::filesystem::path& documentRoot) {
+    const SceneReconstructionBudget budget = GetReconstructionBudget();
+    if (budget.maxEntities == 0 || budget.maxTotalMeshVertices == 0 ||
+        budget.maxTotalMeshIndices == 0 || budget.maxTotalMeshBytes == 0 ||
+        budget.maxTotalTextureBytes == 0 || budget.maxSingleAssetFileBytes == 0) {
+        return false;
+    }
     int formatVersion = 1;
     if (!Serialization::IntField(root, "format_version", formatVersion) ||
         (formatVersion != 1 && formatVersion != 2)) return false;
     const auto* entities = root.Find("entities");
-    if (!scene || (!validateOnly && scene->IsIterating()) || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+    if (!scene || (!validateOnly && scene->IsIterating()) || !entities ||
+        entities->kind != Serialization::Json::Kind::Array ||
+        entities->array.size() > budget.maxEntities) return false;
     std::error_code ec;
     struct LoadedEntity {
         Serialization::EntityData extra;
         std::string name;
         std::string meshType = "cube";
         std::string texturePath;
+        std::string resolvedTexturePath;
+        std::string authoredModelPath;
         glm::vec3 position{0.0f};
         glm::vec3 rotation{0.0f};
         glm::vec3 scale{1.0f};
@@ -383,14 +418,20 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
         bool hasColliderShape = false;
     };
 
+    size_t estimatedMeshVertices = 0;
+    size_t estimatedMeshIndices = 0;
+    size_t estimatedMeshBytes = 0;
+    size_t estimatedTextureBytes = 0;
+
     std::vector<LoadedEntity> loaded;
-    loaded.reserve(64);
+    loaded.reserve(std::min<size_t>(entities->array.size(), 64));
     for (const auto& data : entities->array) {
         LoadedEntity current;
         current.hasMeshRenderer = !root.Find("project");
         if (!Serialization::StringField(data, "name", current.name, true) ||
             !Serialization::StringField(data, "mesh_type", current.meshType) ||
             !Serialization::StringField(data, "texture", current.texturePath) ||
+            (current.texturePath.empty() && !Serialization::StringField(data, "texture_path", current.texturePath)) ||
             !Serialization::BoolField(data, "has_mesh", current.hasMesh) ||
             !Serialization::BoolField(data, "has_mesh_renderer", current.hasMeshRenderer) ||
             !Serialization::BoolField(data, "collider_trigger", current.colliderTrigger) ||
@@ -421,6 +462,7 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
         else if (current.meshType == "fbx") current.source.type = MeshSourceType::FBX;
         else return false;
         if (!Serialization::StringField(data, "model_path", current.source.path)) return false;
+        current.authoredModelPath = current.source.path;
         if (const auto* source = data.Find("mesh_source")) {
             if (source->kind != Serialization::Json::Kind::Object ||
                 !Serialization::FloatField(*source, "size", current.source.size) ||
@@ -433,15 +475,62 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
                 !Serialization::IntField(*source, "steps", current.source.steps)) return false;
         }
         if (current.source.type == MeshSourceType::OBJ || current.source.type == MeshSourceType::FBX) {
-            if (current.source.path.empty() || current.source.path.find('\0') != std::string::npos ||
-                !std::filesystem::is_regular_file(current.source.path, ec) || ec) return false;
+            if (!ResourceManager::IsSafeAssetPath(current.source.path)) return false;
+            const auto resolvedModel = ResourceManager::Get().ResolveAssetPath(current.source.path, documentRoot, true);
+            if (resolvedModel.empty()) return false;
+            const auto modelFileSize = std::filesystem::file_size(resolvedModel, ec);
+            if (ec || modelFileSize == 0 || modelFileSize > budget.maxSingleAssetFileBytes) return false;
+            if (modelFileSize > budget.maxTotalMeshBytes - estimatedMeshBytes) return false;
+            estimatedMeshBytes += static_cast<size_t>(modelFileSize);
+            current.source.path = resolvedModel.string();
         }
-        if (!current.texturePath.empty() && (current.texturePath.find('\0') != std::string::npos ||
-            !std::filesystem::is_regular_file(current.texturePath, ec) || ec)) return false;
+        if (!current.texturePath.empty()) {
+            if (!ResourceManager::IsSafeAssetPath(current.texturePath)) return false;
+            const auto resolvedTex = ResourceManager::Get().ResolveAssetPath(current.texturePath, documentRoot, true);
+            if (resolvedTex.empty()) return false;
+            const auto texFileSize = std::filesystem::file_size(resolvedTex, ec);
+            if (ec || texFileSize == 0 || texFileSize > budget.maxSingleAssetFileBytes) return false;
+            if (texFileSize > budget.maxTotalTextureBytes - estimatedTextureBytes) return false;
+            estimatedTextureBytes += static_cast<size_t>(texFileSize);
+            current.resolvedTexturePath = resolvedTex.string();
+        }
         if (current.hasMeshRenderer && current.hasMesh) {
             if (current.source.size <= 0 || current.source.width <= 0 || current.source.height <= 0 ||
                 current.source.depth <= 0 || current.source.radius <= 0 || current.source.segments < 3 ||
                 current.source.segments > 512 || current.source.steps < 1 || current.source.steps > 4096) return false;
+
+            size_t procVerts = 0;
+            size_t procIndices = 0;
+            switch (current.source.type) {
+                case MeshSourceType::Cube: procVerts = 24; procIndices = 36; break;
+                case MeshSourceType::Plane: procVerts = 4; procIndices = 6; break;
+                case MeshSourceType::Ramp: procVerts = 18; procIndices = 24; break;
+                case MeshSourceType::Stairs:
+                    procVerts = static_cast<size_t>(current.source.steps) * 24u;
+                    procIndices = static_cast<size_t>(current.source.steps) * 36u;
+                    break;
+                case MeshSourceType::Sphere: {
+                    const size_t seg = static_cast<size_t>(current.source.segments);
+                    procVerts = (seg + 1u) * (seg + 1u);
+                    procIndices = seg * seg * 6u;
+                    break;
+                }
+                case MeshSourceType::Capsule:
+                    procVerts = 33u * 18u;
+                    procIndices = 32u * 16u * 6u;
+                    break;
+                default:
+                    break;
+            }
+            const size_t procBytes = procVerts * sizeof(Vertex) + procIndices * sizeof(unsigned int);
+            if (procVerts > budget.maxTotalMeshVertices - estimatedMeshVertices ||
+                procIndices > budget.maxTotalMeshIndices - estimatedMeshIndices ||
+                procBytes > budget.maxTotalMeshBytes - estimatedMeshBytes) {
+                return false;
+            }
+            estimatedMeshVertices += procVerts;
+            estimatedMeshIndices += procIndices;
+            estimatedMeshBytes += procBytes;
         }
         current.hasCollider = data.Find("collider") != nullptr;
         current.hasColliderShape = data.Find("collider_shape") != nullptr;
@@ -449,6 +538,15 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
         if (current.colliderShape < 0 || current.colliderShape > 1 || current.lightType < 0 || current.lightType > 2 ||
             current.lightIntensity < 0 || current.lightRange < 0) return false;
         if (!Serialization::ReadComponents(data, current.extra)) return false;
+        if (current.extra.skybox) {
+            for (const auto& facePath : current.extra.skybox->facePaths) {
+                if (!facePath.empty() && !ResourceManager::IsSafeAssetPath(facePath)) return false;
+            }
+        }
+        if (current.extra.audio && !current.extra.audio->clipName.empty() &&
+            !ResourceManager::IsSafeAssetPath(current.extra.audio->clipName)) return false;
+        if (current.extra.audioComponent && !current.extra.audioComponent->clip_path.empty() &&
+            !ResourceManager::IsSafeAssetPath(current.extra.audioComponent->clip_path)) return false;
         if ((formatVersion == 2) != !current.extra.persistentID.empty()) return false;
         if (formatVersion == 2 && (data.Find("id") || data.Find("parent_id"))) return false;
         // .scene replaces authored content only; imported records cannot make
@@ -469,6 +567,10 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
 
     std::vector<EntityHandle> created;
     created.reserve(loaded.size());
+    size_t actualMeshVertices = 0;
+    size_t actualMeshIndices = 0;
+    size_t actualMeshBytes = 0;
+    size_t actualTextureBytes = 0;
     try {
         for (const LoadedEntity& data : loaded) {
             Entity* e = scene->CreateEntity(data.name);
@@ -484,13 +586,37 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
                 if (data.hasMesh) {
                     auto mesh = Mesh::CreateFromSource(data.source);
                     if (!mesh) throw std::runtime_error("Mesh reconstruction failed");
+                    if (!data.authoredModelPath.empty()) {
+                        mesh->SetSourcePath(data.authoredModelPath);
+                    }
+                    const size_t vCount = std::as_const(*mesh).GetVertices().size();
+                    const size_t iCount = std::as_const(*mesh).GetIndices().size();
+                    const size_t mBytes = vCount * sizeof(Vertex) + iCount * sizeof(unsigned int);
+                    if (vCount > budget.maxTotalMeshVertices - actualMeshVertices ||
+                        iCount > budget.maxTotalMeshIndices - actualMeshIndices ||
+                        mBytes > budget.maxTotalMeshBytes - actualMeshBytes) {
+                        throw std::runtime_error("Aggregate mesh reconstruction budget exceeded");
+                    }
+                    actualMeshVertices += vCount;
+                    actualMeshIndices += iCount;
+                    actualMeshBytes += mBytes;
                     mr->SetMeshAsset(std::move(mesh));
                 }
                 mr->color = data.color;
                 if (!data.texturePath.empty()) {
-                    const std::string assetKey = std::filesystem::weakly_canonical(data.texturePath).generic_string();
-                    auto tex = TextureManager::Get().LoadShared(assetKey, data.texturePath);
+                    const std::string& loadTexPath = data.resolvedTexturePath.empty() ? data.texturePath : data.resolvedTexturePath;
+                    const std::string assetKey = ResourceManager::Get().CanonicalAssetKey(loadTexPath, documentRoot);
+                    auto tex = TextureManager::Get().LoadShared(assetKey, loadTexPath);
                     if (!tex) throw std::runtime_error("Texture reconstruction failed");
+                    tex->SetPath(data.texturePath);
+                    const size_t texBytes =
+                        static_cast<size_t>(std::max(1, tex->GetWidth())) *
+                        static_cast<size_t>(std::max(1, tex->GetHeight())) *
+                        static_cast<size_t>(std::max(1, tex->GetChannels()));
+                    if (texBytes > budget.maxTotalTextureBytes - actualTextureBytes) {
+                        throw std::runtime_error("Aggregate texture reconstruction budget exceeded");
+                    }
+                    actualTextureBytes += texBytes;
                     mr->SetTextureAsset(std::move(tex));
                 }
             }

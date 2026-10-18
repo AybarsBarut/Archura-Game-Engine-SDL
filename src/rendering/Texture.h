@@ -38,6 +38,9 @@ public:
 
     bool IsLoaded() const { return m_TextureID != 0; }
     const std::string& GetPath() const { return m_Path; }
+    const std::string& GetCanonicalPath() const { return m_CanonicalPath; }
+    void SetPath(const std::string& path) { m_Path = path; }
+    void SetCanonicalPath(const std::string& canonicalPath) { m_CanonicalPath = canonicalPath; }
 
 private:
     void Release() noexcept;
@@ -47,6 +50,7 @@ private:
     int m_Height = 0;
     int m_Channels = 0;
     std::string m_Path;
+    std::string m_CanonicalPath;
 };
 
 /**
@@ -76,5 +80,6 @@ private:
 
 private:
     std::unordered_map<std::string, std::shared_ptr<Texture>> m_Textures;
+    std::unordered_map<std::string, std::shared_ptr<Texture>> m_TexturesByCanonicalPath;
 };
 } // namespace Archura
