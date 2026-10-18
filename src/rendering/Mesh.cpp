@@ -28,6 +28,37 @@ std::shared_ptr<Mesh> Mesh::CreateRampShared(float width, float height, float de
 std::shared_ptr<Mesh> Mesh::LoadFromOBJShared(const std::string& path) { return std::shared_ptr<Mesh>(LoadFromOBJ(path)); }
 std::shared_ptr<Mesh> Mesh::LoadFromFBXShared(const std::string& path) { return std::shared_ptr<Mesh>(LoadFromFBX(path)); }
 
+std::shared_ptr<Mesh> Mesh::CreateFromSource(const MeshSource& source) {
+    const auto positive = [](float value) { return std::isfinite(value) && value > 0.0f; };
+    switch (source.type) {
+        case MeshSourceType::Cube:
+            return positive(source.size) ? CreateCubeShared(source.size) : nullptr;
+        case MeshSourceType::Plane:
+            return positive(source.width) && positive(source.height) && std::isfinite(source.uvScale)
+                ? CreatePlaneShared(source.width, source.height, source.uvScale) : nullptr;
+        case MeshSourceType::Sphere:
+            return positive(source.radius) && source.segments >= 3 && source.segments <= 512
+                ? CreateSphereShared(source.radius, source.segments) : nullptr;
+        case MeshSourceType::Capsule:
+            return positive(source.radius) && positive(source.height)
+                ? CreateCapsuleShared(source.radius, source.height) : nullptr;
+        case MeshSourceType::Stairs:
+            return positive(source.width) && positive(source.height) && positive(source.depth)
+                && source.steps >= 1 && source.steps <= 4096
+                ? CreateStairsShared(source.width, source.height, source.depth, source.steps) : nullptr;
+        case MeshSourceType::Ramp:
+            return positive(source.width) && positive(source.height) && positive(source.depth)
+                ? CreateRampShared(source.width, source.height, source.depth) : nullptr;
+        case MeshSourceType::OBJ:
+            return !source.path.empty() ? LoadFromOBJShared(source.path) : nullptr;
+        case MeshSourceType::FBX:
+            return !source.path.empty() ? LoadFromFBXShared(source.path) : nullptr;
+        case MeshSourceType::Custom:
+        default:
+            return nullptr;
+    }
+}
+
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
     : m_Vertices(vertices)
     , m_Indices(indices)
@@ -51,6 +82,8 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
     Release();
     m_Vertices = std::move(other.m_Vertices);
     m_Indices = std::move(other.m_Indices);
+    m_Source = std::move(other.m_Source);
+    other.m_Source = MeshSource{};
     m_VAO = std::exchange(other.m_VAO, 0);
     m_VBO = std::exchange(other.m_VBO, 0);
     m_EBO = std::exchange(other.m_EBO, 0);
@@ -295,7 +328,11 @@ Mesh* Mesh::CreateCube(float size) {
         indices.push_back(base + 3);
     }
     
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Cube;
+    source.size = size;
+    return mesh;
 }
 
 Mesh* Mesh::CreatePlane(float width, float height, float uvScale) {
@@ -314,7 +351,11 @@ Mesh* Mesh::CreatePlane(float width, float height, float uvScale) {
         0, 2, 3
     };
     
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Plane;
+    source.width = width; source.height = height; source.uvScale = uvScale;
+    return mesh;
 }
 
 Mesh* Mesh::CreateSphere(float radius, int segments) {
@@ -361,7 +402,11 @@ Mesh* Mesh::CreateSphere(float radius, int segments) {
         }
     }
     
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Sphere;
+    source.radius = radius; source.segments = segments;
+    return mesh;
 }
 
 Mesh* Mesh::CreateCapsule(float radius, float height) {
@@ -511,7 +556,11 @@ Mesh* Mesh::CreateCapsule(float radius, float height) {
         }
     }
 
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Capsule;
+    source.radius = radius; source.height = height;
+    return mesh;
 }
 
 Mesh* Mesh::CreateStairs(float width, float height, float depth, int steps) {
@@ -677,7 +726,11 @@ Mesh* Mesh::CreateStairs(float width, float height, float depth, int steps) {
         }
     }
 
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Stairs;
+    source.width = width; source.height = height; source.depth = depth; source.steps = steps;
+    return mesh;
 }
 
 Mesh* Mesh::CreateRamp(float width, float height, float depth) {
@@ -754,7 +807,11 @@ Mesh* Mesh::CreateRamp(float width, float height, float depth) {
     // Sol (Tri)
     indices.push_back(15); indices.push_back(16); indices.push_back(17);
 
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::Ramp;
+    source.width = width; source.height = height; source.depth = depth;
+    return mesh;
 }
 
 Mesh* Mesh::LoadFromOBJ(const std::string& path) {
@@ -823,7 +880,11 @@ Mesh* Mesh::LoadFromOBJ(const std::string& path) {
     
     if (vertices.empty()) return nullptr;
     
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::OBJ;
+    source.path = path;
+    return mesh;
 }
 
 Mesh* Mesh::LoadFromFBX(const std::string& path) {
@@ -944,12 +1005,17 @@ Mesh* Mesh::LoadFromFBX(const std::string& path) {
     }
 
     // std::cout << "Loaded FBX: " << path << " (" << vertices.size() << " vertices)" << std::endl;
-    return new Mesh(vertices, indices);
+    auto mesh = new Mesh(vertices, indices);
+    MeshSource& source = mesh->m_Source;
+    source.type = MeshSourceType::FBX;
+    source.path = path;
+    return mesh;
 }
 
 
 
 void Mesh::UpdateVertices() {
+    m_Source = MeshSource{};
     if (!RenderThread::IsCurrent() || m_VBO == 0) return;
     glBindVertexArray(m_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
@@ -974,6 +1040,7 @@ void Mesh::UpdateVertices() {
 }
 
 void Mesh::RecalculateNormals() {
+    m_Source = MeshSource{};
     // 1. Reset normals
     for (auto& v : m_Vertices) {
         v.normal = glm::vec3(0.0f);

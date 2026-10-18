@@ -1,16 +1,36 @@
 # GAUNTLET State
 
-Last updated: 2026-08-18
+Last updated: 2026-10-18
 
 ## Current status
 
-- Phase: RECON
-- Baseline revision: `371c71fd11e25d30e61e5e88e7cdfca05ad4d64c`
-- Last integrated work unit: `GAUNTLET-0003` — truthful frame and render instrumentation
-- Active work unit: `GAUNTLET-0009` — truthful network console contract
-- Baseline build: PASS (Debug, NMake/MSVC, 316.216 s)
-- Baseline tests: PASS (4/4, 0.30 s)
-- Runtime networking: unavailable because SDL_net is not installed
+- Phase: bounded stabilization cycle verified; broader engine work incomplete
+- Starting revision: `662d628` (clean working tree before this cycle)
+- Current changes: uncommitted, source/build/test/docs together in working tree
+- Fresh baseline: Debug all targets PASS; 14/14 contracts PASS (0.78 s)
+- Final build: Debug and Release all targets PASS (VS2022/MSVC x64, C++17)
+- Final tests: Debug 21/21 PASS (2.17 s), Release 21/21 PASS (2.74 s)
+- Runtime: both configurations rendered 16 OpenGL frames and shut down; unsupported backend failed as expected
+- Headless server: help PASS; no-backend startup exited 2 with explicit error
+- Runtime networking: unavailable because SDL_net is absent; no authoritative simulation implemented
+- OpenAL enabled configuration, full editor lifecycle, audio, Mono reload, image regressions and packaged deployment: untested
+
+## Completed in this cycle
+
+- Shared versioned scene codec for ProjectSerializer and GameSaveManager, complete
+  bounded JSON parsing/schema preflight, legacy inputs, staged entity/resource
+  creation with rollback, atomic save replacement and preceding-save backup.
+- Hierarchy, supported native/audio configuration, original imported mesh paths
+  and exact procedural recipes persist. Unknown components, custom/edited meshes,
+  assigned shaders, generated textures and excluded-system hierarchy edges fail
+  explicitly without replacing the prior save. See docs/serialization.md.
+- Transform undo uses generation handles plus owner Scene identity; deleted
+  entities/components and wrong-scene history entries are safely discarded.
+- Project panel filesystem work moved to a joined worker with immutable snapshots,
+  navigation/manual invalidation, polling and visible errors; no speedup measured.
+- Startup failure/exception status, bounded startup tests and Release warning/error
+  logging; CMake presets/dependency diagnostics/BUILD_TESTING controls; batch CWD fix.
+- Required audit, roadmap, build guide and test plan created; history retained.
 
 ## Current invariants
 
@@ -22,6 +42,16 @@ Last updated: 2026-08-18
 
 ## Next queue
 
-1. `GAUNTLET-0009` — truthful network console contract.
-2. `GAUNTLET-0004` — runtime networking contract.
-3. `GAUNTLET-0005` — cache editor Project panel enumeration.
+1. Add persistent scene identifiers and explicit system ownership metadata; replace
+   `.scene` name exclusions, preserving legacy migration and live handle validity.
+2. Cover gameplay configuration (Weapon etc.), editable geometry/shader materials;
+   add aggregate resource budgets and project-relative asset resolution.
+3. Validate all editor selections; implement authored-state Play/Stop restoration,
+   including runtime script/audio/physics cleanup and stable Player references.
+4. Separate runtime packaging and validate a sample game outside the repository.
+5. Enable/test SDL_net, then implement authoritative world/input/snapshot vertical
+   slice with a dedicated server and two real clients.
+
+Do not treat old backlog statements about fabricated networking/no parser as
+current evidence. Audit confirms transport pumping and truthful console already
+exist. Shader, terrain, audio and timing findings remain queued in ENGINE_AUDIT.

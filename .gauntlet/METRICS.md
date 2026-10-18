@@ -1,5 +1,39 @@
 # Metrics
 
+## Stabilization cycle — 2026-10-18
+
+Starting revision `662d628`; changes remain uncommitted. Environment: Windows x64,
+Visual Studio 2022, MSVC 19.44, Windows SDK 10.0.26100.0, CMake 4.2.3, C++17.
+
+- Initial discovery in reused build directory: 12 tests, 11 unbuilt executables;
+  this was Not Run, not evidence of 11 runtime regressions.
+- Enabled ECS/physics/renderer tests; fresh Debug all-target build exited 0.
+  Baseline CTest: 14/14 passed, 0.78 s.
+- Final Debug all-target build exited 0; CTest: 21/21 passed, 2.17 s.
+- Final Release all-target build exited 0; CTest: 21/21 passed, 2.74 s.
+- 19 contracts plus 2 startup checks: Release diagnostics; directory cache;
+  deletion/scene-safe undo; mesh recipes/OBJ/FBX/moves; shared project/save codec
+  rollback/validation/backup; existing input/gameplay/ECS/physics/network contracts.
+- Actual OpenGL startup used NVIDIA GeForce RTX 4060 Laptop GPU, OpenGL 3.3;
+  each config rendered exactly 16 frames and completed normal destruction.
+  Unsupported Vulkan without fallback failed intentionally with a useful error.
+- Headless server `--help` exited 0; regular no-SDL_net startup exited 2 and
+  named the missing backend. No multiplayer simulation or two-client run claimed.
+- `BUILD_TESTING=OFF` fresh configuration discovered 0 tests; presets parsed.
+- An intermediate Release build failed while shared-codec declarations were
+  incomplete; declarations and test link dependencies were corrected before the
+  successful final Debug/Release builds. No intermediate failure is counted PASS.
+- Existing unused-variable/parameter and third-party compiler warnings remain;
+  the added Windows-header macro warning was corrected. Build is not warning-free.
+- Commands: docs/BUILD_GUIDE.md. Logs: ignored build-codex-graphics-api/
+  baseline-debug.log, final-debug.log, final-release.log and Testing/Temporary.
+
+No performance benchmark, cache FPS improvement, gameplay percentile/memory
+growth result, visual comparison, real audio, managed reload, packaged game or
+authoritative multiplayer acceptance is claimed. SDL_net absent; OpenAL off.
+
+The historical measurements below are retained for provenance only.
+
 ## Baseline — 2026-08-18
 
 Revision: `371c71fd11e25d30e61e5e88e7cdfca05ad4d64c`

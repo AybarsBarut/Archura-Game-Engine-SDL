@@ -37,6 +37,23 @@ struct Vertex {
  * 
  * VAO/VBO/EBO ile optimize edilmiş rendering
  */
+// Persist the recipe used to build a mesh instead of inferring its identity from
+// vertex counts. Custom meshes deliberately have no reconstruction recipe.
+enum class MeshSourceType { Custom, Cube, Plane, Sphere, Capsule, Stairs, Ramp, OBJ, FBX };
+
+struct MeshSource {
+    MeshSourceType type = MeshSourceType::Custom;
+    float size = 1.0f;
+    float width = 10.0f;
+    float height = 10.0f;
+    float depth = 1.0f;
+    float uvScale = 1.0f;
+    float radius = 1.0f;
+    int segments = 32;
+    int steps = 5;
+    std::string path;
+};
+
 class Mesh {
 public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
@@ -59,6 +76,10 @@ public:
     static Mesh* CreateStairs(float width = 1.0f, float height = 1.0f, float depth = 1.0f, int steps = 5);
     static Mesh* CreateRamp(float width = 1.0f, float height = 1.0f, float depth = 1.0f);
     
+    const MeshSource& GetSource() const noexcept { return m_Source; }
+    // Returns nullptr for custom or invalid recipes and unavailable model files.
+    static std::shared_ptr<Mesh> CreateFromSource(const MeshSource& source);
+
     // Model Loader
     static Mesh* LoadFromOBJ(const std::string& path);
     static Mesh* LoadFromFBX(const std::string& path);
@@ -82,7 +103,9 @@ private:
 
 public:
     // Dynamic Mesh Modification
-    std::vector<Vertex>& GetVertices() { return m_Vertices; }
+    // Granting mutable access conservatively invalidates the reconstruction
+    // recipe, so edited geometry cannot later reload as its original shape.
+    std::vector<Vertex>& GetVertices() { m_Source = MeshSource{}; return m_Vertices; }
     const std::vector<Vertex>& GetVertices() const { return m_Vertices; }
     const std::vector<unsigned int>& GetIndices() const { return m_Indices; }
     
@@ -93,9 +116,11 @@ private:
     std::vector<Vertex> m_Vertices;
     std::vector<unsigned int> m_Indices;
 
-    unsigned int m_VAO;  // Vertex Array Object
-    unsigned int m_VBO;  // Vertex Buffer Object
-    unsigned int m_EBO;  // Element Buffer Object
+    MeshSource m_Source;
+
+    unsigned int m_VAO = 0;  // Vertex Array Object
+    unsigned int m_VBO = 0;  // Vertex Buffer Object
+    unsigned int m_EBO = 0;  // Element Buffer Object
     size_t m_VertexCapacityBytes = 0;
     
     unsigned int m_InstanceVBO = 0; // For instanced rendering

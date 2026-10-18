@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
+cd /d "%~dp0"
+if errorlevel 1 exit /b 1
 
 REM =============================================================
 REM  Archura Engine  -  Release Build + Arsiv Sistemi

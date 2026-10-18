@@ -25,6 +25,8 @@ struct SDL_Window;
 #include "EditorCamera.h"
 #include "ObjectManipulationTool.h"
 #include "GameBuilderPanel.h"
+#include "TransformUndoHistory.h"
+#include "ProjectDirectoryCache.h"
 
 namespace Archura {
 
@@ -132,6 +134,7 @@ public: // ── Shared State (kept public for minimal refactor surface) ──
     uint32_t m_CachedEntityID  = 0;
 
     // Project browser
+    ProjectDirectoryCache m_ProjectDirectoryCache;
     std::filesystem::path m_BaseProjectDir;
     std::filesystem::path m_CurrentProjectDir;
     std::vector<std::filesystem::path> m_SelectedFiles;
@@ -216,15 +219,7 @@ private:
     float      m_GizmoDragScale      = 1.0f;
 
     // ── Undo System ────────────────────────────────────────────────────────
-    struct UndoSnapshot {
-        Entity*   entity = nullptr; // raw ptr – valid while scene lives
-        uint32_t  id     = 0;
-        glm::vec3 pos    = {};
-        glm::vec3 rot    = {};
-        glm::vec3 scale  = {1,1,1};
-    };
-    static constexpr int UNDO_LIMIT = 50;
-    std::deque<UndoSnapshot> m_UndoStack;
+    TransformUndoHistory m_UndoHistory;
 
     void UndoLastAction(Scene* scene);
 

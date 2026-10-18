@@ -1,4 +1,9 @@
 #include "GameSaveManager.h"
+#include "SerializationJson.h"
+#include "SceneData.h"
+#include "AtomicFile.h"
+#include <limits>
+#include <locale>
 #include "../ecs/Entity.h"
 #include "../ecs/Component.h"
 #include "../rendering/Mesh.h"
@@ -57,18 +62,7 @@ std::string GameSaveManager::GetTimestamp() const {
 }
 
 std::string GameSaveManager::EscapeJson(std::string_view s) {
-    std::string out;
-    out.reserve(s.size() + s.size() / 10);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            default:   out += c;
-        }
-    }
-    return out;
+    return Serialization::Escape(s);
 }
 
 std::string GameSaveManager::ExtractJsonField(std::string_view json, std::string_view key) {
@@ -139,7 +133,8 @@ void GameSaveManager::RefreshProjects() {
     std::error_code ec;
     if (!std::filesystem::exists("saves", ec)) return;
 
-    for (const auto& entry : std::filesystem::directory_iterator("saves", ec)) {
+    for (std::filesystem::directory_iterator it("saves", ec), end; !ec && it != end; it.increment(ec)) {
+        const auto& entry = *it;
         if (!entry.is_regular_file(ec)) continue;
         if (entry.path().extension() != ".scene") continue;
 
@@ -150,27 +145,22 @@ void GameSaveManager::RefreshProjects() {
         std::streamsize size = f.tellg();
         f.seekg(0, std::ios::beg);
 
-        if (size <= 0) continue;
+        if (size <= 0 || size > 32 * 1024 * 1024) continue;
 
         std::string content;
         content.resize(static_cast<size_t>(size));
         if (!f.read(content.data(), size)) continue;
 
+        Serialization::Json root;
+        if (!Serialization::JsonParser(content).Parse(root)) continue;
+        const auto* entities = root.Find("entities");
+        if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) continue;
         ProjectSave proj;
-        proj.filePath   = entry.path().string();
-        std::string_view contentView(content);
-        proj.name       = ExtractJsonField(contentView, "project_name");
-        proj.timestamp  = ExtractJsonField(contentView, "timestamp");
-        proj.valid      = true;
-
-        size_t cnt = 0, p = 0;
-        std::string_view nameKey = "\"name\":";
-        while ((p = contentView.find(nameKey, p)) != std::string_view::npos) { 
-            ++cnt; 
-            p += nameKey.length(); 
-        }
-        proj.entityCount = static_cast<int>(cnt);
-
+        proj.filePath = entry.path().string();
+        if (!Serialization::StringField(root, "project_name", proj.name) ||
+            !Serialization::StringField(root, "timestamp", proj.timestamp)) continue;
+        proj.entityCount = static_cast<int>(entities->array.size());
+        proj.valid = true;
         if (proj.name.empty()) proj.name = entry.path().stem().string();
         m_Projects.push_back(proj);
     }
@@ -195,24 +185,49 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
     std::string path     = "saves/" + safeName + ".scene";
     std::string ts       = GetTimestamp();
 
-    std::ofstream file(path, std::ios::out | std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "[SaveManager] Dosya olusturulamadi: " << path << std::endl;
-        return false;
-    }
+    std::ostringstream file;
+    file.imbue(std::locale::classic());
+    file << std::setprecision(std::numeric_limits<float>::max_digits10);
 
-    file << "{\n";
+    file << "{\n  \"format_version\": 1,\n";
     file << "  \"project_name\": \"" << EscapeJson(actualName) << "\",\n";
     file << "  \"timestamp\": \"" << EscapeJson(ts) << "\",\n";
     file << "  \"engine_version\": \"1.0\",\n";
     file << "  \"entities\": [\n";
 
+    if (!WriteEntities(file, scene, true)) return false;
+
+    file << "\n  ]\n}\n";
+    Serialization::Json validation;
+    const auto content = file.str();
+    if (!Serialization::JsonParser(content).Parse(validation) || !LoadEntities(validation, scene, true, true) || !Serialization::AtomicWrite(path, content)) return false;
+
+    std::cout << "[SaveManager] Proje kaydedildi: " << path << std::endl;
+    RefreshProjects();
+    return true;
+}
+
+bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitSystem) {
     const auto& entities = scene->GetEntities();
     bool first = true;
 
     for (const auto& ePtr : entities) {
         Entity* e = ePtr.get();
-        if (IsSystemEntity(e->GetName())) continue;
+        if (omitSystem && IsSystemEntity(e->GetName())) {
+            if (e->GetParent() && !IsSystemEntity(e->GetParent()->GetName())) {
+                std::cerr << "[SaveManager] Saved parent has an excluded system child; save cancelled\n";
+                return false;
+            }
+            continue;
+        }
+        if (!Serialization::HasOnlySupportedComponents(e)) {
+            std::cerr << "[SaveManager] Unsupported component on entity: " << e->GetName() << "; save cancelled\n";
+            return false;
+        }
+        if (omitSystem && e->GetParent() && IsSystemEntity(e->GetParent()->GetName())) {
+            std::cerr << "[SaveManager] Parent is excluded system entity; save cancelled: " << e->GetName() << '\n';
+            return false;
+        }
 
         if (!first) file << ",\n";
         first = false;
@@ -221,6 +236,10 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
         auto* mr = e->GetComponent<MeshRenderer>();
         auto* bc = e->GetComponent<BoxCollider>();
         auto* lc = e->GetComponent<LightComponent>();
+        if (mr && (mr->GetShader() || (mr->GetTexture() && mr->GetTexture()->GetPath().empty()))) {
+            std::cerr << "[SaveManager] Assigned shader or generated texture lacks a serialization source; save cancelled: " << e->GetName() << '\n';
+            return false;
+        }
 
         file << "    {\n";
         file << "      \"name\": \""  << EscapeJson(e->GetName()) << "\",\n";
@@ -229,12 +248,34 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
                                    ? "ramp"
                                    : "cube";
         std::string modelPath;
-        if (mr) {
-            meshType  = "cube";
+        const MeshSource* source = nullptr;
+        if (mr && mr->GetMesh()) {
+            source = &mr->GetMesh()->GetSource();
+            switch (source->type) {
+                case MeshSourceType::Cube: meshType = "cube"; break;
+                case MeshSourceType::Plane: meshType = "plane"; break;
+                case MeshSourceType::Sphere: meshType = "sphere"; break;
+                case MeshSourceType::Capsule: meshType = "capsule"; break;
+                case MeshSourceType::Stairs: meshType = "stairs"; break;
+                case MeshSourceType::Ramp: meshType = "ramp"; break;
+                case MeshSourceType::OBJ: meshType = "obj"; modelPath = source->path; break;
+                case MeshSourceType::FBX: meshType = "fbx"; modelPath = source->path; break;
+                default:
+                    std::cerr << "[SaveManager] Custom mesh has no reconstructible source; save cancelled\n";
+                    return false;
+            }
         }
         file << "      \"mesh_type\": \"" << meshType << "\",\n";
         file << "      \"has_mesh_renderer\": " << (mr ? "true" : "false") << ",\n";
 
+        if (source) {
+            file << "      \"mesh_source\": {\"size\":" << source->size
+                 << ",\"width\":" << source->width << ",\"height\":" << source->height
+                 << ",\"depth\":" << source->depth << ",\"uv_scale\":" << source->uvScale
+                 << ",\"radius\":" << source->radius << ",\"segments\":" << source->segments
+                 << ",\"steps\":" << source->steps << "},\n";
+        }
+        file << "      \"has_mesh\": " << (mr && mr->GetMesh() ? "true" : "false") << ",\n";
         if (!modelPath.empty())
             file << "      \"model_path\": \"" << EscapeJson(modelPath) << "\",\n";
 
@@ -246,7 +287,7 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
 
         if (mr) {
             file << "      \"color\": [" << mr->color.r << "," << mr->color.g << "," << mr->color.b << "],\n";
-            std::string texPath = mr->texture ? mr->texture->GetPath() : "";
+            std::string texPath = mr->GetTexture() ? mr->GetTexture()->GetPath() : "";
             file << "      \"texture\": \"" << EscapeJson(texPath) << "\",\n";
         }
 
@@ -264,15 +305,12 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
             file << "      \"light_range\": " << lc->range << ",\n";
         }
 
-        file << "      \"__end\": true\n";
+        file << "      \"__end\": true";
+        Serialization::WriteComponents(file, e);
+        file << '\n';
         file << "    }";
     }
 
-    file << "\n  ]\n}\n";
-    file.close();
-
-    std::cout << "[SaveManager] Proje kaydedildi: " << path << std::endl;
-    RefreshProjects();
     return true;
 }
 
@@ -305,16 +343,29 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
     if (!file.read(content.data(), size)) return false;
     file.close();
 
-    const size_t first = content.find_first_not_of(" \t\r\n");
-    const size_t last = content.find_last_not_of(" \t\r\n");
-    if (first == std::string::npos || content[first] != '{' ||
-        last == std::string::npos || content[last] != '}' ||
-        content.find("\"entities\"") == std::string::npos) {
-        std::cerr << "[SaveManager] Gecersiz proje formati\n";
-        return false;
+    Serialization::Json root;
+    if (!Serialization::JsonParser(content).Parse(root)) {
+        std::cerr << "[SaveManager] Invalid JSON in " << filePath << '\n'; return false;
+    }
+    int version = 1;
+    if (!Serialization::IntField(root, "format_version", version) || version != 1) return false;
+    const auto* entities = root.Find("entities");
+    if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+
+    if (!LoadEntities(root, scene, true)) {
+        std::cerr << "[SaveManager] Scene validation or reconstruction failed: " << filePath << "; previous scene retained\n"; return false;
     }
 
+    std::cout << "[SaveManager] Proje yuklendi: " << filePath << std::endl;
+    return true;
+}
+
+bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene, bool keepSystem, bool validateOnly) {
+    const auto* entities = root.Find("entities");
+    if (!scene || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+    std::error_code ec;
     struct LoadedEntity {
+        Serialization::EntityData extra;
         std::string name;
         std::string meshType = "cube";
         std::string texturePath;
@@ -329,6 +380,8 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
         int lightType = 0;
         float lightIntensity = 1.0f;
         float lightRange = 20.0f;
+        MeshSource source;
+        bool hasMesh = true;
         bool hasMeshRenderer = true; // backwards-compatible with old saves
         bool hasCollider = false;
         bool colliderTrigger = false;
@@ -338,171 +391,82 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
 
     std::vector<LoadedEntity> loaded;
     loaded.reserve(64);
-    LoadedEntity current;
-    bool inEntities = false;
-    bool entitiesClosed = false;
-    bool currentOpen = false;
-    bool parseError = false;
-
-    auto parseArr3 = [&](std::string_view line, std::string_view key,
-                         glm::vec3& value) -> bool {
-        const std::string quotedKey = "\"" + std::string(key) + "\"";
-        const size_t kp = line.find(quotedKey);
-        if (kp == std::string_view::npos) return true;
-        const size_t open = line.find('[', kp);
-        if (open == std::string_view::npos) return false;
-        const char* begin = line.data() + open + 1;
-        const char* end = line.data() + line.size();
-        char* next = nullptr;
-        float values[3]{};
-        const char* cursor = begin;
-        for (float& component : values) {
-            while (cursor < end && (*cursor == ' ' || *cursor == '\t' || *cursor == ',')) ++cursor;
-            component = std::strtof(cursor, &next);
-            if (next == cursor || !std::isfinite(component)) return false;
-            cursor = next;
+    for (const auto& data : entities->array) {
+        LoadedEntity current;
+        current.hasMeshRenderer = !root.Find("project");
+        if (!Serialization::StringField(data, "name", current.name, true) ||
+            !Serialization::StringField(data, "mesh_type", current.meshType) ||
+            !Serialization::StringField(data, "texture", current.texturePath) ||
+            !Serialization::BoolField(data, "has_mesh", current.hasMesh) ||
+            !Serialization::BoolField(data, "has_mesh_renderer", current.hasMeshRenderer) ||
+            !Serialization::BoolField(data, "collider_trigger", current.colliderTrigger) ||
+            !Serialization::IntField(data, "light_type", current.lightType) ||
+            !Serialization::IntField(data, "collider_shape", current.colliderShape) ||
+            !Serialization::FloatField(data, "light_intensity", current.lightIntensity) ||
+            !Serialization::FloatField(data, "light_range", current.lightRange) ||
+            !Serialization::Vec3Field(data, "position", current.position) ||
+            !Serialization::Vec3Field(data, "rotation", current.rotation) ||
+            !Serialization::Vec3Field(data, "scale", current.scale) ||
+            !Serialization::Vec3Field(data, "color", current.color) ||
+            !Serialization::Vec3Field(data, "collider", current.colliderSize) ||
+            !Serialization::Vec3Field(data, "collider_center", current.colliderCenter) ||
+            !Serialization::Vec3Field(data, "light_color", current.lightColor)) return false;
+        if (const auto* transform = data.Find("transform")) {
+            if (transform->kind != Serialization::Json::Kind::Object ||
+                !Serialization::Vec3Field(*transform, "position", current.position) ||
+                !Serialization::Vec3Field(*transform, "rotation", current.rotation) ||
+                !Serialization::Vec3Field(*transform, "scale", current.scale)) return false;
         }
-        value = glm::vec3(values[0], values[1], values[2]);
-        return true;
-    };
-
-    auto parseFloat = [&](std::string_view line, std::string_view key,
-                          float& target) -> bool {
-        const std::string value = ExtractJsonField(line, key);
-        if (value.empty()) return false;
-        try {
-            size_t consumed = 0;
-            const float parsed = std::stof(value, &consumed);
-            if (consumed != value.size() || !std::isfinite(parsed)) return false;
-            target = parsed;
-            return true;
-        } catch (...) {
-            return false;
+        if (current.meshType == "cube") current.source.type = MeshSourceType::Cube;
+        else if (current.meshType == "plane") current.source.type = MeshSourceType::Plane;
+        else if (current.meshType == "sphere") current.source.type = MeshSourceType::Sphere;
+        else if (current.meshType == "capsule") { current.source.type = MeshSourceType::Capsule; current.source.radius = 0.5f; current.source.height = 2.0f; }
+        else if (current.meshType == "ramp") { current.source.type = MeshSourceType::Ramp; current.source.width = 1; current.source.height = 1; }
+        else if (current.meshType == "stairs") { current.source.type = MeshSourceType::Stairs; current.source.width = 1; current.source.height = 1; }
+        else if (current.meshType == "obj") current.source.type = MeshSourceType::OBJ;
+        else if (current.meshType == "fbx") current.source.type = MeshSourceType::FBX;
+        else return false;
+        if (!Serialization::StringField(data, "model_path", current.source.path)) return false;
+        if (const auto* source = data.Find("mesh_source")) {
+            if (source->kind != Serialization::Json::Kind::Object ||
+                !Serialization::FloatField(*source, "size", current.source.size) ||
+                !Serialization::FloatField(*source, "width", current.source.width) ||
+                !Serialization::FloatField(*source, "height", current.source.height) ||
+                !Serialization::FloatField(*source, "depth", current.source.depth) ||
+                !Serialization::FloatField(*source, "uv_scale", current.source.uvScale) ||
+                !Serialization::FloatField(*source, "radius", current.source.radius) ||
+                !Serialization::IntField(*source, "segments", current.source.segments) ||
+                !Serialization::IntField(*source, "steps", current.source.steps)) return false;
         }
-    };
-
-    auto parseInt = [&](std::string_view line, std::string_view key,
-                        int& target) -> bool {
-        const std::string value = ExtractJsonField(line, key);
-        if (value.empty()) return false;
-        try {
-            size_t consumed = 0;
-            const int parsed = std::stoi(value, &consumed);
-            if (consumed != value.size()) return false;
-            target = parsed;
-            return true;
-        } catch (...) {
-            return false;
+        if (current.source.type == MeshSourceType::OBJ || current.source.type == MeshSourceType::FBX) {
+            if (current.source.path.empty() || current.source.path.find('\0') != std::string::npos ||
+                !std::filesystem::is_regular_file(current.source.path, ec) || ec) return false;
         }
-    };
-
-    std::string_view remaining(content);
-    while (!remaining.empty()) {
-        const size_t eol = remaining.find('\n');
-        std::string_view line = eol == std::string_view::npos
-                                    ? remaining
-                                    : remaining.substr(0, eol);
-        remaining = eol == std::string_view::npos
-                        ? std::string_view{}
-                        : remaining.substr(eol + 1);
-        const size_t start = line.find_first_not_of(" \t\r");
-        if (start == std::string_view::npos) continue;
-        line = line.substr(start);
-        const size_t end = line.find_last_not_of(" \t\r");
-        if (end != std::string_view::npos) line = line.substr(0, end + 1);
-
-        if (line.find("\"entities\"") != std::string_view::npos) {
-            inEntities = true;
-            continue;
+        if (!current.texturePath.empty() && (current.texturePath.find('\0') != std::string::npos ||
+            !std::filesystem::is_regular_file(current.texturePath, ec) || ec)) return false;
+        if (current.hasMeshRenderer && current.hasMesh) {
+            if (current.source.size <= 0 || current.source.width <= 0 || current.source.height <= 0 ||
+                current.source.depth <= 0 || current.source.radius <= 0 || current.source.segments < 3 ||
+                current.source.segments > 512 || current.source.steps < 1 || current.source.steps > 4096) return false;
         }
-        if (!inEntities) continue;
-
-        if (line == "]") {
-            entitiesClosed = true;
-            continue;
-        }
-        if (entitiesClosed) continue;
-
-        if (line == "{") {
-            if (currentOpen || loaded.size() >= 100000) {
-                parseError = true;
-                break;
-            }
-            current = LoadedEntity{};
-            currentOpen = true;
-            continue;
-        }
-        if (line == "}" || line == "},") {
-            if (!currentOpen || current.name.empty()) {
-                parseError = true;
-                break;
-            }
-            loaded.push_back(current);
-            currentOpen = false;
-            continue;
-        }
-        if (!currentOpen) continue;
-
-        if (line.find("\"name\":") != std::string_view::npos) {
-            current.name = ExtractJsonField(line, "name");
-            if (current.name.empty()) parseError = true;
-        }
-        if (line.find("\"mesh_type\":") != std::string_view::npos) {
-            current.meshType = ExtractJsonField(line, "mesh_type");
-            if (current.meshType != "cube" && current.meshType != "sphere" &&
-                current.meshType != "capsule" && current.meshType != "ramp" &&
-                current.meshType != "stairs") parseError = true;
-        }
-        if (line.find("\"has_mesh_renderer\":") != std::string_view::npos) {
-            const std::string value = ExtractJsonField(line, "has_mesh_renderer");
-            if (value == "true") current.hasMeshRenderer = true;
-            else if (value == "false") current.hasMeshRenderer = false;
-            else parseError = true;
-        }
-        if (line.find("\"texture\":") != std::string_view::npos)
-            current.texturePath = ExtractJsonField(line, "texture");
-        if (line.find("\"light_type\":") != std::string_view::npos) {
-            current.hasLight = parseInt(line, "light_type", current.lightType);
-            if (!current.hasLight) parseError = true;
-        }
-        if (line.find("\"light_intensity\":") != std::string_view::npos &&
-            !parseFloat(line, "light_intensity", current.lightIntensity)) parseError = true;
-        if (line.find("\"light_range\":") != std::string_view::npos &&
-            !parseFloat(line, "light_range", current.lightRange)) parseError = true;
-        if (line.find("\"collider_shape\":") != std::string_view::npos) {
-            current.hasColliderShape = parseInt(line, "collider_shape", current.colliderShape);
-            if (!current.hasColliderShape) parseError = true;
-        }
-        if (line.find("\"collider_trigger\":") != std::string_view::npos) {
-            const std::string value = ExtractJsonField(line, "collider_trigger");
-            if (value == "true") current.colliderTrigger = true;
-            else if (value == "false") current.colliderTrigger = false;
-            else parseError = true;
-        }
-        if (line.find("\"collider\":") != std::string_view::npos) {
-            current.hasCollider = parseArr3(line, "collider", current.colliderSize);
-            if (!current.hasCollider) parseError = true;
-        }
-        if (!parseArr3(line, "position", current.position) ||
-            !parseArr3(line, "rotation", current.rotation) ||
-            !parseArr3(line, "scale", current.scale) ||
-            !parseArr3(line, "color", current.color) ||
-            !parseArr3(line, "collider_center", current.colliderCenter) ||
-            !parseArr3(line, "light_color", current.lightColor)) parseError = true;
+        current.hasCollider = data.Find("collider") != nullptr;
+        current.hasColliderShape = data.Find("collider_shape") != nullptr;
+        current.hasLight = data.Find("light_type") != nullptr;
+        if (current.colliderShape < 0 || current.colliderShape > 1 || current.lightType < 0 || current.lightType > 2 ||
+            current.lightIntensity < 0 || current.lightRange < 0) return false;
+        if (!Serialization::ReadComponents(data, current.extra)) return false;
+        loaded.push_back(std::move(current));
     }
 
-    if (!entitiesClosed || currentOpen || parseError || loaded.size() > 100000) {
-        std::cerr << "[SaveManager] Proje parse edilemedi; sahne degistirilmedi\n";
-        return false;
-    }
+    if (!Serialization::ValidateHierarchy(loaded)) return false;
+    if (validateOnly) return true;
 
     // Only mutate the scene after the complete file has been read and
     // validated. A malformed save can no longer erase the current scene.
     std::vector<EntityID> toDelete;
     for (const auto& ePtr : scene->GetEntities()) {
-        if (!IsSystemEntity(ePtr->GetName())) toDelete.push_back(ePtr->GetID());
+        if (!keepSystem || !IsSystemEntity(ePtr->GetName())) toDelete.push_back(ePtr->GetID());
     }
-    for (EntityID id : toDelete) scene->DestroyEntity(id);
 
     std::vector<EntityHandle> created;
     created.reserve(loaded.size());
@@ -518,16 +482,17 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
 
             if (data.hasMeshRenderer) {
                 auto* mr = e->AddComponent<MeshRenderer>();
-                if (data.meshType == "sphere") mr->SetMeshAsset(Mesh::CreateSphereShared());
-                else if (data.meshType == "capsule") mr->SetMeshAsset(Mesh::CreateCapsuleShared());
-                else if (data.meshType == "ramp") mr->SetMeshAsset(Mesh::CreateRampShared());
-                else if (data.meshType == "stairs") mr->SetMeshAsset(Mesh::CreateStairsShared());
-                else mr->SetMeshAsset(Mesh::CreateCubeShared());
+                if (data.hasMesh) {
+                    auto mesh = Mesh::CreateFromSource(data.source);
+                    if (!mesh) throw std::runtime_error("Mesh reconstruction failed");
+                    mr->SetMeshAsset(std::move(mesh));
+                }
                 mr->color = data.color;
                 if (!data.texturePath.empty()) {
-                    const std::string stem = std::filesystem::path(data.texturePath).stem().string();
-                    auto tex = TextureManager::Get().LoadShared(stem, data.texturePath);
-                    if (tex) mr->SetTextureAsset(std::move(tex));
+                    const std::string assetKey = std::filesystem::weakly_canonical(data.texturePath).generic_string();
+                    auto tex = TextureManager::Get().LoadShared(assetKey, data.texturePath);
+                    if (!tex) throw std::runtime_error("Texture reconstruction failed");
+                    mr->SetTextureAsset(std::move(tex));
                 }
             }
 
@@ -548,14 +513,17 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
                 lc->intensity = data.lightIntensity;
                 lc->range = data.lightRange;
             }
+            Serialization::ApplyComponents(e, data.extra);
         }
+        if (!Serialization::LinkHierarchy(scene, loaded, created)) throw std::runtime_error("Invalid hierarchy");
     } catch (...) {
         for (EntityHandle handle : created) scene->DestroyEntity(handle);
-        std::cerr << "[SaveManager] Entity olusturma basarisiz\n";
+        std::cerr << "[SaveManager] Component/resource/hierarchy reconstruction failed; previous scene retained\n";
         return false;
     }
 
-    std::cout << "[SaveManager] Proje yuklendi: " << filePath << std::endl;
+    for (EntityID id : toDelete) scene->DestroyEntity(id);
+
     return true;
 }
 

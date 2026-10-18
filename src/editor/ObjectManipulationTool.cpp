@@ -252,7 +252,7 @@ void ObjectManipulationTool::RenderObjectModeUI() {
     m_DeformationValue = 0.0f; // Reset value on switch
     // Capture base state
     if (m_CurrentMesh && m_BaseMeshState.empty()) {
-      m_BaseMeshState = m_CurrentMesh->GetVertices();
+      m_BaseMeshState = static_cast<const Mesh&>(*m_CurrentMesh).GetVertices();
     }
   }
 
@@ -266,7 +266,7 @@ void ObjectManipulationTool::RenderObjectModeUI() {
 
   if (valueChanged && m_CurrentMesh) {
     if (m_BaseMeshState.empty()) {
-      m_BaseMeshState = m_CurrentMesh->GetVertices();
+      m_BaseMeshState = static_cast<const Mesh&>(*m_CurrentMesh).GetVertices();
     }
     ApplyDeformation(m_CurrentMesh.get(), m_DeformationType, m_DeformationValue,
                      m_DeformationAxis);
@@ -315,7 +315,7 @@ bool ObjectManipulationTool::RayIntersectsMesh(
 
   // Iterate triangles
   const auto &indices = mesh->GetIndices();
-  const auto &vertices = mesh->GetVertices();
+  const auto &vertices = static_cast<const Mesh&>(*mesh).GetVertices();
 
   float closestT = std::numeric_limits<float>::max();
   bool hit = false;
@@ -518,7 +518,7 @@ void ObjectManipulationTool::PushHistory(const std::shared_ptr<Mesh>& mesh) {
     return;
   HistoryState state;
   state.targetMesh = mesh;
-  state.vertices = mesh->GetVertices();
+  state.vertices = static_cast<const Mesh&>(*mesh).GetVertices();
   m_UndoStack.push_back(state);
 
   if (m_UndoStack.size() > 20) {

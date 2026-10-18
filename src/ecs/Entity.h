@@ -64,8 +64,11 @@ public:
 
   EntityID GetID() const noexcept { return m_Handle.id; }
   EntityHandle GetHandle() const noexcept { return m_Handle; }
+  const Scene* GetScene() const noexcept { return m_Owner; }
   const std::string &GetName() const noexcept { return m_Name; }
   void SetName(std::string name) { m_Name = std::move(name); }
+
+  size_t GetComponentCount() const noexcept { return m_Components.size(); }
 
   // Hierarchy is non-owning. Cycles, self-parenting and duplicate children are
   // rejected. The Scene owns all Entity lifetimes.
