@@ -401,6 +401,7 @@ void Application::Run(uint32_t frameLimit) {
 
   // 4. Skybox Entity
   Entity *skyboxEntity = m_Scene->CreateEntity("Skybox");
+  skyboxEntity->SetOwnership(EntityOwnership::Engine);
   auto *skyComp = skyboxEntity->AddComponent<SkyboxComponent>();
   skyComp->facePaths = {"assets/skybox/right.jpg", "assets/skybox/left.jpg",
                         "assets/skybox/top.jpg",   "assets/skybox/bottom.jpg",
@@ -431,6 +432,7 @@ void Application::Run(uint32_t frameLimit) {
 
   // Create Player entity (store as member)
   Entity *player = m_Scene->CreateEntity("Player");
+  player->SetOwnership(EntityOwnership::Engine);
   m_PlayerHandleValue = player->GetHandle().Value();
   auto *weapon = player->AddComponent<Weapon>();
   weapon->InitInventory();
@@ -462,6 +464,7 @@ void Application::Run(uint32_t frameLimit) {
   // --- SETUP ROBUST MAP ---
   // 1. Sun
   Entity *light = m_Scene->CreateEntity("Sun");
+  light->SetOwnership(EntityOwnership::Engine);
   auto *lightComp = light->AddComponent<LightComponent>();
   lightComp->type = LightComponent::Type::Directional;
   lightComp->color = glm::vec3(1.0f, 0.98f, 0.9f);
@@ -471,6 +474,7 @@ void Application::Run(uint32_t frameLimit) {
 
   // 1.5 Ambient Light (Fill)
   Entity *ambientLight = m_Scene->CreateEntity("AmbientLight");
+  ambientLight->SetOwnership(EntityOwnership::Engine);
   auto *ambientComp = ambientLight->AddComponent<LightComponent>();
   ambientComp->type = LightComponent::Type::Circle;
   ambientComp->color = glm::vec3(0.6f, 0.6f, 0.7f);
@@ -478,6 +482,7 @@ void Application::Run(uint32_t frameLimit) {
 
   // 2. Floor
   Entity *floor = m_Scene->CreateEntity("Floor");
+  floor->SetOwnership(EntityOwnership::Engine);
   {
     auto *mesh = floor->AddComponent<MeshRenderer>();
     mesh->SetMeshAsset(Mesh::CreateCubeShared());
@@ -525,6 +530,7 @@ void Application::Run(uint32_t frameLimit) {
 
   for (const auto &w : walls) {
     Entity *wall = m_Scene->CreateEntity(w.name);
+    wall->SetOwnership(EntityOwnership::Engine);
     auto *mesh = wall->AddComponent<MeshRenderer>();
     mesh->SetMeshAsset(Mesh::CreateCubeShared());
     mesh->color = w.c;

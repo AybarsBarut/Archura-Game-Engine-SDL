@@ -20,8 +20,13 @@ with immutable snapshots, navigation/manual invalidation and two-second polling.
 Release warnings/errors remain visible; startup/loop exceptions produce failure
 status. Build presets, dependency diagnostics and BUILD_TESTING gating work.
 
-Remaining P0: persistent identifiers instead of runtime-ID remapping; name-based
-`.scene` exclusions; broader selection lifetime and Play/Stop restoration;
+Follow-up: `.scene` display-name exclusions are replaced by explicit Entity
+ownership. The regression first reproduced lost authored Player/Floor entities;
+it now verifies their transforms/hierarchy, renamed engine services, repeated
+loads, project ownership metadata and legacy/malformed input policies.
+
+Remaining P0: persistent identifiers instead of runtime-ID remapping;
+broader selection lifetime and Play/Stop restoration;
 standalone packaging; authoritative server simulation. Per-file/entity/mesh
 limits do not establish an aggregate allocation budget. Full interactive reopen,
 texture rendering, managed callbacks, audio and resource-growth acceptance remain

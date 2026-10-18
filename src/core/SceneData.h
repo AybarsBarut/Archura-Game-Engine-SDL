@@ -13,6 +13,7 @@ namespace Archura::Serialization {
 // instance IDs are deliberately reset when a component is constructed.
 struct EntityData {
     EntityID id = 0, parent = 0;
+    bool engineOwned = false;
     std::optional<BoxCollider> collider;
     std::optional<LightComponent> light;
     std::optional<RigidBody> rigidBody;
@@ -36,6 +37,7 @@ inline bool HasOnlySupportedComponents(Entity* entity) {
     return known == entity->GetComponentCount();
 }
 inline void WriteComponents(std::ostream& out, Entity* entity) {
+    out << ",\n      \"engine_owned\":" << (entity->IsEngineOwned() ? "true" : "false");
     out << ",\n      \"id\":" << entity->GetID() << ",\"parent_id\":" << (entity->GetParent() ? entity->GetParent()->GetID() : 0) << ",\"components\":{";
     bool first = true;
     auto key = [&](const char* name) { if (!first) out << ','; first = false; out << '"' << name << "\":{"; };
@@ -57,6 +59,7 @@ inline bool IDField(const Json& data, const char* name, EntityID& id) {
     id=static_cast<EntityID>(value->number);return true;
 }
 inline bool ReadComponents(const Json& data, EntityData& result) {
+    if (!BoolField(data, "engine_owned", result.engineOwned)) return false;
     if(!IDField(data,"id",result.id)||!IDField(data,"parent_id",result.parent))return false;
     const Json* components=data.Find("components");if(!components)return true;
     if(components->kind!=Json::Kind::Object)return false;
@@ -78,6 +81,7 @@ inline bool ReadComponents(const Json& data, EntityData& result) {
     return true;
 }
 inline void ApplyComponents(Entity* entity, const EntityData& data) {
+    entity->SetOwnership(data.engineOwned ? EntityOwnership::Engine : EntityOwnership::Authored);
     if(data.collider)*entity->AddComponent<BoxCollider>()=*data.collider;
     if(data.light)*entity->AddComponent<LightComponent>()=*data.light;
     if(data.rigidBody)*entity->AddComponent<RigidBody>()=*data.rigidBody;

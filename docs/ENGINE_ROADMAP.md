@@ -5,9 +5,23 @@ source preservation, safe transform undo, async Project cache, startup coverage
 and build/test controls. Debug and Release each pass 21/21 checks. This is a
 bounded stabilization cycle; the engine objectives remain incomplete.
 
-Next: persistent scene identifiers and explicit system-entity ownership metadata,
-then runtime-component coverage and safe Play/Stop scene restoration. Add an
-aggregate resource reconstruction budget before accepting untrusted large scenes.
+Follow-up implemented: explicit engine/authored ownership replaces display-name
+exclusions. Authored Player/Floor content persists, renamed bootstrap services
+survive content loads, project ownership round-trips and legacy records migrate.
+
+## Next implementation queue
+
+| Priority | Concrete change / affected files | Acceptance |
+|---|---|---|
+| P0, next | Separate persistent scene IDs from runtime handles in Entity/Scene and SceneData. Stage ID restoration without colliding with the old live scene; migrate legacy numeric hierarchy references. | Save/load/save preserves persistent IDs and hierarchy; new creations never collide; old runtime handles remain invalid; duplicate IDs reject transactionally. |
+| P0 | Serialize Weapon gameplay configuration, then implement the authored Play/Stop boundary in Application/Editor/ScriptSystem. Clear selection/history and transient audio/physics/script ownership at the boundary. | Default authored game scene saves; Edit does not simulate; repeated Play/Stop restores all authored values and removes runtime-only entities. |
+| P1 | Add configurable aggregate mesh/texture reconstruction budgets and project-root asset resolution in the shared codec/ResourceManager. | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation and duplicate filenames are tested. |
+| P0/P1 | Extract standalone runtime startup and implement a manifest-driven builder with required dependencies. | A sample game launches from a clean directory outside the repository without opening the editor. |
+| P0 | Enable real SDL_net validation, then authoritative input/world/snapshot modules and client consumption. | One dedicated server and two separate clients replicate movement/spawn/despawn and reject invalid input. |
+
+Keep these as sequential acceptance gates. Performance, renderer and UI expansion
+follow the measured/reproducible work units below; no FPS improvement is inferred
+from a structural change alone.
 
 Updated 2026-10-18. Implementation status and evidence: [ENGINE_AUDIT.md](ENGINE_AUDIT.md), [TEST_PLAN.md](TEST_PLAN.md), `.gauntlet/STATE.md` and `.gauntlet/METRICS.md`. A source implementation is not a completed acceptance test.
 

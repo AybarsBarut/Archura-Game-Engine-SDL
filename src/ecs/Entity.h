@@ -21,6 +21,10 @@ using EntityGeneration = uint32_t;
 
 class Scene;
 
+// Ownership is independent of display names. Scene content is authored unless
+// the application explicitly marks a bootstrap/runtime service entity.
+enum class EntityOwnership : uint8_t { Authored, Engine };
+
 // A serializable, generation-checked entity reference. EntityID remains available
 // for legacy native call sites, but persistent/external references must use this
 // handle so that a destroyed entity can never alias a later entity.
@@ -67,6 +71,9 @@ public:
   const Scene* GetScene() const noexcept { return m_Owner; }
   const std::string &GetName() const noexcept { return m_Name; }
   void SetName(std::string name) { m_Name = std::move(name); }
+  EntityOwnership GetOwnership() const noexcept { return m_Ownership; }
+  void SetOwnership(EntityOwnership ownership) noexcept { m_Ownership = ownership; }
+  bool IsEngineOwned() const noexcept { return m_Ownership == EntityOwnership::Engine; }
 
   size_t GetComponentCount() const noexcept { return m_Components.size(); }
 
@@ -129,6 +136,7 @@ private:
   EntityHandle m_Handle;
   Scene *m_Owner = nullptr;
   std::string m_Name;
+  EntityOwnership m_Ownership = EntityOwnership::Authored;
   Entity *m_Parent = nullptr;
   std::vector<Entity *> m_Children;
   std::unordered_map<std::type_index, std::unique_ptr<Component>> m_Components;

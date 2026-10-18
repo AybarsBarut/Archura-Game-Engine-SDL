@@ -38,6 +38,7 @@ int main(){
     Check(saves.SaveProject("roundtrip",&scene),"scene save succeeds");
     Archura::Scene restored;
     auto* system=restored.CreateEntity("Player");const auto systemHandle=system->GetHandle();
+    system->SetOwnership(Archura::EntityOwnership::Engine);
     Check(saves.LoadProject("saves/roundtrip.scene",&restored),"scene reload succeeds");
     Check(restored.IsAlive(systemHandle),"system entity survives load");
     Check(restored.GetEntities().size()==3,"all user entities reload");
@@ -71,6 +72,7 @@ int main(){
     Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"unknown component fails without overwrite");
     scene.GetEntities()[0]->RemoveComponent<Unsupported>();
     auto* excluded = scene.CreateEntity("Player");
+    excluded->SetOwnership(Archura::EntityOwnership::Engine);
     child->TrySetParent(excluded);
     Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"omitted parent fails without overwrite");
     child->TrySetParent(scene.GetEntities()[0].get());
@@ -81,6 +83,41 @@ int main(){
     Check(!saves.SaveProject("roundtrip",&scene),"custom/edited mesh save fails explicitly");
     std::ifstream retained("saves/roundtrip.scene",std::ios::binary);std::ostringstream actual;actual<<retained.rdbuf();retained.close();
     Check(actual.str()==expected.str(),"unsupported mesh never overwrites prior save");
+
+    {
+        Archura::Scene authored;
+        auto* playerNamed = authored.CreateEntity("Player");
+        auto* floorNamed = authored.CreateEntity("Floor");
+        floorNamed->TrySetParent(playerNamed);
+        floorNamed->GetComponent<Archura::Transform>()->position = {3, 4, 5};
+        auto* renamedEngine = authored.CreateEntity("Renamed bootstrap service");
+        renamedEngine->SetOwnership(Archura::EntityOwnership::Engine);
+        Check(saves.SaveProject("authored_names", &authored), "authored system-like names save");
+        Archura::Scene loaded;
+        Check(saves.LoadProject("saves/authored_names.scene", &loaded), "authored system-like names load");
+        Check(loaded.GetEntities().size() == 2, "Player/Floor authored entities must not disappear");
+        if (loaded.GetEntities().size() == 2) {
+            Check(loaded.GetEntities()[1]->GetParent() == loaded.GetEntities()[0].get(), "system-like name hierarchy survives");
+            Check(loaded.GetEntities()[1]->GetComponent<Archura::Transform>()->position == glm::vec3(3, 4, 5), "system-like name transform survives");
+        }
+        auto* preservedEngine = loaded.CreateEntity("Runtime service with arbitrary name");
+        preservedEngine->SetOwnership(Archura::EntityOwnership::Engine);
+        preservedEngine->SetName("Renamed again");
+        const auto serviceHandle = preservedEngine->GetHandle();
+        for (int reload = 0; reload < 3; ++reload) {
+            const auto replacedHandle = loaded.GetEntities().front()->GetHandle();
+            Check(saves.LoadProject("saves/authored_names.scene", &loaded), "repeated content reload succeeds");
+            Check(loaded.IsAlive(serviceHandle), "explicit engine ownership survives rename and reload");
+            Check(loaded.GetEntities().size() == 3, "authored Player/Floor names do not accumulate across loads");
+            if (replacedHandle != serviceHandle) Check(!loaded.IsAlive(replacedHandle), "authored old handles are invalidated");
+        }
+        write(R"({"entities":[{"name":"injected service","engine_owned":true,"has_mesh_renderer":false}]})");
+        Check(!saves.LoadProject("input.scene", &loaded) && loaded.GetEntities().size() == 3 && loaded.IsAlive(serviceHandle), "scene content cannot claim permanent engine ownership");
+        write(R"({"entities":[{"name":"invalid ownership","engine_owned":"true","has_mesh_renderer":false}]})");
+        Check(!saves.LoadProject("input.scene", &loaded), "ownership metadata requires a boolean");
+        write(R"({"entities":[{"name":"Player","has_mesh_renderer":false},{"name":"Floor","has_mesh_renderer":false}]})");
+        Check(saves.LoadProject("input.scene", &loaded) && loaded.GetEntities().size() == 3, "legacy scene system-like names migrate as authored content");
+    }
     std::filesystem::current_path(original);
     // This unique directory was created exclusively by this test.
     std::error_code ec;std::filesystem::remove_all(work,ec);

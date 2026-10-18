@@ -1,5 +1,25 @@
 # Metrics
 
+## Ownership follow-up — 2026-10-18
+
+- Initial stabilization committed/pushed as `3d1cd9d` before new implementation.
+- Regression reproduced first: authored Player/Floor names saved successfully
+  but vanished after load; GameSaveManager CTest failed with that exact assertion.
+- Replaced name filtering with explicit EntityOwnership; default authored,
+  Application bootstrap explicitly engine-owned. Project metadata round-trips;
+  legacy content stays authored and `.scene` cannot claim retained ownership.
+- Focused codec tests passed 2/2, including arbitrary service renames, authored
+  names/hierarchy/transforms, three repeated loads, invalid metadata and both
+  cross-boundary hierarchy directions.
+- Debug all-target build passed; full CTest 21/21, 1.84 s.
+- Release all-target build including runtime staging exited 0; full CTest
+  passed 21/21, 1.88 s. Both startup checks ran actual engine executables.
+- Commands: `cmake --build build-codex-graphics-api --config Debug --parallel 4`,
+  same for Release, and `ctest --test-dir build-codex-graphics-api -C <config>
+  --output-on-failure`. Logs: ownership-repro-build.log, ownership-debug.log,
+  ownership-release.log in the ignored build directory.
+- No new performance claim; simulation timing/graphics/scripting are unchanged.
+
 ## Stabilization cycle — 2026-10-18
 
 Starting revision `662d628`; changes remain uncommitted. Environment: Windows x64,

@@ -1,5 +1,15 @@
 # Regressions
 
+## Explicit ownership protections — 2026-10-18
+
+The authored Player/Floor round-trip regression failed before this fix; it passes
+with explicit ownership along with all 21 checks in both Debug and Release.
+Authored names/hierarchy/transforms survive; renamed engine services persist;
+repeated scene loads replace authored entities without accumulating special
+names; `.project` restores ownership and replaces old engine-owned entities;
+legacy records migrate to authored; `.scene` cannot inject permanent services.
+Existing cross-boundary hierarchy rejection and rollback guarantees still pass.
+
 ## Stabilization protections — 2026-10-18
 
 Verified in final MSVC x64 Debug/Release CTest (21/21 each):
