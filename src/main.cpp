@@ -63,8 +63,12 @@ void LoadingWorker() {
 
 int main(int argc, char** argv) {
     bool smokeTest = false;
-    for (int i = 1; i < argc; ++i)
+    bool playStopSmokeTest = false;
+    for (int i = 1; i < argc; ++i) {
         if (argv[i] && std::string_view(argv[i]) == "--smoke-test") smokeTest = true;
+        if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
+            smokeTest = playStopSmokeTest = true;
+    }
     // Tests and normal startup must have a writable diagnostic directory.
     std::error_code logError;
     std::filesystem::create_directories("logs", logError);
@@ -222,7 +226,7 @@ int main(int argc, char** argv) {
 
     try {
         auto app = std::make_unique<Archura::Application>(graphicsOptions);
-        app->Run(smokeTest ? 16 : 0);
+        app->Run(smokeTest ? 16 : 0, playStopSmokeTest);
         if (smokeTest) {
             const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
             app.reset(); // Include orderly shutdown in the smoke-test result.

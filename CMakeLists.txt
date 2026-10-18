@@ -700,8 +700,10 @@ if(BUILD_TESTING)
             COMMAND ArchuraEngine --smoke-test --graphics=opengl --no-graphics-fallback)
         add_test(NAME Archura.Startup.UnsupportedBackend
             COMMAND ArchuraEngine --smoke-test --graphics=vulkan --no-graphics-fallback)
+        add_test(NAME Archura.Startup.PlayStop
+            COMMAND ArchuraEngine --play-stop-smoke-test --graphics=opengl --no-graphics-fallback)
         set_tests_properties(Archura.Startup.UnsupportedBackend PROPERTIES WILL_FAIL TRUE)
-        set_tests_properties(Archura.Startup.OpenGL Archura.Startup.UnsupportedBackend PROPERTIES
+        set_tests_properties(Archura.Startup.OpenGL Archura.Startup.UnsupportedBackend Archura.Startup.PlayStop PROPERTIES
             LABELS "startup;integration" TIMEOUT 60
             WORKING_DIRECTORY "$<TARGET_FILE_DIR:ArchuraEngine>")
     endif()

@@ -80,3 +80,14 @@ Build and CTest results are recorded in `.gauntlet/METRICS.md`. Logs reside in
 the ignored build directory. `BUILD_TESTING=OFF` now disables all contract test
 targets/registrations, independently of the focused test options. Performance
 benchmarks remain separate opt-in targets.
+
+With `ARCHURA_BUILD_STARTUP_TESTS=ON`, CTest includes
+`Archura.Startup.PlayStop`. For a direct check, run from the executable directory:
+
+```powershell
+.\ArchuraEngine.exe --play-stop-smoke-test --graphics=opengl --no-graphics-fallback
+```
+
+This skips the splash, renders 16 frames and verifies two actual Editor/Application
+Play/Stop cycles and shutdown. It opens an OpenGL window and needs a graphics
+session. Normal `--smoke-test` still checks startup/shutdown without entering Play.

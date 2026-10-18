@@ -91,3 +91,32 @@ ASSET-01, AUD-01/02, REND-01 and TERR-01 have the bounded repairs above.
 - OpenGL shader reload preserves the previous program on failed compile/link. PostProcess checks framebuffer completeness and restores program/VAO/texture/depth/blend/cull state; resize handles zero dimensions. Visual quality still requires live image comparisons.
 - Unsupported graphics backend selection supports explicit failure or logged OpenGL fallback. No Vulkan renderer is claimed.
 - Application tears render owners down before context; thread-affinity rules remain main-thread Scene/Mono and render-owner OpenGL.
+
+## Loop 6 — Play/Stop rejection and snapshot lifetime (2026-10-18)
+
+Starting revision: `f2e58ab`. Reproduction in the lifecycle test exposed silent
+loss of an unsupported authored component and replacement of an unrelated scene
+by Stop (seven failed assertions before the repair).
+
+`EditorModeState` publishes Edit/Play only after the runtime callback succeeds,
+rejects reentrant transitions and preserves its mode/guard across a thrown callback.
+Application respects failed Play/Stop, including the load-game boundary. Snapshot
+preflight rejects components without snapshot support and raw mesh/material assets
+without retained shared owners. Stop/tick require the captured Scene lifetime token;
+a destroyed source or another Scene cannot consume the snapshot. Shutdown explicitly
+releases captured GPU owners before destroying the OpenGL context.
+
+Coverage includes rejected Play/Stop, missing callbacks, reentrancy, exception guard
+recovery, foreign/expired Scene rejection, captured asset release and the existing
+20-cycle restoration suite. `Archura.Startup.PlayStop` also runs two real Editor /
+Application Play/Stop cycles with OpenGL, checking authored transform restoration,
+runtime-spawn removal and stale-handle invalidation before 16-frame shutdown.
+
+Limits: arbitrary C# script execution, audio hardware and allocation/runtime-hook
+failure recovery are not certified by these checks. Standalone packaging (PKG-01)
+remains the next feature gate; this loop repairs data safety before that work.
+
+Final Loop 6 gate: VS2022 x64 all-target Debug and Release builds/staging passed.
+Debug CTest 24/24 (3.79 s), Release 24/24 (2.98 s), including real OpenGL startup,
+two native Play/Stop cycles and unsupported-backend rejection. OpenAL is OFF;
+SDL_net is unavailable. No performance or live-audio claim is made.
