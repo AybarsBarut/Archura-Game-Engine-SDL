@@ -210,8 +210,7 @@ builds/release/*.meta
 
 # Artifact / dokumantasyon markdown dosyalari
 *.md
-!.gauntlet/
-!.gauntlet/*.md
+.gauntlet/
 
 # Build arsiv klasoru - EXE,  meta ve DLL'ler izlenmez
 builds/debug/*.exe
