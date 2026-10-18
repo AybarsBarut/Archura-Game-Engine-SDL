@@ -33,6 +33,8 @@
 #include "editor/Editor.h"
 
 #include "core/GameSaveManager.h"
+#include "core/GameManifest.h"
+#include "scripting/ScriptEngine.h"
 #include "game/CommandRegistry.h"
 #include "game/DevConsole.h"
 #include "game/FPSConsoleCommands.h"
@@ -153,13 +155,15 @@ void Application::SetFPSLimit(float limit) {
   }
 }
 
-void Application::SetDevMode(bool enabled) { m_DevModeActive = enabled; }
+void Application::SetDevMode(bool enabled) { m_DevModeActive = !m_Standalone && enabled; }
 
 bool Application::Init() {
   LogStartup("Init: Started");
 
   Engine::EngineConfig config;
   config.windowTitle = "Archura FPS Engine - Build 0.2 (SDL2)";
+  if (m_Standalone) config.windowTitle = m_GameTitle;
+  config.editorMode = !m_Standalone;
   config.windowWidth = 1920;
   config.windowHeight = 1080;
   config.vsync = false;
@@ -190,6 +194,13 @@ bool Application::Init() {
   NetworkManager::Get().Init();
 
   LogStartup("Init: NetworkManager initialized");
+
+  if (m_Standalone) {
+    // Gameplay pause UI can use ImGui; no editor, console or authoring commands.
+    m_ImGuiLayer = std::make_unique<ImGuiLayer>();
+    m_ImGuiLayer->Init(m_Window);
+    return true;
+  }
 
   LogStartup("Init: Initializing DevConsole");
   DevConsole::Get().Init();
@@ -380,7 +391,67 @@ bool Application::Init() {
   return true;
 }
 
-void Application::Run(uint32_t frameLimit, bool playStopSmokeTest) {
+void Application::InitializeGame(const GameManifest& game) {
+  ResourceManager::Get().SetProjectRoot(game.root);
+  m_Scene = std::make_unique<Scene>(game.title);
+  if (!GameSaveManager::Get().LoadProject((game.root / game.scene).string(), m_Scene.get()))
+    throw std::runtime_error("Standalone startup scene failed to load");
+  Entity* player = m_Scene->GetEntityByPersistentID(game.playerID);
+  if (!player || player->GetName() != "Player")
+    throw std::runtime_error("Standalone player_id must resolve to the Player entity");
+  size_t playerCount = 0;
+  for (const auto& entity : m_Scene->GetEntities())
+    if (entity->GetName() == "Player") ++playerCount;
+  if (playerCount != 1) throw std::runtime_error("Standalone scene requires exactly one Player");
+  m_PlayerPersistentID = game.playerID;
+  m_PlayerHandleValue = player->GetHandle().Value();
+  m_Camera = std::make_unique<Camera>(glm::vec3(player->GetWorldTransform()[3]));
+  const auto* transform = player->GetComponent<Transform>();
+  m_Camera->SetYaw(transform->rotation.y);
+  m_Camera->SetPitch(transform->rotation.x);
+  m_FPSController = std::make_unique<FPSController>(m_Camera.get());
+  m_RenderSystem = std::make_unique<RenderSystem>(m_Camera.get());
+  m_RenderSystem->Init(m_Scene.get());
+  if (!m_RenderSystem->IsInitialized()) throw std::runtime_error("Standalone renderer failed");
+  m_PhysicsSystem = std::make_unique<PhysicsSystem>();
+  m_PhysicsSystem->Init(m_Scene.get());
+  m_ParticleSystem = std::make_unique<ParticleSystem>();
+  m_ParticleSystem->Init(m_Scene.get());
+  m_ProjectileSystem = std::make_unique<ProjectileSystem>();
+  m_ProjectileSystem->Init(m_Scene.get(), m_PhysicsSystem.get());
+  m_ScriptSystem = std::make_unique<ScriptSystem>();
+  ScriptEngine::Init();
+  if (!ScriptEngine::GetCoreAssemblyImage()) throw std::runtime_error("Packaged ScriptCore failed to load");
+  for (const auto& entity : m_Scene->GetEntities()) {
+    if (const auto* script = entity->GetComponent<ScriptComponent>())
+      if (!ScriptEngine::ClassExists(script->className))
+        throw std::runtime_error("Packaged script class missing: " + script->className);
+  }
+  m_ScriptSystem->StartRuntime(m_Scene.get());
+#ifdef ARCHURA_OPENAL
+  m_OpenALAudioSystem = std::make_unique<OpenALAudioSystem>();
+  m_OpenALAudioSystem->Init(m_Scene.get());
+  m_OpenALAudioSystem->SetListenerCamera(m_Camera.get());
+#endif
+  m_HUDRenderer = std::make_unique<HUDRenderer>();
+  if (!m_HUDRenderer->Init()) throw std::runtime_error("Standalone HUD failed");
+  m_EngineWindow = Engine::Get().GetWindow();
+  m_Input = Engine::Get().GetInput();
+  m_Renderer = Engine::Get().GetRenderer();
+  m_Input->SetCursorMode(2);
+  if (m_Editor || Engine::Get().IsEditorMode())
+    throw std::runtime_error("Standalone startup unexpectedly enabled the editor");
+  std::cout << "Standalone scene loaded: entities=" << m_Scene->GetEntities().size()
+            << "; editor=off\n";
+}
+
+void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game) {
+  m_Standalone = game != nullptr;
+  if (m_Standalone) {
+    if (playStopSmokeTest) throw std::runtime_error("Editor smoke cannot run in standalone mode");
+    m_DevModeActive = false;
+    m_GameTitle = game->title;
+  }
   LogStartup("Run() started");
 
   LogStartup("Calling Init()");
@@ -392,6 +463,10 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest) {
   }
 
   LogStartup("Init() completed successfully");
+
+  if (game) {
+    InitializeGame(*game);
+  } else {
 
   LogStartup("Creating Scene");
 
@@ -637,6 +712,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest) {
 
   // Set initial cursor mode: free in editor, locked in Play mode
   m_Input->SetCursorMode(m_DevModeActive ? 0 : 2);
+  }
 
   std::cout << "DEBUG: Window ShouldClose: " << m_EngineWindow->ShouldClose()
             << ", Running: " << m_Running << std::endl;
@@ -781,7 +857,7 @@ void Application::ProcessInput() {
   }
 
   // 2. Handle special input (pause, dev mode, console)
-  if (m_Input->IsKeyJustPressed(SDL_SCANCODE_TAB)) {
+  if (!m_Standalone && m_Input->IsKeyJustPressed(SDL_SCANCODE_TAB)) {
     bool entering = !m_DevModeActive;
     SetDevMode(entering);
     // In editor mode: free cursor. In play-through: respect game state.
@@ -798,7 +874,7 @@ void Application::ProcessInput() {
       m_Input->SetCursorMode(m_IsPaused ? 0 : 2);
     }
   }
-  if (m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) {
+  if (!m_Standalone && m_Input->IsKeyJustPressed(SDL_SCANCODE_GRAVE)) {
     DevConsole::Get().Toggle();
   }
 #ifdef ARCHURA_DEBUG_PHYSICS
@@ -965,9 +1041,15 @@ void Application::RenderFrame(float /*alpha*/) {
   }
 #endif
 
-  DevConsole::Get().Render();
-  m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow,
-                      m_Scene.get());
+  if (!m_Standalone) DevConsole::Get().Render();
+  if (m_PauseMenu) m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow,
+                                     m_Scene.get());
+  if (m_Standalone && m_IsPaused) {
+    ImGui::Begin("Paused", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    if (ImGui::Button("Resume")) { m_IsPaused = false; m_Input->SetCursorMode(2); }
+    if (ImGui::Button("Quit")) Quit();
+    ImGui::End();
+  }
 
   m_ImGuiLayer->EndFrame();
   m_Renderer->EndFrame();

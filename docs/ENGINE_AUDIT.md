@@ -70,7 +70,7 @@ ASSET-01, AUD-01/02, REND-01 and TERR-01 have the bounded repairs above.
 | EDIT-01 / P0 | `src/editor/Editor.cpp:1974-2007`: undo stores `Entity*`, ignores supplied Scene and dereferences pointer after destruction. Inspector/gizmo/selection also retain raw pointers. | Gizmo-move selected entity, delete, Ctrl+Z; repeat with script deletion and scene reload. Run address diagnostics where available; resolve handles before any access. | Repaired (`TransformUndoHistory` + `EditorSelectionState` + isolation handle validation; covered by CTest) |
 | EDIT-02 / P0 | `src/core/Application.cpp:415-425`: Play/Stop callbacks only change cursor/pause. `UpdateGameLogic:726` gates on pause alone, so physics/scripts also run in Edit; authored scene has no snapshot/restore. | Record authored transforms/components, Play, move/spawn/destroy, Stop; compare to original. Repeat 20 cycles, including pause and selected-object deletion. | Repaired (`PlayModeSession` snapshot/restore + Edit simulation gating; 20-cycle CTest passes) |
 | NET-01 / P0 | `src/server/server_main.cpp:45-54` pumps transport only; gameplay, world state, collision and snapshots are TODOs. No authoritative multiplayer simulation exists. | One real SDL_net server plus two processes: identities, spawn/despawn, validated movement, snapshots, disconnect cleanup and invalid input rejection. | Transport partial; simulation not implemented |
-| PKG-01 / P0-P1 | CMake builds Engine/editor, Server and Launcher; no game-only target/startup-scene flow. `GameBuilderPanel` adds scene content; it does not package a game. `Build.bat` archives an executable and a few DLLs. | Build sample game into clean directory; launch from unrelated CWD with source/build folders unavailable; verify script/assets/runtime dependencies and startup scene. | Standalone creator workflow not implemented |
+| PKG-01 / P0-P1 | CMake builds Engine/editor, Server and Launcher; no game-only target/startup-scene flow. `GameBuilderPanel` adds scene content; it does not package a game. `Build.bat` archives an executable and a few DLLs. | Build sample game into clean directory; launch from unrelated CWD with source/build folders unavailable; verify script/assets/runtime dependencies and startup scene. | CLI standalone startup/package workflow implemented (Loop 7); editor export UI and clean-OS deployment remain |
 | AUD-01 / P1 | `src/scripting/ScriptGlue.cpp:297` sets legacy `AudioSource::isPlaying` only. MCI `AudioSystem::Update` sends volume to an alias but does not open it. OpenAL uses a separate `AudioSourceComponent`, so this managed call does not start that backend either. | Attach configured audio source, invoke C# Play, confirm actual sound/error and native state. Exercise both backends and missing clips. | Repaired in source/CTest (`AudioSystem::Update` opens `sound_<id>`, `ScriptGlue::AudioSource_Play` triggers both `AudioSource` and `AudioSourceComponent`); live audio hardware untested |
 | AUD-02 / P1 | `GameBuilderPanel.cpp:277-280` passes `assets/audio/name` to `AudioSystem::PlayOneShot`, which prefixes `assets/audio/` again. MCI volume/status commands run in fixed ticks. | Preview existing clip; rapid one-shots, stop/reload/delete source, category changes; measure MCI work before optimizing. | Path normalization repaired (`AudioSystem::ResolveAudioPath`, covered by CTest); MCI tick cost unmeasured |
 | TIME-01 / P1 | `Application.cpp:589,755` computes alpha then discards it; simulation runs 128 Hz while PhysicsSystem internally accumulates 60 Hz. Five application ticks bound each frame but leftover backlog is retained. | Same scripted input at 30/60/120/144/240 render FPS and frame stalls; compare trajectories, cooldown/jump and bounded recovery. Keep simulation transforms unchanged by rendering. | Interpolation absent; cadence effects untested |
@@ -120,3 +120,33 @@ Final Loop 6 gate: VS2022 x64 all-target Debug and Release builds/staging passed
 Debug CTest 24/24 (3.79 s), Release 24/24 (2.98 s), including real OpenGL startup,
 two native Play/Stop cycles and unsupported-backend rejection. OpenAL is OFF;
 SDL_net is unavailable. No performance or live-audio claim is made.
+
+## Loop 7 — Standalone runtime startup and packaging
+
+`GameManifest` provides a bounded versioned manifest, explicit persistent player
+identity, relative content paths and canonical root containment. The runtime
+entry resolves the default manifest relative to the executable, anchors CWD to
+that package and initializes a scene without constructing the Editor or demo.
+ScriptCore failure and missing script classes fail visibly; normal gameplay uses
+the existing 128 Hz loop and runtime systems.
+
+`tools/package_game.py` publishes a new package only after all declared content,
+native DLLs, engine shaders, Mono 4.5 and ScriptCore have been copied. Existing
+outputs are refused, scene asset references must be declared and portable, and
+failed copies remove only private staging. The sample scene includes an imported
+OBJ and a persistent Player identity. See BUILD_GUIDE for actual use and limits.
+
+PKG-01 now has a CLI runtime/package path; editor export UI, a separate smaller
+runtime binary, automatic arbitrary managed dependencies and clean-OS prerequisite
+installation remain future work. The sample certifies startup/relocation, not a
+complete authored gameplay or managed-script project.
+
+Loop 7 final gate (VS2022 x64, build/windows-x64): all-target Debug/Release
+build and staging PASS; CTest 29/29 each (6.69 s / 6.61 s). Additional final
+space-containing package paths and missing-script-class checks passed in both
+configs (focused package smoke 3.53 s / 3.58 s). Python contracts contain seven
+cases; the Windows symlink-permission case skipped, six ran successfully.
+OpenAL OFF; SDL_net unavailable. A retained Release sample under
+Documents/Archura_Game_Engine/ArchuraStandaloneSample-20261018-Loop7 also passed
+16-frame OpenGL/Mono startup from Temp CWD. No frame-time improvement or custom
+managed-script/clean-OS distribution certification is claimed.

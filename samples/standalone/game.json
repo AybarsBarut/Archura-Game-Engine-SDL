@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "title": "Archura Standalone Sample",
+  "scene": "scenes/start.scene",
+  "player_id": "10000000000000000000000000000001",
+  "content": ["scenes/start.scene", "assets/models/marker.obj"]
+}

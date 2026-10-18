@@ -17,13 +17,15 @@ namespace Archura {
         static Application& Get() { return *s_Instance; }
         static Application* TryGet() noexcept { return s_Instance; }
 
-        void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false);
+        void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false,
+                 const struct GameManifest* game = nullptr);
         void Quit() { m_Running = false; }
 
         Window& GetWindow() { return *m_Window; }
 
     private:
         bool Init();
+        void InitializeGame(const GameManifest& game);
         void OnEvent(); // Event polling placeholder if needed here
 
 
@@ -96,6 +98,8 @@ namespace Archura {
         PlayModeSession m_PlaySession;
         
         bool m_DevModeActive = true;
+        bool m_Standalone = false;
+        std::string m_GameTitle;
         bool m_IsPaused = false;
         
         // Separated update/render methods

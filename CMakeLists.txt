@@ -707,9 +707,24 @@ if(BUILD_TESTING AND ARCHURA_BUILD_PHYSICS_TESTS)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(ArchuraGameManifestTests tests/GameManifestTests.cpp)
+    target_include_directories(ArchuraGameManifestTests PRIVATE src)
+    add_test(NAME Archura.Core.GameManifest COMMAND ArchuraGameManifestTests)
+    find_package(Python3 3.9 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME Archura.Packaging.Contracts
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/PackageGameTests.py")
+    endif()
     get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)
     if(ARCHURA_BUILD_STARTUP_TESTS)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME Archura.Startup.StandalonePackage
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/StandalonePackageSmoke.py"
+                    --runtime-dir "$<TARGET_FILE_DIR:ArchuraEngine>")
+            set_tests_properties(Archura.Startup.StandalonePackage PROPERTIES
+                LABELS "startup;integration;packaging" TIMEOUT 90 RUN_SERIAL TRUE)
+        endif()
         add_test(NAME Archura.Startup.OpenGL
             COMMAND ArchuraEngine --smoke-test --graphics=opengl --no-graphics-fallback)
         add_test(NAME Archura.Startup.UnsupportedBackend

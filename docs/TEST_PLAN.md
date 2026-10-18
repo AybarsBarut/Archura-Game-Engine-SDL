@@ -70,3 +70,17 @@ failed-transition mode retention and reentrant/throwing callback handling.
 script runtime start/stop and OpenGL over two cycles. Each cycle checks transform
 restoration, deletion of runtime spawns and old-handle invalidation. It does not
 execute a configured managed ScriptComponent or certify audible output.
+
+Loop 7 adds `Archura.Core.GameManifest` (strict schema/size/identity/path limits,
+case collisions and missing-content preservation), and Python
+`Archura.Packaging.Contracts` (portable publication, no overwrite, missing native
+and managed dependencies, undeclared/external scene assets, malformed manifests
+and injected copy failure cleanup). The symlink case skips when Windows does not
+allow test symlink creation; canonical containment is still enforced in code.
+
+With Python 3.9+ and startup tests enabled, `Archura.Startup.StandalonePackage`
+copies the sample project into a temporary source directory, packages it, renames
+the source directory away and launches only the package from an unrelated CWD.
+It verifies exactly four authored entities, editor disabled, actual OpenGL/Mono,
+16 frames and shutdown. Missing imported OBJ, wrong player, malformed scene and
+missing default manifest must fail without opening the editor/demo.

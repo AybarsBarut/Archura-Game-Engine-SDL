@@ -1,5 +1,6 @@
 #define SDL_MAIN_HANDLED
 #include "core/Application.h"
+#include "core/GameManifest.h"
 #include "rendering/GraphicsAPI.h"
 #include <iostream>
 #include <cstdio>
@@ -64,10 +65,34 @@ void LoadingWorker() {
 int main(int argc, char** argv) {
     bool smokeTest = false;
     bool playStopSmokeTest = false;
+    std::filesystem::path gamePath;
     for (int i = 1; i < argc; ++i) {
+        if (argv[i] && std::string_view(argv[i]) == "--game") {
+            if (++i == argc || !argv[i] || std::string_view(argv[i]).empty()) {
+                std::cerr << "--game requires a manifest path\n"; return 1;
+            }
+            gamePath = argv[i];
+        }
         if (argv[i] && std::string_view(argv[i]) == "--smoke-test") smokeTest = true;
         if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
             smokeTest = playStopSmokeTest = true;
+    }
+    wchar_t executableName[32768];
+    const DWORD executableLength = GetModuleFileNameW(nullptr, executableName, 32768);
+    if (!executableLength || executableLength >= 32768) return 1;
+    const std::filesystem::path executablePath(executableName);
+    if (gamePath.empty() && executablePath.stem() == "ArchuraGame")
+        gamePath = executablePath.parent_path() / "game.json";
+    Archura::GameManifest game;
+    const bool standalone = !gamePath.empty();
+    if (standalone) {
+        std::string error;
+        if (!Archura::GameManifest::Load(gamePath, game, error)) {
+            std::cerr << "GAME CONFIG ERROR: " << error << '\n'; return 1;
+        }
+        std::error_code directoryError;
+        std::filesystem::current_path(game.root, directoryError);
+        if (directoryError) { std::cerr << "Cannot enter game root\n"; return 1; }
     }
     // Tests and normal startup must have a writable diagnostic directory.
     std::error_code logError;
@@ -82,7 +107,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    if (!smokeTest) {
+    if (!smokeTest && !standalone) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SPLASH ERROR: SDL_Init Failed: " << SDL_GetError() << "\n";
         return -1;
@@ -226,7 +251,7 @@ int main(int argc, char** argv) {
 
     try {
         auto app = std::make_unique<Archura::Application>(graphicsOptions);
-        app->Run(smokeTest ? 16 : 0, playStopSmokeTest);
+        app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr);
         if (smokeTest) {
             const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
             app.reset(); // Include orderly shutdown in the smoke-test result.

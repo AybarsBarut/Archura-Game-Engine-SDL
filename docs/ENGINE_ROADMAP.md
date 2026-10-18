@@ -29,7 +29,7 @@ pass 23/23 (Debug 2.02 s, Release 1.65 s). Execution gates: `.gauntlet/LOOP_PLAN
 | Done, Loop 2 | Real Weapon active/inventory/ammo/recoil configuration codec with transient reset. | Both save APIs and dedicated malformed/boundary tests pass; existing 128 Hz progression stays green. |
 | Done, Loop 3 | Authored Play/Stop boundary in `Application`/`Editor`/`PlayModeSession`/`ScriptSystem`, generation-checked `EditorSelectionState`, rebinding runtime references through persistent IDs, and transient audio/physics/script/projectile/particle cleanup. | Edit does not simulate; 20-cycle Play/Stop restores authored values and removes runtime-only entities; Debug/Release 23/23 pass. |
 | Done, Loops 4 & 5 | Configurable aggregate `SceneReconstructionBudget`, project-root asset resolution (`ResourceManager`), canonical texture keys (`ASSET-01`), `GameBuilderPanel` `assets/models` fallback, `AudioSystem::ResolveAudioPath` & runtime alias opening (`AUD-01`, `AUD-02`), world-space render culling (`REND-01`), and `Terrain` heightmap leak/rectangular/scale/bounds repairs (`TERR-01`). | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation, duplicate texture stems, `assets/models` fallback, audio paths, and rectangular scaled terrain pass in Debug/Release 23/23. |
-| P0/P1, next | Extract standalone runtime startup and implement a manifest-driven builder with required dependencies (`PKG-01`). | A sample game launches from a clean directory outside the repository without opening the editor. |
+| Done, Loop 7 CLI | Manifest-selected runtime startup, portable package builder and sample (`PKG-01`). | External-CWD OpenGL/Mono launch loads the exact authored scene with no Editor; broader dependency/clean-OS/export-UI work remains. |
 | P0 | Enable real SDL_net validation, then authoritative input/world/snapshot modules and client consumption (`NET-01`). | One dedicated server and two separate clients replicate movement/spawn/despawn and reject invalid input. |
 | P1 | Previous/current transform render interpolation (`TIME-01`) and retained runtime UI backend (`UI-01`). | Cross-FPS gameplay assertions and retained UI interaction tests pass. |
 
@@ -49,3 +49,12 @@ Loop 6 final verification: all-target Debug/Release builds and 24/24 CTest each
 passed (3.79 s / 2.98 s). The additional test is the native OpenGL Play/Stop
 integration check; packaging, live SDL_net replication and managed script scenarios
 remain separate acceptance work.
+
+Loop 7 implements the first standalone creator path: strict game manifest,
+manifest-selected runtime scene/player, no Editor construction, portable CLI
+package publication and an external-CWD sample launch. Detailed constraints and
+commands are in BUILD_GUIDE. Follow-up packaging work is editor export UI,
+separate runtime linkage, broader managed dependency discovery and clean-OS
+prerequisite deployment. The next engine gauntlet is real SDL_net transport
+validation and an authoritative server/two-client world slice (NET-01), followed
+by previous/current transform interpolation (TIME-01).
