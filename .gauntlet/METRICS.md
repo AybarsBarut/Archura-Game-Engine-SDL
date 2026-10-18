@@ -1,5 +1,25 @@
 # Metrics
 
+## GAUNTLET Loop 1 — persistent identity, 2026-10-18
+
+- Fresh configured baseline: Debug21/21 (1.45 s), Release21/21 (1.80 s).
+- First regression failed as expected: no independent persistent_id survives
+  save/load/save in d1e8a80. Added separate 128-bit IDs and schema v2, with legacy
+  numeric hierarchy migration and final persistent-index preparation before commit.
+- Final full Debug build exited0; CTest21/21 passed, 2.81 s.
+- Final full Release build/staging exited0; CTest21/21 passed, 3.27 s.
+- ECS fault injection directly reported19 rollback points passed in each config.
+  Debug test excludes MSVC iterator-proxy-sized allocations; Release excludes none.
+  Earlier abort dialog/30s timeout is recorded as failure in REGRESSIONS.
+- Checks include deterministic save/load/save, repeated same-ID replacement,
+  malformed/duplicate/missing-parent/cyclic IDs, retained-service collision,
+  invalidated runtime handles, numeric legacy migration and128/129-node depth.
+- Commands: cmake --build build-codex-graphics-api --config <Debug|Release>
+  --parallel4; ctest --test-dir build-codex-graphics-api -C <config>
+  --output-on-failure. Logs: loop1-final-debug.log, loop1-final-release.log,
+  identity-repro-build.log, identity-fault-debug.log in the ignored build folder.
+- No large-import timing or allocation-memory/performance claim is made.
+
 ## Ownership follow-up — 2026-10-18
 
 - Initial stabilization committed/pushed as `3d1cd9d` before new implementation.

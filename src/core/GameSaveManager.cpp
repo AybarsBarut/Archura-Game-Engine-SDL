@@ -177,7 +177,7 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
     file.imbue(std::locale::classic());
     file << std::setprecision(std::numeric_limits<float>::max_digits10);
 
-    file << "{\n  \"format_version\": 1,\n";
+    file << "{\n  \"format_version\": 2,\n";
     file << "  \"project_name\": \"" << EscapeJson(actualName) << "\",\n";
     file << "  \"timestamp\": \"" << EscapeJson(ts) << "\",\n";
     file << "  \"engine_version\": \"1.0\",\n";
@@ -336,7 +336,7 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
         std::cerr << "[SaveManager] Invalid JSON in " << filePath << '\n'; return false;
     }
     int version = 1;
-    if (!Serialization::IntField(root, "format_version", version) || version != 1) return false;
+    if (!Serialization::IntField(root, "format_version", version) || (version != 1 && version != 2)) return false;
     const auto* entities = root.Find("entities");
     if (!entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
 
@@ -349,8 +349,11 @@ bool GameSaveManager::LoadProject(const std::string& filePath, Scene* scene) {
 }
 
 bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene, bool keepSystem, bool validateOnly) {
+    int formatVersion = 1;
+    if (!Serialization::IntField(root, "format_version", formatVersion) ||
+        (formatVersion != 1 && formatVersion != 2)) return false;
     const auto* entities = root.Find("entities");
-    if (!scene || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
+    if (!scene || (!validateOnly && scene->IsIterating()) || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;
     std::error_code ec;
     struct LoadedEntity {
         Serialization::EntityData extra;
@@ -443,6 +446,8 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
         if (current.colliderShape < 0 || current.colliderShape > 1 || current.lightType < 0 || current.lightType > 2 ||
             current.lightIntensity < 0 || current.lightRange < 0) return false;
         if (!Serialization::ReadComponents(data, current.extra)) return false;
+        if ((formatVersion == 2) != !current.extra.persistentID.empty()) return false;
+        if (formatVersion == 2 && (data.Find("id") || data.Find("parent_id"))) return false;
         // .scene replaces authored content only; imported records cannot make
         // themselves permanent engine services. Full project files retain it.
         if (keepSystem && current.extra.engineOwned) return false;
@@ -454,9 +459,9 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
 
     // Only mutate the scene after the complete file has been read and
     // validated. A malformed save can no longer erase the current scene.
-    std::vector<EntityID> toDelete;
+    std::vector<EntityHandle> toDelete;
     for (const auto& ePtr : scene->GetEntities()) {
-        if (!keepSystem || !ePtr->IsEngineOwned()) toDelete.push_back(ePtr->GetID());
+        if (!keepSystem || !ePtr->IsEngineOwned()) toDelete.push_back(ePtr->GetHandle());
     }
 
     std::vector<EntityHandle> created;
@@ -507,13 +512,16 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
             Serialization::ApplyComponents(e, data.extra);
         }
         if (!Serialization::LinkHierarchy(scene, loaded, created)) throw std::runtime_error("Invalid hierarchy");
+        std::vector<std::string> persistentIDs;
+        persistentIDs.reserve(loaded.size());
+        for (const auto& data : loaded) persistentIDs.push_back(data.extra.persistentID);
+        if (!scene->CommitEntityReplacement(toDelete, created, persistentIDs))
+            throw std::runtime_error("Persistent identity collision or invalid replacement");
     } catch (...) {
         for (EntityHandle handle : created) scene->DestroyEntity(handle);
         std::cerr << "[SaveManager] Component/resource/hierarchy reconstruction failed; previous scene retained\n";
         return false;
     }
-
-    for (EntityID id : toDelete) scene->DestroyEntity(id);
 
     return true;
 }

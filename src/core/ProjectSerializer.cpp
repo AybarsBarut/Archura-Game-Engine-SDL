@@ -17,7 +17,7 @@ bool ProjectSerializer::SaveProject(const std::string& path, const ProjectConfig
     std::ostringstream file;
     file.imbue(std::locale::classic());
     file << std::setprecision(std::numeric_limits<float>::max_digits10);
-    file << "{\n  \"format_version\": 1,\n  \"project\": {\n";
+    file << "{\n  \"format_version\": 2,\n  \"project\": {\n";
     file << "    \"name\": \"" << EscapeJson(config.name) << "\",\n";
     file << "    \"version\": \"" << EscapeJson(config.version) << "\",\n";
     file << "    \"start_scene\": \"" << EscapeJson(config.startScene) << "\"\n  },\n  \"entities\": [\n";
@@ -41,7 +41,7 @@ bool ProjectSerializer::LoadProject(const std::string& path, ProjectConfig& outC
     Serialization::Json root;
     if (!Serialization::JsonParser(content).Parse(root)) { std::cerr << "[ProjectSerializer] Invalid JSON: " << path << '\n'; return false; }
     int version = 1;
-    if (!Serialization::IntField(root, "format_version", version) || version != 1) return false;
+    if (!Serialization::IntField(root, "format_version", version) || (version != 1 && version != 2)) return false;
     const auto* project = root.Find("project");
     const auto* entities = root.Find("entities");
     if (!project || project->kind != Serialization::Json::Kind::Object || !entities || entities->kind != Serialization::Json::Kind::Array || entities->array.size() > 100000) return false;

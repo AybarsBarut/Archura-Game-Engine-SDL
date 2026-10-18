@@ -1,5 +1,19 @@
 # Regressions
 
+## Persistent identity loop — intermediate failure and correction
+
+- New save/load/save identity regression failed on d1e8a80 before implementation.
+- Initial global allocation-failure injection caused an MSVC Debug CRT abort
+  dialog and CTest timeout (30 s); this is a failed run, not a passing result.
+- Stack evidence identified iterator-proxy allocation inside noexcept MSVC STL
+  vector move / `_Hash_vec` construction. Commit now accepts identity vectors by
+  reference and copies in its recoverable preflight scope. Test-only injection
+  excludes Debug iterator-proxy-sized allocations; Release excludes none.
+- Debug ECS then passed with 19 injected payload allocation-failure points,
+  checking old entity/parent/handle/identity/index preservation before commit.
+- Test CRT errors/aborts now report without interactive dialogs. Final full
+  Debug/Release validation is recorded in METRICS/STATE once complete.
+
 ## Explicit ownership protections — 2026-10-18
 
 The authored Player/Floor round-trip regression failed before this fix; it passes

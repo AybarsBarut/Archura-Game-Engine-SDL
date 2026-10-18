@@ -6,6 +6,7 @@
 #include "core/SerializationJson.h"
 #include <limits>
 #include <sstream>
+#include <iomanip>
 
 #include <filesystem>
 #include <fstream>
@@ -69,6 +70,30 @@ int main() {
   Check(loadedScene.GetEntities()[0]->GetComponent<Archura::ScriptComponent>()->className == "Gameplay.Test", "script class round trips");
   Check(loadedScene.GetEntities()[1]->GetParent() == loadedScene.GetEntities()[0].get(), "hierarchy restored");
   Check(loadedScene.GetEntities()[1]->GetComponent<Archura::LightComponent>()->intensity == 4.0f, "light round trips");
+  Check(loadedScene.GetEntities()[0]->GetPersistentID() == entity->GetPersistentID() &&
+        loadedScene.GetEntities()[1]->GetPersistentID() == child->GetPersistentID(), "both entity identities restore");
+
+  {
+    std::ifstream originalFile(path, std::ios::binary);
+    std::ostringstream originalText; originalText << originalFile.rdbuf(); originalFile.close();
+    Archura::Serialization::Json originalDocument, reloadedDocument;
+    Check(Archura::Serialization::JsonParser(originalText.str()).Parse(originalDocument), "saved identity document parses");
+    Check(Archura::ProjectSerializer::SaveProject(path.string(), loadedConfig, &loadedScene), "save after load succeeds");
+    std::ifstream reloadedFile(path, std::ios::binary);
+    std::ostringstream reloadedText; reloadedText << reloadedFile.rdbuf(); reloadedFile.close();
+    Check(Archura::Serialization::JsonParser(reloadedText.str()).Parse(reloadedDocument), "re-saved identity document parses");
+    const auto* beforeID = originalDocument.Find("entities")->array[0].Find("persistent_id");
+    const auto* afterID = reloadedDocument.Find("entities")->array[0].Find("persistent_id");
+    Check(beforeID && afterID && beforeID->string == afterID->string && !beforeID->string.empty(),
+          "persistent scene identity must survive save/load/save independently of runtime handles");
+    Check(originalText.str() == reloadedText.str(), "project save/load/save is deterministic for supported authored data");
+    for (int i = 0; i < 3; ++i) {
+      const auto oldHandle = loadedScene.GetEntities()[0]->GetHandle();
+      Check(Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig, &loadedScene), "same persistent IDs can replace the active scene repeatedly");
+      Check(!loadedScene.IsAlive(oldHandle), "previous runtime handles stay invalid after identity restoration");
+      Check(loadedScene.GetEntityByPersistentID(entity->GetPersistentID()) == loadedScene.GetEntities()[0].get(), "persistent lookup finds the fresh runtime object");
+    }
+  }
 
   {
     std::ofstream malformed(path, std::ios::binary);
@@ -95,7 +120,14 @@ int main() {
     R"({"project":{"name":"bad"},"entities":[{"name":"a","name":"b"}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a"},]})",
     R"({"project":{"name":"bad"},"entities":[]} trailing)",
-    R"({"format_version":2,"project":{"name":"bad"},"entities":[]})",
+    R"({"format_version":3,"project":{"name":"bad"},"entities":[]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"missing identity"}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"11111111111111111111111111111111","parent_persistent_id":""},{"name":"b","persistent_id":"11111111111111111111111111111111","parent_persistent_id":""}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"00000000000000000000000000000000","parent_persistent_id":""}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"ABCDEFABCDEFABCDEFABCDEFABCDEFABCD","parent_persistent_id":""}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"11111111111111111111111111111111","parent_persistent_id":"22222222222222222222222222222222"}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"11111111111111111111111111111111","parent_persistent_id":"11111111111111111111111111111111"}]})",
+    R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"11111111111111111111111111111111","parent_persistent_id":"","id":1}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a","id":1,"parent_id":2},{"name":"b","id":2,"parent_id":1}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"future_component":{}}}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a","transform":{"scale":[1e90,1,1]}}]})"
@@ -106,6 +138,24 @@ int main() {
     Check(loadedConfig.name == "compact", "failed load preserves config");
     Check(loadedScene.GetEntities().size() == 1 && loadedScene.IsAlive(sentinel), "failed load preserves original entity handles");
   }
+  auto deepScene = [](int count) {
+    auto id = [](int value) { std::ostringstream out; out << std::hex << std::setw(32) << std::setfill('0') << value; return out.str(); };
+    std::ostringstream out;
+    out << "{\"format_version\":2,\"project\":{\"name\":\"depth boundary\"},\"entities\":[";
+    for (int i = 1; i <= count; ++i) {
+      if (i > 1) out << ',';
+      out << "{\"name\":\"node\",\"persistent_id\":\"" << id(i)
+          << "\",\"parent_persistent_id\":\"" << (i == 1 ? "" : id(i - 1)) << "\"}";
+    }
+    return out.str() + "]}";
+  };
+  write(deepScene(128));
+  Check(Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig, &loadedScene) && loadedScene.GetEntities().size() == 128,
+        "version-two hierarchy permits 128 nodes / 127 parent links");
+  const auto depthSentinel = loadedScene.GetEntities()[0]->GetHandle();
+  write(deepScene(129));
+  Check(!Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig, &loadedScene) && loadedScene.IsAlive(depthSentinel) && loadedScene.GetEntities().size() == 128,
+        "version-two excessive hierarchy depth rejects without replacing live state");
   Archura::Serialization::Json parsed;
   Check(Archura::Serialization::JsonParser(R"({"unicode":"\uD83D\uDE00","control":"\u0001"})").Parse(parsed), "unicode surrogate pairs and escaped controls parse");
   Check(!Archura::Serialization::JsonParser(R"({"unicode":"\uD800"})").Parse(parsed), "unpaired surrogate rejects");

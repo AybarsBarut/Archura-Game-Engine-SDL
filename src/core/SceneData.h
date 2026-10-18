@@ -13,6 +13,7 @@ namespace Archura::Serialization {
 // instance IDs are deliberately reset when a component is constructed.
 struct EntityData {
     EntityID id = 0, parent = 0;
+    std::string persistentID, parentPersistentID;
     bool engineOwned = false;
     std::optional<BoxCollider> collider;
     std::optional<LightComponent> light;
@@ -38,7 +39,10 @@ inline bool HasOnlySupportedComponents(Entity* entity) {
 }
 inline void WriteComponents(std::ostream& out, Entity* entity) {
     out << ",\n      \"engine_owned\":" << (entity->IsEngineOwned() ? "true" : "false");
-    out << ",\n      \"id\":" << entity->GetID() << ",\"parent_id\":" << (entity->GetParent() ? entity->GetParent()->GetID() : 0) << ",\"components\":{";
+    out << ",\n      \"persistent_id\":\"" << entity->GetPersistentID()
+        << "\",\"parent_persistent_id\":\""
+        << (entity->GetParent() ? entity->GetParent()->GetPersistentID() : "")
+        << "\",\"components\":{";
     bool first = true;
     auto key = [&](const char* name) { if (!first) out << ','; first = false; out << '"' << name << "\":{"; };
     if (auto* c = entity->GetComponent<BoxCollider>()) { key("collider"); out << "\"size\":"; Vec(out,c->size);out << ",\"center\":";Vec(out,c->center);out << ",\"shape\":" << static_cast<int>(c->shape) << ",\"trigger\":" << (c->isTrigger?"true":"false") << '}'; }
@@ -59,6 +63,13 @@ inline bool IDField(const Json& data, const char* name, EntityID& id) {
     id=static_cast<EntityID>(value->number);return true;
 }
 inline bool ReadComponents(const Json& data, EntityData& result) {
+    const bool hasPersistentID = data.Find("persistent_id") != nullptr;
+    if (hasPersistentID != (data.Find("parent_persistent_id") != nullptr)) return false;
+    if (hasPersistentID &&
+        (!StringField(data, "persistent_id", result.persistentID, true) ||
+         !StringField(data, "parent_persistent_id", result.parentPersistentID, true) ||
+         !Entity::IsValidPersistentID(result.persistentID) ||
+         (!result.parentPersistentID.empty() && !Entity::IsValidPersistentID(result.parentPersistentID)))) return false;
     if (!BoolField(data, "engine_owned", result.engineOwned)) return false;
     if(!IDField(data,"id",result.id)||!IDField(data,"parent_id",result.parent))return false;
     const Json* components=data.Find("components");if(!components)return true;
@@ -93,17 +104,24 @@ inline void ApplyComponents(Entity* entity, const EntityData& data) {
     if(data.audioComponent)*entity->AddComponent<AudioSourceComponent>()=*data.audioComponent;
     if(data.surface)*entity->AddComponent<SurfaceProperty>()=*data.surface;
 }
+inline std::string IdentityKey(const EntityData& data) {
+    return data.persistentID.empty() ? (data.id ? std::to_string(data.id) : "") : data.persistentID;
+}
+inline std::string ParentKey(const EntityData& data) {
+    return data.persistentID.empty() ? (data.parent ? std::to_string(data.parent) : "") : data.parentPersistentID;
+}
 template<class Data> bool ValidateHierarchy(const std::vector<Data>& loaded) {
     // Bound hierarchy depth before linking to protect recursive world-transform
     // evaluation and avoid quadratic walks on hostile deeply nested input.
-    std::unordered_map<EntityID, EntityID> parents;
+    std::unordered_map<std::string, std::string> parents;
     for (const auto& data : loaded) {
-        if (data.extra.parent && !data.extra.id) return false;
-        if (data.extra.id && !parents.emplace(data.extra.id, data.extra.parent).second) return false;
+        const auto id = IdentityKey(data.extra), parent = ParentKey(data.extra);
+        if (!parent.empty() && id.empty()) return false;
+        if (!id.empty() && !parents.emplace(id, parent).second) return false;
     }
     for (const auto& pair : parents) {
-        EntityID cursor = pair.first;
-        for (unsigned depth = 0; cursor; ++depth) {
+        std::string cursor = pair.first;
+        for (unsigned depth = 0; !cursor.empty(); ++depth) {
             if (depth >= 128) return false;
             const auto found = parents.find(cursor);
             if (found == parents.end()) return false;
@@ -113,10 +131,10 @@ template<class Data> bool ValidateHierarchy(const std::vector<Data>& loaded) {
     return true;
 }
 template<class Data> bool LinkHierarchy(Scene* scene, const std::vector<Data>& loaded, const std::vector<EntityHandle>& created) {
-    std::unordered_map<EntityID,Entity*> ids;
-    for(size_t i=0;i<loaded.size();++i)if(loaded[i].extra.id && !ids.emplace(loaded[i].extra.id,scene->GetEntity(created[i])).second)return false;
+    std::unordered_map<std::string,Entity*> ids;
+    for(size_t i=0;i<loaded.size();++i) { const auto id=IdentityKey(loaded[i].extra);if(!id.empty() && !ids.emplace(id,scene->GetEntity(created[i])).second)return false; }
     if (!ValidateHierarchy(loaded)) return false;
-    for(size_t i=0;i<loaded.size();++i)if(loaded[i].extra.parent){auto parent=ids.find(loaded[i].extra.parent);if(parent==ids.end()||!scene->GetEntity(created[i])->TrySetParent(parent->second))return false;}
+    for(size_t i=0;i<loaded.size();++i) { const auto key=ParentKey(loaded[i].extra);if(!key.empty()){auto parent=ids.find(key);if(parent==ids.end()||!scene->GetEntity(created[i])->TrySetParent(parent->second))return false;} }
     return true;
 }
 } // namespace Archura::Serialization
