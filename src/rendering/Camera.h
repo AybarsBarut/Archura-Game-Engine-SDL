@@ -48,6 +48,8 @@ public:
     float GetFOV() const { return m_FOV; }
     float GetNearPlane() const { return m_NearPlane; }
     float GetFarPlane() const { return m_FarPlane; }
+    float GetMovementSpeed() const { return m_MovementSpeed; }
+    float GetMouseSensitivity() const { return m_MouseSensitivity; }
 
     // Setters
     void SetPosition(const glm::vec3& position) { m_Position = position; }

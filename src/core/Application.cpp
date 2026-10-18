@@ -119,6 +119,7 @@ Application::~Application() {
   ResourceManager::Get().Clear();
 
   m_PlayerHandleValue = 0;
+  m_PlayerPersistentID.clear();
   m_Window = nullptr;
   m_EngineWindow = nullptr;
   m_Input = nullptr;
@@ -311,7 +312,29 @@ bool Application::Init() {
               "saves/" + GameSaveManager::MakeSafeFileName(filePath) + ".scene";
         Scene *scene = Application::Get().GetScene();
         if (scene) {
-          if (GameSaveManager::Get().LoadProject(filePath, scene))
+          Application &app = Application::Get();
+          if (app.m_Editor && app.m_Editor->GetMode() == EditorMode::Play) {
+            app.m_Editor->SetMode(EditorMode::Edit);
+          }
+          const bool loaded = GameSaveManager::Get().LoadProject(filePath, scene);
+          if (loaded) {
+            app.m_PlayerHandleValue = 0;
+            app.m_PlayerPersistentID.clear();
+            for (const auto &entityPtr : scene->GetEntities()) {
+              if (entityPtr && entityPtr->GetName() == "Player") {
+                app.m_PlayerHandleValue = entityPtr->GetHandle().Value();
+                app.m_PlayerPersistentID = entityPtr->GetPersistentID();
+                break;
+              }
+            }
+            if (app.m_Editor) {
+              app.m_Editor->ClearSelection();
+              app.m_Editor->GetUndoHistory().Clear();
+              app.m_Editor->GetSelectionState().BindScene(scene);
+              app.m_Editor->SanitizeSelection(scene);
+            }
+          }
+          if (loaded)
             std::cout << "Proje yuklendi: " << filePath << std::endl;
           else
             std::cout << "Proje yuklenemedi: " << filePath << std::endl;
@@ -420,12 +443,60 @@ void Application::Run(uint32_t frameLimit) {
   m_Editor->SetEnabled(true);
 
   // ── Play / Stop callbacks ────────────────────────────────────────────
+  m_Editor->GetSelectionState().BindScene(m_Scene.get());
   m_Editor->RegisterOnPlay([this]() {
+    PlayModeContext playCtx{};
+    playCtx.scene = m_Scene.get();
+    playCtx.camera = m_Camera.get();
+    playCtx.fpsController = m_FPSController.get();
+    playCtx.physicsSystem = m_PhysicsSystem.get();
+    playCtx.projectileSystem = m_ProjectileSystem.get();
+    playCtx.particleSystem = m_ParticleSystem.get();
+    playCtx.selection = m_Editor ? &m_Editor->GetSelectionState() : nullptr;
+    playCtx.undoHistory = m_Editor ? &m_Editor->GetUndoHistory() : nullptr;
+    playCtx.playerHandleValue = &m_PlayerHandleValue;
+    playCtx.playerPersistentID = &m_PlayerPersistentID;
+    playCtx.onRuntimeStart = [this](Scene *scene) {
+      if (m_ScriptSystem) {
+        m_ScriptSystem->StartRuntime(scene);
+      }
+    };
+    m_PlaySession.EnterPlayMode(playCtx);
+    if (m_Editor) {
+      m_Editor->SanitizeSelection(m_Scene.get());
+    }
+    m_Accumulator = 0.0f;
     m_Input->SetCursorMode(2);
     m_IsPaused = false;
     std::cout << "[Editor] Entered Play mode" << std::endl;
   });
   m_Editor->RegisterOnStop([this]() {
+    PlayModeContext playCtx{};
+    playCtx.scene = m_Scene.get();
+    playCtx.camera = m_Camera.get();
+    playCtx.fpsController = m_FPSController.get();
+    playCtx.physicsSystem = m_PhysicsSystem.get();
+    playCtx.projectileSystem = m_ProjectileSystem.get();
+    playCtx.particleSystem = m_ParticleSystem.get();
+    playCtx.selection = m_Editor ? &m_Editor->GetSelectionState() : nullptr;
+    playCtx.undoHistory = m_Editor ? &m_Editor->GetUndoHistory() : nullptr;
+    playCtx.playerHandleValue = &m_PlayerHandleValue;
+    playCtx.playerPersistentID = &m_PlayerPersistentID;
+    playCtx.onRuntimeStop = [this](Scene *scene) {
+      if (m_ScriptSystem) {
+        m_ScriptSystem->StopRuntime();
+      }
+      AudioSystem::Get().StopAllSceneAudio(scene);
+      if (m_RenderSystem) {
+        m_RenderSystem->SetIsolatedEntity(nullptr);
+      }
+    };
+    m_PlaySession.ExitPlayMode(playCtx);
+    if (m_Editor) {
+      m_Editor->SanitizeSelection(m_Scene.get());
+    }
+    m_IsPaused = false;
+    m_Accumulator = 0.0f;
     m_Input->SetCursorMode(0);
     std::cout << "[Editor] Returned to Edit mode" << std::endl;
   });
@@ -434,6 +505,7 @@ void Application::Run(uint32_t frameLimit) {
   Entity *player = m_Scene->CreateEntity("Player");
   player->SetOwnership(EntityOwnership::Engine);
   m_PlayerHandleValue = player->GetHandle().Value();
+  m_PlayerPersistentID = player->GetPersistentID();
   auto *weapon = player->AddComponent<Weapon>();
   weapon->InitInventory();
   auto *playerHealth = player->AddComponent<Health>();
@@ -449,7 +521,11 @@ void Application::Run(uint32_t frameLimit) {
                                         m_PhysicsSystem.get());
 #endif
   m_ScriptSystem = std::make_unique<ScriptSystem>();
-  m_ScriptSystem->Init(m_Scene.get());
+  if (m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit) {
+    m_ScriptSystem->SetScene(m_Scene.get());
+  } else {
+    m_ScriptSystem->StartRuntime(m_Scene.get());
+  }
   m_ParticleSystem = std::make_unique<ParticleSystem>();
   m_ParticleSystem->Init(m_Scene.get());
   m_ProjectileSystem = std::make_unique<ProjectileSystem>();
@@ -735,7 +811,18 @@ void Application::UpdateGameLogic(float dt) {
     network.UpdateClient();
   }
 
-  if (!m_IsPaused) {
+  const bool inEditMode =
+      m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
+  if (!inEditMode && !m_IsPaused) {
+    if (!m_PlaySession.IsPlaying() && m_Editor) {
+      m_Editor->SetMode(EditorMode::Play);
+    }
+    if (m_Scene && !m_Scene->GetEntity(EntityHandle::FromValue(m_PlayerHandleValue)) &&
+        !m_PlayerPersistentID.empty()) {
+      if (Entity *resolvedPlayer = m_Scene->GetEntityByPersistentID(m_PlayerPersistentID)) {
+        m_PlayerHandleValue = resolvedPlayer->GetHandle().Value();
+      }
+    }
     // Weapon progression is fixed-tick state. Advance it exactly once before
     // FPSController evaluates held-fire for this tick.
     WeaponSystem weaponSystem;

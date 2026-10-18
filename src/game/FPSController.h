@@ -127,6 +127,36 @@ private:
     float m_MaxBunnyhopSpeed = 30.0f; // Soft cap for bunnyhop speed
 
     // Object Grabbing (In-game dragging)
+public:
+    bool IsGravityEnabled() const { return m_GravityEnabled; }
+    const glm::vec3& GetVelocity() const { return m_Velocity; }
+    void SetVelocity(const glm::vec3& velocity) { m_Velocity = velocity; }
+    const glm::vec3& GetCurrentRecoil() const { return m_CurrentRecoil; }
+    const glm::vec3& GetTargetRecoil() const { return m_TargetRecoil; }
+    EntityHandle GetGrabbedEntity() const { return m_GrabbedEntity; }
+    bool IsGrabbing() const { return m_IsGrabbing; }
+
+    void ResetRuntimeState() noexcept {
+        m_Velocity = glm::vec3(0.0f);
+        m_IsGrounded = true;
+        m_IsRunning = false;
+        m_IsMantling = false;
+        m_MantleStartPos = glm::vec3(0.0f);
+        m_MantleTargetPos = glm::vec3(0.0f);
+        m_MantleTimer = 0.0f;
+        m_CurrentRecoil = glm::vec3(0.0f);
+        m_TargetRecoil = glm::vec3(0.0f);
+        m_CurrentTilt = 0.0f;
+        m_MouseDeltaX = 0.0f;
+        m_GrabbedEntity = {};
+        m_GrabDistance = 0.0f;
+        m_IsGrabbing = false;
+        if (m_Camera) {
+            m_Camera->SetRoll(0.0f);
+        }
+    }
+
+private:
     EntityHandle m_GrabbedEntity{};
     float m_GrabDistance = 0.0f;
     bool m_IsGrabbing = false;

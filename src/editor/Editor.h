@@ -23,6 +23,7 @@
 struct SDL_Window;
 
 #include "EditorCamera.h"
+#include "EditorSelectionState.h"
 #include "ObjectManipulationTool.h"
 #include "GameBuilderPanel.h"
 #include "TransformUndoHistory.h"
@@ -95,6 +96,7 @@ public:
     // ── State Machine ────────────────────────────────────────────────────────
     EditorMode  GetMode()    const { return m_Mode; }
     bool IsGameRunning()     const { return m_Mode == EditorMode::Play; }
+    void SetMode(EditorMode mode);
 
     /** Called when toolbar Play button is clicked. */
     void RegisterOnPlay(std::function<void()> cb)  { m_OnPlay  = std::move(cb); }
@@ -108,12 +110,13 @@ public:
     bool WantCaptureMouse() const;
 
     // ── Entity selection ─────────────────────────────────────────────────────
-    void SetSelectedEntity(Entity* entity) { 
-        m_SelectedEntity = entity; 
-        m_SelectedEntities.clear();
-        if (entity) m_SelectedEntities.push_back(entity);
-    }
-    void SetLookedAtEntity(Entity* entity) { m_LookedAtEntity = entity; }
+    void SetSelectedEntity(Entity* entity);
+    void SetLookedAtEntity(Entity* entity);
+    void ClearSelection();
+    bool SanitizeSelection(Scene* scene = nullptr);
+    EditorSelectionState& GetSelectionState() noexcept { return m_SelectionState; }
+    const EditorSelectionState& GetSelectionState() const noexcept { return m_SelectionState; }
+    TransformUndoHistory& GetUndoHistory() noexcept { return m_UndoHistory; }
     void SetSpawnPosition(const glm::vec3& pos) { m_SpawnPosition = pos; }
 
     // ── Console logging ──────────────────────────────────────────────────────
@@ -217,8 +220,10 @@ private:
     glm::vec3  m_GizmoDragPosStart   = {};
     glm::vec2  m_GizmoDragMousePrev  = {};
     float      m_GizmoDragScale      = 1.0f;
+    EntityHandle m_GizmoTargetHandle = {};
 
-    // ── Undo System ────────────────────────────────────────────────────────
+    // ── Selection & Undo System ─────────────────────────────────────────────
+    EditorSelectionState m_SelectionState;
     TransformUndoHistory m_UndoHistory;
 
     void UndoLastAction(Scene* scene);

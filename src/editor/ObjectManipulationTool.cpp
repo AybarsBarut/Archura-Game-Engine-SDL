@@ -18,7 +18,9 @@ void ObjectManipulationTool::Init() {
 
 void ObjectManipulationTool::Draw(Scene *scene, Camera *camera,
                                   Entity *selectedEntity) {
-  (void)scene;
+  if (selectedEntity && (!scene || !scene->OwnsEntityPointer(selectedEntity))) {
+    selectedEntity = nullptr;
+  }
   (void)camera;
   if (!m_IsOpen)
     return;
@@ -69,7 +71,16 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
   (void)scene;
 
   // Toggle Isolation
-  RenderSystem *renderSystem = Application::Get().GetRenderSystem();
+  if (selectedEntity && (!scene || !scene->OwnsEntityPointer(selectedEntity))) {
+    selectedEntity = nullptr;
+  }
+  if (!selectedEntity) {
+    m_IsPainting = false;
+    m_IsDeforming = false;
+    m_CurrentMesh.reset();
+  }
+  Application *app = Application::TryGet();
+  RenderSystem *renderSystem = app ? app->GetRenderSystem() : nullptr;
   if (m_IsOpen && selectedEntity) {
     if (renderSystem)
       renderSystem->SetIsolatedEntity(selectedEntity);
@@ -161,7 +172,7 @@ void ObjectManipulationTool::DrawBrushCursor(Camera *camera,
   // it to "Unlit" color mode.
 
   // Since RenderSystem is accessible:
-  RenderSystem *rs = Application::Get().GetRenderSystem();
+  // Using ImGui background draw list avoids direct GL state dependencies.
   // This is getting complex to pipe the shader.
   // Quick Hack: Generate line segments and draw using
   // `ImGui::GetBackgroundDrawList()->AddLine` by projecting vertices to screen?

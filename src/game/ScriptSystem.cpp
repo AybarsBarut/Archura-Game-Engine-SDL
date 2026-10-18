@@ -7,9 +7,17 @@
 namespace Archura {
 
     void ScriptSystem::Init(Scene* scene) {
+        StartRuntime(scene);
+    }
+
+    void ScriptSystem::StartRuntime(Scene* scene) {
+        if (m_RuntimeActive) {
+            StopRuntime();
+        }
         m_Scene = scene;
         ScriptEngine::Init();
         ScriptEngine::OnRuntimeStart(scene);
+        m_RuntimeActive = true;
         DevConsole::Get().Log("Script System Initialized (Mono)");
 
         m_ActiveScriptEntities.clear();
@@ -27,8 +35,19 @@ namespace Archura {
         });
     }
 
+    void ScriptSystem::StopRuntime() {
+        for (const uint64_t handle : m_ActiveScriptEntities) {
+            ScriptEngine::OnDestroyEntity(EntityHandle::FromValue(handle));
+        }
+        m_ActiveScriptEntities.clear();
+        if (m_RuntimeActive) {
+            ScriptEngine::OnRuntimeStop();
+            m_RuntimeActive = false;
+        }
+    }
+
     void ScriptSystem::Update(float deltaTime) {
-        if (!m_Scene) return;
+        if (!m_Scene || !m_RuntimeActive) return;
 
         std::unordered_set<uint64_t> seen;
         m_Scene->ForEachEntity([this, deltaTime, &seen](Entity& entity) {
@@ -70,10 +89,7 @@ namespace Archura {
     }
 
     void ScriptSystem::Shutdown() {
-        for (const uint64_t handle : m_ActiveScriptEntities)
-            ScriptEngine::OnDestroyEntity(EntityHandle::FromValue(handle));
-        m_ActiveScriptEntities.clear();
-        ScriptEngine::OnRuntimeStop();
+        StopRuntime();
         ScriptEngine::Shutdown();
         m_Scene = nullptr;
     }

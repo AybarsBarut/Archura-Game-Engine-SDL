@@ -55,10 +55,82 @@ bool Editor::Init(Window *window) {
 }
 
 void Editor::Shutdown() {
+  ClearSelection();
   if (m_OldCoutBuf) {
     std::cout.rdbuf(m_OldCoutBuf);
     m_OldCoutBuf = nullptr;
   }
+}
+
+void Editor::SetMode(EditorMode mode) {
+  if (m_Mode == mode)
+    return;
+  m_GizmoActive = GizmoOp::None;
+  m_GizmoHovered = GizmoOp::None;
+  m_GizmoSSValid = false;
+  m_GizmoTargetHandle = {};
+  m_Mode = mode;
+  if (m_Mode == EditorMode::Play) {
+    if (m_OnPlay)
+      m_OnPlay();
+  } else {
+    if (m_OnStop)
+      m_OnStop();
+  }
+}
+
+void Editor::SetSelectedEntity(Entity *entity) {
+  const EntityHandle prevPrimary = m_SelectionState.GetSelectedEntityHandle();
+  if (entity && entity->GetScene()) {
+    m_SelectionState.BindScene(entity->GetScene());
+  }
+  m_SelectionState.SetSelectedEntity(entity);
+  m_SelectedEntity = m_SelectionState.GetSelectedEntity();
+  m_SelectedEntities = m_SelectionState.GetSelectedEntities();
+  m_LastClickedEntity = m_SelectionState.GetLastClickedEntity();
+  m_LookedAtEntity = m_SelectionState.GetLookedAtEntity();
+  if (m_SelectionState.GetSelectedEntityHandle() != prevPrimary) {
+    m_GizmoActive = GizmoOp::None;
+    m_GizmoHovered = GizmoOp::None;
+    m_GizmoSSValid = false;
+    m_GizmoTargetHandle = m_SelectionState.GetSelectedEntityHandle();
+  }
+}
+
+void Editor::SetLookedAtEntity(Entity *entity) {
+  if (entity && entity->GetScene()) {
+    m_SelectionState.BindScene(entity->GetScene());
+  }
+  m_SelectionState.SetLookedAtEntity(entity);
+  m_LookedAtEntity = m_SelectionState.GetLookedAtEntity();
+}
+
+void Editor::ClearSelection() {
+  m_SelectionState.Clear();
+  m_SelectedEntity = nullptr;
+  m_SelectedEntities.clear();
+  m_LastClickedEntity = nullptr;
+  m_LookedAtEntity = nullptr;
+  m_GizmoActive = GizmoOp::None;
+  m_GizmoHovered = GizmoOp::None;
+  m_GizmoSSValid = false;
+  m_GizmoTargetHandle = {};
+}
+
+bool Editor::SanitizeSelection(Scene *scene) {
+  Scene *effectiveScene = scene ? scene : m_SelectionState.GetBoundScene();
+  const EntityHandle prevPrimary = m_SelectionState.GetSelectedEntityHandle();
+  const bool valid = m_SelectionState.ReconcileMirrors(
+      effectiveScene, m_SelectedEntity, m_SelectedEntities, m_LastClickedEntity,
+      m_LookedAtEntity);
+  if (m_SelectionState.GetSelectedEntityHandle() != prevPrimary ||
+      !m_SelectedEntity) {
+    m_GizmoActive = GizmoOp::None;
+    m_GizmoHovered = GizmoOp::None;
+    m_GizmoSSValid = false;
+    m_GizmoTargetHandle = m_SelectionState.GetSelectedEntityHandle();
+  }
+  return valid;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +245,7 @@ void Editor::BeginDockSpace() {
 }
 
 void Editor::DrawEditorUI(Scene *scene) {
+  SanitizeSelection(scene);
   if (!m_Enabled)
     return;
 
@@ -233,6 +306,8 @@ void Editor::DrawEditorUI(Scene *scene) {
     DrawPerformanceMetrics(ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
   if (m_ShowDemoWindow)
     DrawDemoWindow();
+
+  SanitizeSelection(scene);
   if (m_ShowGameBuilder)
     m_GameBuilderPanel.Draw(scene, m_SelectedEntity);
 
@@ -294,9 +369,7 @@ void Editor::DrawToolbar(Scene * /*scene*/) {
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                           ImVec4(0.14f, 0.40f, 0.24f, 1.0f));
     if (ImGui::Button("  PLAY", ImVec2(btnW, 0))) {
-      m_Mode = EditorMode::Play;
-      if (m_OnPlay)
-        m_OnPlay();
+      SetMode(EditorMode::Play);
     }
     ImGui::PopStyleColor(3);
   } else {
@@ -307,9 +380,7 @@ void Editor::DrawToolbar(Scene * /*scene*/) {
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                           ImVec4(0.42f, 0.10f, 0.10f, 1.0f));
     if (ImGui::Button("  STOP", ImVec2(btnW, 0))) {
-      m_Mode = EditorMode::Edit;
-      if (m_OnStop)
-        m_OnStop();
+      SetMode(EditorMode::Edit);
     }
     ImGui::PopStyleColor(3);
   }
@@ -437,6 +508,7 @@ void Editor::DrawMenuBar(Scene *scene) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
+  SanitizeSelection(scene);
   m_ObjectTool.OnSceneGUI(scene, gameCamera, m_SelectedEntity);
 
   constexpr float DIST = 10.0f;
@@ -516,6 +588,7 @@ void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::DrawSceneHierarchy(Scene *scene) {
+  SanitizeSelection(scene);
   ImGuiWindowFlags window_flags = 0;
   if (m_HierarchyLocked)
     window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
@@ -583,6 +656,7 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 
   std::vector<Entity*> flatList;
   Entity* pendingShiftSelect = nullptr;
+  std::vector<EntityHandle> pendingDeleteHandles;
 
   std::function<void(Entity *)> DrawNode = [&](Entity *entity) {
     flatList.push_back(entity);
@@ -634,11 +708,16 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
                 m_SelectedEntity = entity;
             }
             m_LastClickedEntity = entity;
+            m_SelectionState.SetSelectionList(m_SelectedEntities, m_SelectedEntity);
+            m_SelectionState.SetLastClickedEntity(m_LastClickedEntity);
+            SanitizeSelection(scene);
         } else if (io.KeyShift && m_LastClickedEntity) {
             pendingShiftSelect = entity;
         } else {
             SetSelectedEntity(entity);
             m_LastClickedEntity = entity;
+            m_SelectionState.SetLastClickedEntity(entity);
+            SanitizeSelection(scene);
         }
     }
 
@@ -665,23 +744,19 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
       bool inSelection = std::find(m_SelectedEntities.begin(), m_SelectedEntities.end(), entity) != m_SelectedEntities.end();
       if (ImGui::MenuItem("Unparent")) {
         if (inSelection) {
-            for (auto* e : m_SelectedEntities) e->SetParent(nullptr);
+            for (auto* e : m_SelectedEntities) {
+                if (e) e->SetParent(nullptr);
+            }
         } else {
             entity->SetParent(nullptr);
         }
       }
       if (ImGui::MenuItem("Delete")) {
         if (inSelection) {
-            for (auto* e : m_SelectedEntities) scene->DestroyEntity(e->GetID());
-            m_SelectedEntities.clear();
-            m_SelectedEntity = nullptr;
-            m_LastClickedEntity = nullptr;
+            const auto handles = m_SelectionState.GetSelectedHandles();
+            pendingDeleteHandles.insert(pendingDeleteHandles.end(), handles.begin(), handles.end());
         } else {
-            scene->DestroyEntity(entity->GetID());
-            if (m_SelectedEntity == entity) {
-                m_SelectedEntities.clear();
-                m_SelectedEntity = nullptr;
-            }
+            pendingDeleteHandles.push_back(entity->GetHandle());
         }
       }
       ImGui::EndPopup();
@@ -698,7 +773,12 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
     if (ePtr->GetParent() == nullptr)
       DrawNode(ePtr.get());
 
-  if (pendingShiftSelect && m_LastClickedEntity) {
+  if (!pendingDeleteHandles.empty()) {
+      for (const EntityHandle handle : pendingDeleteHandles) {
+          scene->DestroyEntity(handle);
+      }
+      SanitizeSelection(scene);
+  } else if (pendingShiftSelect && m_LastClickedEntity) {
       auto it1 = std::find(flatList.begin(), flatList.end(), m_LastClickedEntity);
       auto it2 = std::find(flatList.begin(), flatList.end(), pendingShiftSelect);
       if (it1 != flatList.end() && it2 != flatList.end()) {
@@ -715,6 +795,8 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
               }
           }
           m_SelectedEntity = pendingShiftSelect;
+          m_SelectionState.SetSelectionList(m_SelectedEntities, m_SelectedEntity);
+          SanitizeSelection(scene);
       }
   }
 
@@ -740,6 +822,7 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::DrawInspector(Scene *scene) {
+  SanitizeSelection(scene);
   ImGuiWindowFlags window_flags = 0;
   if (m_InspectorLocked)
     window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
@@ -976,9 +1059,9 @@ void Editor::DrawInspector(Scene *scene) {
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                         ImVec4(0.50f, 0.10f, 0.10f, 1.0f));
   if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) {
-    if (scene) {
-      scene->DestroyEntity(m_SelectedEntity->GetID());
-      m_SelectedEntity = nullptr;
+    if (scene && m_SelectedEntity) {
+      scene->DestroyEntity(m_SelectedEntity->GetHandle());
+      SanitizeSelection(scene);
     }
   }
   ImGui::PopStyleColor(3);
@@ -1628,7 +1711,7 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
   }
 
   Log("Spawned " + type);
-  m_SelectedEntity = e;
+  SetSelectedEntity(e);
   m_AssetCacheDirty = false; // spawn doesn't invalidate asset cache
 }
 
@@ -1755,16 +1838,26 @@ Entity *Editor::PickEntityAtScreenPos(Scene *scene, Input *input, int screenW,
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::DrawTransformGizmo(int screenW, int screenH) {
+  SanitizeSelection();
   // Reset cache
   m_GizmoSSValid = false;
   for (int i = 0; i < 3; ++i)
     m_GizmoRotArcSSValid[i] = false;
 
-  if (!m_SelectedEntity)
+  if (!m_SelectedEntity) {
+    m_GizmoActive = GizmoOp::None;
+    m_GizmoHovered = GizmoOp::None;
+    m_GizmoTargetHandle = {};
     return;
+  }
   auto *tf = m_SelectedEntity->GetComponent<Transform>();
-  if (!tf)
+  if (!tf) {
+    m_GizmoActive = GizmoOp::None;
+    m_GizmoHovered = GizmoOp::None;
+    m_GizmoTargetHandle = {};
     return;
+  }
+  m_GizmoTargetHandle = m_SelectedEntity->GetHandle();
 
   const float asp = (screenH > 0) ? (float)screenW / (float)screenH : 1.777f;
   glm::mat4 vp =
@@ -1888,8 +1981,11 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
+  (void)screenW;
+  SanitizeSelection();
   m_GizmoHovered = GizmoOp::None;
-  if (!m_SelectedEntity || !input || !m_GizmoSSValid) {
+  if (!m_SelectedEntity || !input || !m_GizmoSSValid ||
+      m_SelectedEntity->GetHandle() != m_GizmoTargetHandle) {
     m_GizmoActive = GizmoOp::None;
     return;
   }
@@ -1998,6 +2094,7 @@ void Editor::UndoLastAction(Scene *scene) {
 }
 
 void Editor::CopySelected() {
+  SanitizeSelection();
   if (!m_SelectedEntity)
     return;
   auto *tf = m_SelectedEntity->GetComponent<Transform>();
@@ -2060,11 +2157,12 @@ void Editor::PasteClipboard(Scene *scene) {
     auto *ns = e->AddComponent<ScriptComponent>();
     ns->className = m_Clipboard.scriptClass;
   }
-  m_SelectedEntity = e;
+  SetSelectedEntity(e);
   Log("[Yapistir] " + m_Clipboard.name);
 }
 
 void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
+  SanitizeSelection(scene);
   if (!input)
     return;
   if (ImGui::GetIO().WantTextInput)
@@ -2093,26 +2191,19 @@ void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
 
   // Ctrl+A – Deselect All
   if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_A)) {
-    m_SelectedEntity = nullptr;
-    m_SelectedEntities.clear();
-    m_LastClickedEntity = nullptr;
+    ClearSelection();
   }
 
   // Delete key – Delete selected entities
-  if (!ctrl && input->IsKeyJustPressed(SDL_SCANCODE_DELETE)) {
-    if (!m_SelectedEntities.empty() && scene) {
-      for (auto *e : m_SelectedEntities) {
-        scene->DestroyEntity(e->GetID());
+  if (!ctrl && input->IsKeyJustPressed(SDL_SCANCODE_DELETE) && scene) {
+    const std::vector<EntityHandle> handles = m_SelectionState.GetSelectedHandles();
+    if (!handles.empty()) {
+      for (const EntityHandle handle : handles) {
+        scene->DestroyEntity(handle);
       }
-      m_SelectedEntities.clear();
-      m_SelectedEntity = nullptr;
-      m_LastClickedEntity = nullptr;
-      Log("[Sil] Secili varliklar silindi.");
-    } else if (m_SelectedEntity && scene) {
-      scene->DestroyEntity(m_SelectedEntity->GetID());
-      m_SelectedEntity = nullptr;
-      m_LastClickedEntity = nullptr;
-      Log("[Sil] Varlik silindi.");
+      SanitizeSelection(scene);
+      Log(handles.size() > 1 ? "[Sil] Secili varliklar silindi."
+                             : "[Sil] Varlik silindi.");
     }
   }
 

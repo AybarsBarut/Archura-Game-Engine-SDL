@@ -1039,6 +1039,17 @@ void Mesh::UpdateVertices() {
     glBindVertexArray(0);
 }
 
+void Mesh::RestoreGeometrySnapshot(const std::vector<Vertex>& vertices,
+                                   const std::vector<unsigned int>& indices,
+                                   const MeshSource& source) {
+    m_Vertices = vertices;
+    m_Indices = indices;
+    m_Source = source;
+    if (!RenderThread::IsCurrent() || m_VBO == 0) return;
+    UpdateVertices();
+    m_Source = source;
+}
+
 void Mesh::RecalculateNormals() {
     m_Source = MeshSource{};
     // 1. Reset normals

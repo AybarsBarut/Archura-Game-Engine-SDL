@@ -2,6 +2,7 @@
 
 #include "FrameTelemetry.h"
 #include "Window.h"
+#include "../editor/PlayModeSession.h"
 #include "../rendering/GraphicsAPI.h"
 #include <cstdint>
 #include <memory>
@@ -14,6 +15,7 @@ namespace Archura {
         virtual ~Application();
 
         static Application& Get() { return *s_Instance; }
+        static Application* TryGet() noexcept { return s_Instance; }
 
         void Run(uint32_t frameLimit = 0);
         void Quit() { m_Running = false; }
@@ -90,6 +92,8 @@ namespace Archura {
         // Generation-checked player identity. Resolve through Scene before use;
         // editor deletion must never leave a cached raw pointer behind.
         uint64_t m_PlayerHandleValue = 0;
+        std::string m_PlayerPersistentID;
+        PlayModeSession m_PlaySession;
         
         bool m_DevModeActive = true;
         bool m_IsPaused = false;

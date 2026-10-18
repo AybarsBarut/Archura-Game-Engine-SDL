@@ -36,6 +36,12 @@ public:
     void Init(Scene* scene);
     void Update(float deltaTime);
     void Shutdown();
+    void ResetRuntimeState() noexcept {
+        m_Accumulator = 0.0;
+        m_PreviousContacts.clear();
+    }
+    double GetAccumulator() const noexcept { return m_Accumulator; }
+    std::size_t GetActiveContactCount() const noexcept { return m_PreviousContacts.size(); }
 
     void SetGravity(const glm::vec3& gravity) noexcept;
     const glm::vec3& GetGravity() const noexcept { return m_Gravity; }

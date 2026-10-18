@@ -18,6 +18,7 @@ public:
     ~ProjectileSystem() = default;
 
     void Init(Scene* scene, PhysicsSystem* physicsSystem);
+    void ResetRuntimeState() noexcept { m_ProjectilesToDestroy.clear(); }
     void Update(float deltaTime) override;
 
     void UpdateProjectile(Entity* entity, Projectile* proj, float deltaTime);
