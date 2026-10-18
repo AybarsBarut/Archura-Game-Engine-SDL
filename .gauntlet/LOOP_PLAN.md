@@ -49,9 +49,77 @@ integrated; focused tests 4/4 pass, including unchanged 128 Hz firing progressio
 Final Debug gate 22/22 passed (1.77 s); Release 22/22 passed (1.68 s). Persist all real
 stats/inventory/pattern data and reset only explicitly transient firing state.
 
+## Loop 3 — Editor selection lifetime and authored Play/Stop boundary (P0, after Loop 2 gate)
+
+- Inspect: `Editor` selection/gizmo/manipulation pointer ownership, `RenderSystem`
+  isolation pointer, `Application::UpdateGameLogic` Edit/Play boundary, and
+  runtime system cleanup (`PhysicsSystem`, `FPSController`, `WeaponSystem`,
+  `ProjectileSystem`, `ParticleSystem`, `ScriptSystem`, `AudioSystem`).
+- Reproduce: raw `Entity*` selection survives entity destruction and slot recycling;
+  Edit mode runs simulation systems unless paused; Stop leaves runtime-mutated
+  transforms/components/spawned entities in the authored scene.
+- Implement: generation-checked `EditorSelectionState` with `Scene` lifetime tokens
+  and `OwnsEntityPointer` validation; handle-validated `RenderSystem::m_IsolationTarget`;
+  persistent-ID rebinding in `TransformUndoHistory`; Edit-mode simulation gating in
+  `Application::UpdateGameLogic`; and `PlayModeSession` complete in-memory authored
+  scene snapshot (`Mesh::RestoreGeometrySnapshot` preserving `MeshSource` recipes,
+  hierarchy, ownership, and all supported + in-memory runtime components) restored
+  transactionally via `Scene::CommitEntityReplacement` on Stop.
+- Accept: deleted/recycled entities and destroyed scenes never leave dangling
+  selection/isolation/gizmo pointers; Edit mode does not advance gameplay/physics/
+  scripts/particles/audio; Play/Stop restores exact authored transforms, components,
+  camera, controller, Player identity and selection across 20 repeated cycles.
+- Verify: `Archura.Editor.PlayStopLifecycle` plus full Debug/Release builds and CTest.
+
+Loop 3 implementation and verification: `Archura.Editor.PlayStopLifecycle` passed,
+and final Debug all-target build + 23/23 CTest (2.61 s) and Release all-target
+build/staging + 23/23 CTest (2.37 s) passed, including real OpenGL startup/shutdown.
+
+## Loop 4 — Configurable aggregate resource budgets, project-root resolution & canonical asset identity (P1, after Loop 3 gate)
+
+- Inspect: `GameSaveManager::LoadEntities`, `ProjectSerializer::LoadProject`,
+  `ResourceManager`, `TextureManager`, and `GameBuilderPanel`.
+- Reproduce: multiple valid entities can exceed desired aggregate scene memory
+  without a configurable scene budget; textures in different directories with the
+  same filename stem (`wood/albedo.bmp` vs `metal/albedo.bmp`) collide on stem key;
+  `GameBuilderPanel` discovers `.obj` files in `assets/models` when `assets/objects`
+  is absent but attempts to load them from `assets/objects/`; relocated project
+  loads depend on CWD.
+- Implement: `SceneReconstructionBudget` (`maxEntities`, `maxTotalMeshVertices`,
+  `maxTotalMeshIndices`, `maxTotalMeshBytes`, `maxTotalTextureBytes`,
+  `maxSingleAssetFileBytes`) enforced in preflight and staged reconstruction;
+  `ResourceManager::SetProjectRoot`, `IsSafeAssetPath`, `ResolveAssetPath`, and
+  `CanonicalAssetKey`; canonical path indexing in `TextureManager` and
+  `ResourceManager` plus CPU-side image validation in headless mode; and
+  `GameBuilderPanel::ResolveModelSpawnPath` / `SpawnModelEntity`.
+- Accept: scenes exceeding entity/mesh/texture/file-size budgets reject before
+  replacing live scene state; `..` traversal paths reject; relocated projects
+  load from unrelated CWDs and preserve authored relative paths; same-stem textures
+  in different folders remain distinct; `GameBuilderPanel` spawns `.obj` models
+  from `assets/models` fallback.
+
+## Loop 5 — Audio path/playback routing, world-space render culling & terrain heightmap fixes (P1, after Loop 4)
+
+- Inspect: `AudioSystem`, `ScriptGlue::AudioSource_Play`, `RenderSystem::Update`,
+  and `Terrain`.
+- Reproduce: `GameBuilderPanel` and `AudioSystem` double-prefix `assets/audio/`;
+  `AudioSystem::Update` sends MCI volume commands to `sound_<id>` without opening
+  the alias when `AudioSource::isPlaying` is set; `RenderSystem::Update` uses local
+  `transform->position` instead of `GetWorldTransform()[3]` for distance culling
+  and light positions; `Terrain::LoadFromHeightmap` leaks `new Terrain()` on missing
+  files, truncates rectangular heightmaps to `std::min(w, h)`, and ignores
+  horizontal `scale.x`/`scale.z` and bounds in `GetHeightAt`.
+- Implement: `AudioSystem::ResolveAudioPath`, runtime alias opening in
+  `AudioSystem::Update`, `AudioSource` + `AudioSourceComponent` support in
+  `ScriptGlue`, world-space positions in `RenderSystem::Update`, and leak-free,
+  rectangular (`m_Cols`/`m_Rows`), headless-safe, scale- and bounds-aware `Terrain`.
+- Verify (Loops 4 & 5): `Archura.Core.ProjectSerializer` and
+  `Archura.Core.GameSaveManager` expanded; full Debug all-target build + 23/23 CTest
+  (2.02 s) and full Release all-target build/staging + 23/23 CTest (1.65 s) passed.
+
 ## Subsequent queue
 
-Play/Stop authored-state boundary and selection lifetime; aggregate resource
-budgets/project-root paths; standalone runtime packaging; real SDL_net backend
-and authoritative world/input/snapshot/client vertical slice. Each needs its own
+Standalone runtime packaging (`PKG-01`); real SDL_net backend and authoritative
+world/input/snapshot/client vertical slice (`NET-01`); render transform
+interpolation (`TIME-01`); retained runtime UI (`UI-01`). Each needs its own
 reproduction, bounded implementation and actual acceptance evidence.

@@ -1,5 +1,59 @@
 # Regressions
 
+## Resource budgets, project-root resolution, ASSET-01, AUD-01/02, REND-01 & TERR-01 loops — verified
+
+- `GameSaveManager` and `ProjectSerializer` enforce configurable aggregate
+  `SceneReconstructionBudget` limits (`maxEntities`, `maxTotalMeshVertices`,
+  `maxTotalMeshIndices`, `maxTotalMeshBytes`, `maxTotalTextureBytes`,
+  `maxSingleAssetFileBytes`) before committing scene changes, preserving live
+  entities and handles on budget failure.
+- During initial Loop 4 CTest verification, calling non-const `mesh->GetVertices()`
+  for vertex budget accounting inside `GameSaveManager::LoadEntities` invalidated
+  `Mesh::m_Source` to `MeshSourceType::Custom`, causing `legacy sphere retains
+  source type` and `mesh type and dimensions survive roundtrip` to fail. Using
+  `std::as_const(*mesh).GetVertices()` and `std::as_const(*mesh).GetIndices()`
+  repaired the regression immediately.
+- `ResourceManager::IsSafeAssetPath` and `ResolveAssetPath` reject `..` parent
+  traversal, drive-relative paths and NUL bytes, while resolving relocated project
+  assets and directories across `documentRoot`, `documentRoot.parent_path()`, and
+  `m_ProjectRoot` from unrelated working directories.
+- `TextureManager` and `ResourceManager` index textures by canonical path so
+  same-stem textures in distinct directories (`wood/albedo.bmp` vs
+  `metal/albedo.bmp`) never collide.
+- `GameBuilderPanel` discovers and spawns `.obj` models from `assets/models` when
+  `assets/objects` is absent (`ASSET-01`) and passes unprefixed audio filenames to
+  `AudioSystem::PlayOneShot`.
+- `AudioSystem::ResolveAudioPath` collapses duplicate `assets/audio/` prefixes
+  (`AUD-02`), and `AudioSystem::Update` assigns and opens `sound_<id>` when
+  `AudioSource::isPlaying` is set (`AUD-01`).
+- `Terrain::LoadFromHeightmap` no longer leaks `new Terrain()` when a heightmap is
+  missing, preserves rectangular `m_Cols` and `m_Rows`, guards GL calls when
+  `!RenderThread::IsCurrent()`, and `Terrain::GetHeightAt` accounts for horizontal
+  `scale.x`/`scale.z` and returns `0.0f` outside world bounds (`TERR-01`).
+- All 23/23 CTest checks pass in both Debug (2.02 s) and Release (1.65 s).
+
+## Editor selection lifetime and Play/Stop boundary loop — verified
+
+- `EditorSelectionState` validates primary, multi-select, last-clicked and
+  looked-at entities through generation-checked `EntityHandle`s, `Scene` lifetime
+  tokens and `Scene::OwnsEntityPointer`. Deleting a selected entity, recycling its
+  slot or destroying the `Scene` clears stale selection without dereferencing
+  freed memory. `RenderSystem::m_IsolationTarget` is likewise validated by handle.
+- Edit mode blocks gameplay simulation ticks (`WeaponSystem`, `FPSController`,
+  `ProjectileSystem`, `PhysicsSystem`, `ScriptSystem`, `ParticleSystem`,
+  `AudioSystem`).
+- `PlayModeSession` captures the complete in-memory authored scene, camera,
+  controller, Player persistent ID and selection on Play, and transactionally
+  restores them via `Scene::CommitEntityReplacement` on Stop after stopping scripts
+  and audio, clearing transient projectiles/particles/contacts, and rebinding
+  Player, selection and `TransformUndoHistory` by persistent ID.
+- During headless lifecycle testing, `FPSController::Update` was found to
+  dereference `input->IsCursorLocked()` before checking `input != nullptr`;
+  `FPSController::Update`, `HandleMovement` and `HandleMouseLook` now guard
+  `m_Camera`, `scene` and `input`.
+- All 23/23 CTest checks pass in both Debug (2.61 s) and Release (2.37 s),
+  including the 20-cycle Play/Stop stress test and actual OpenGL startup/shutdown.
+
 ## Weapon persistence loop — verified
 
 Authored Weapon save rejection was reproduced before integration. The complete

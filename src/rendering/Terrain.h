@@ -98,6 +98,8 @@ public:
     float GetDepth()     const { return m_WorldDepth;  }
     float GetMaxHeight() const { return m_MaxHeight;   }
     int   GetGridSize()  const { return m_GridSize;    }
+    int   GetCols()      const { return m_Cols;        }
+    int   GetRows()      const { return m_Rows;        }
 
     // Dunyada konumlamak icin transform
     glm::vec3 position = glm::vec3(0.0f);
@@ -110,6 +112,8 @@ private:
     // Geometri
     std::vector<float>        m_Heights;  // Ham yukseklik verileri (cols*rows)
     int                       m_GridSize = 64;
+    int                       m_Cols     = 64;
+    int                       m_Rows     = 64;
     float                     m_WorldWidth = 100.0f;
     float                     m_WorldDepth = 100.0f;
     float                     m_MaxHeight  = 20.0f;

@@ -46,10 +46,12 @@ public:
     }
     void ClearViewOverride() { m_HasViewOverride = false; }
 
-    void SetIsolatedEntity(Entity* entity) { m_IsolationTarget = entity; }
+    void SetIsolatedEntity(Entity* entity);
+    Entity* GetIsolatedEntity() const noexcept { return m_IsolationTarget; }
 
 private:
     Entity* m_IsolationTarget = nullptr;
+    uint64_t m_IsolationTargetHandleValue = 0;
     Camera* m_Camera;
     std::unique_ptr<Shader> m_DefaultShader;
     std::shared_ptr<class Mesh> m_DebugMesh;

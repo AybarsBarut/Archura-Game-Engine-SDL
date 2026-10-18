@@ -4,18 +4,18 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <mmsystem.h> // Added mmsystem.h
+#include <mmsystem.h>
 #include <iostream>
 #include <filesystem>
-#include <vector> // Added vector
+#include <vector>
 #include <algorithm>
 #include <cmath>
-#include "../game/AudioSource.h"
+#include "ResourceManager.h"
 #include "../game/AudioSource.h"
 #include "../rendering/Camera.h"
 #include "../ecs/Entity.h"
 #include "../ecs/Component.h"
-#include "../ecs/Component.h"
+#include "../ecs/components/AudioSourceComponent.h"
 #include <glm/glm.hpp>
 
 // Link with winmm.lib
@@ -41,11 +41,48 @@ void AudioSystem::Shutdown() {
     m_OneShotAliases.clear();
 }
 
+std::string AudioSystem::ResolveAudioPath(const std::string& filename) {
+    if (!ResourceManager::IsSafeAssetPath(filename)) {
+        return {};
+    }
+
+    std::string normalized = filename;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    while (normalized.rfind("./", 0) == 0) {
+        normalized.erase(0, 2);
+    }
+
+    // Collapse accidental duplicate "assets/audio/assets/audio/" prefixes.
+    const std::string prefix = "assets/audio/";
+    while (normalized.rfind(prefix + prefix, 0) == 0) {
+        normalized.erase(0, prefix.size());
+    }
+
+    if (const std::filesystem::path resolvedDirect =
+            ResourceManager::Get().ResolveAssetPath(normalized);
+        !resolvedDirect.empty()) {
+        return resolvedDirect.string();
+    }
+
+    const std::filesystem::path rawPath(normalized);
+    if (!rawPath.is_absolute() && normalized.rfind(prefix, 0) != 0) {
+        const std::string prefixed = prefix + normalized;
+        if (const std::filesystem::path resolvedPrefixed =
+                ResourceManager::Get().ResolveAssetPath(prefixed);
+            !resolvedPrefixed.empty()) {
+            return resolvedPrefixed.string();
+        }
+        return prefixed;
+    }
+
+    return normalized;
+}
+
 void AudioSystem::PlayMusic(const std::string& filename, bool loop) {
     StopMusic();
 
-    std::string path = "assets/audio/" + filename;
-    if (!std::filesystem::exists(path)) {
+    const std::string path = ResolveAudioPath(filename);
+    if (path.empty() || !std::filesystem::exists(path)) {
         std::cerr << "Audio file not found: " << path << std::endl;
         return;
     }
@@ -72,13 +109,11 @@ void AudioSystem::PlayMusic(const std::string& filename, bool loop) {
 
     mciSendString(cmdPlay.c_str(), NULL, 0, NULL);
     m_CurrentMusicAlias = alias;
-    
-
 }
 
 void AudioSystem::PlayOneShot(const std::string& filename) {
-    std::string path = "assets/audio/" + filename;
-    if (!std::filesystem::exists(path)) {
+    const std::string path = ResolveAudioPath(filename);
+    if (path.empty() || !std::filesystem::exists(path)) {
         // Hata mesaji yazdirma (cok sik olabilir)
         return;
     }
@@ -91,17 +126,6 @@ void AudioSystem::PlayOneShot(const std::string& filename) {
     if (mciSendString(cmdOpen.c_str(), NULL, 0, NULL) != 0)
         return;
 
-    // Cal ve bitince otomatik kapat (notify kullanilabilir ama basitlik icin wait yapmiyoruz)
-    // MCI'da "auto close" yok, bu yuzden surekli yeni alias acmak bellek sizintisina yol acabilir.
-    // Ancak basit kullanim icin "play" komutu yeterli.
-    // Daha iyi bir yontem: "play alias from 0 notify" ve callback ile kapatmak.
-    // Simdilik basit "fire and forget" yapiyoruz, ama alias'lari temizlemedigimiz icin uzun surede sorun olabilir.
-    // Cozum: Sadece belirli sayida kanal kullanmak veya kisa sesler icin WAV kullanmak.
-    // MP3 icin MCI biraz agir.
-    
-    // Pratik cozum: Cal ve kapat komutunu ayni anda veremeyiz.
-    // Bu yuzden sadece "play" diyoruz. 
-    
     // Ses seviyesini ayarla
     ApplyVolume(alias, m_SFXVolume);
 
@@ -157,19 +181,29 @@ void AudioSystem::Update(Scene* scene, Camera* camera) {
     if (!scene || !camera) return;
 
     for (auto& entityPtr : scene->GetEntities()) {
+        if (!entityPtr) continue;
         auto* source = entityPtr->GetComponent<AudioSource>();
         if (!source || !source->isPlaying) continue;
 
         auto* transform = entityPtr->GetComponent<Transform>();
         if (!transform) continue;
 
-        // Calculate distance
-        const float distance = glm::distance(transform->position, camera->GetPosition());
+        std::string alias = source->runtimeAlias;
+        if (alias.empty()) {
+            alias = std::string("sound_") + std::to_string(entityPtr->GetID());
+            source->runtimeAlias = alias;
+            if (!source->clipName.empty()) {
+                Play(source, alias);
+            }
+        }
+
+        // Calculate world-space distance
+        const glm::vec3 worldPos = glm::vec3(entityPtr->GetWorldTransform()[3]);
+        const float distance = glm::distance(worldPos, camera->GetPosition());
 
         // Linear attenuation
         // minDistance: volume = max
         // maxDistance: volume = 0
-        
         float volume = source->volume;
         
         const float minDistance = std::max(0.0f, source->minDistance);
@@ -191,12 +225,6 @@ void AudioSystem::Update(Scene* scene, Camera* camera) {
         if (finalVol < 0) finalVol = 0;
         if (finalVol > 1000) finalVol = 1000;
 
-        std::string alias = source->runtimeAlias;
-        if (alias.empty()) {
-            alias = std::string("sound_") + std::to_string(entityPtr->GetID());
-            source->runtimeAlias = alias;
-        }
-
         std::string cmd = "setaudio " + alias + " volume to " + std::to_string(finalVol);
         mciSendStringA(cmd.c_str(), NULL, 0, NULL);
     }
@@ -205,8 +233,8 @@ void AudioSystem::Update(Scene* scene, Camera* camera) {
 void AudioSystem::Play(AudioSource* source, const std::string& alias) {
     if (!source) return;
 
-    std::string path = "assets/audio/" + source->clipName;
-    if (!std::filesystem::exists(path)) return;
+    const std::string path = ResolveAudioPath(source->clipName);
+    if (path.empty() || !std::filesystem::exists(path)) return;
 
     // Close previous if any
     std::string cmdClose = "close " + alias;
@@ -223,12 +251,16 @@ void AudioSystem::Play(AudioSource* source, const std::string& alias) {
         source->isPlaying = true;
         source->runtimeAlias = alias;
     } else {
-         std::cerr << "AudioSource Open Error: " << path << std::endl;
+        std::cerr << "AudioSource Open Error: " << path << std::endl;
     }
 }
 
 void AudioSystem::Stop(AudioSource* source) {
-    if (!source || source->runtimeAlias.empty()) return;
+    if (!source) return;
+    if (source->runtimeAlias.empty()) {
+        source->isPlaying = false;
+        return;
+    }
 
     const std::string alias = source->runtimeAlias;
     std::string cmd = "stop " + alias;
@@ -236,6 +268,26 @@ void AudioSystem::Stop(AudioSource* source) {
     mciSendStringA(("close " + alias).c_str(), NULL, 0, NULL);
     source->runtimeAlias.clear();
     source->isPlaying = false;
+}
+
+void AudioSystem::StopAllSceneAudio(Scene* scene) {
+    if (scene) {
+        for (const auto& entityPtr : scene->GetEntities()) {
+            if (!entityPtr) continue;
+            if (auto* source = entityPtr->GetComponent<AudioSource>()) {
+                Stop(source);
+            }
+            if (auto* asc = entityPtr->GetComponent<AudioSourceComponent>()) {
+                asc->playing = false;
+            }
+        }
+    }
+    for (const std::string& alias : m_OneShotAliases) {
+        mciSendStringA(("stop " + alias).c_str(), nullptr, 0, nullptr);
+        mciSendStringA(("close " + alias).c_str(), nullptr, 0, nullptr);
+    }
+    m_OneShotAliases.clear();
+    StopMusic();
 }
 
 void AudioSystem::CleanupFinishedOneShots() {

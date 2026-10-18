@@ -16,21 +16,44 @@ Last updated: 2026-10-18
 - Loop 2 gate PASS: complete Weapon codec and both scene integrations; Debug
   full build/22 tests (1.77 s), Release full build/staging/22 tests (1.68 s).
   Ammo/stat/pattern validation, transient reset and 128 Hz progression all pass.
-  Play/Stop and the broader queue remain incomplete.
+- Loop 3 gate PASS: generation-checked `EditorSelectionState` with `Scene`
+  lifetime tokens, `RenderSystem` isolation handle validation, `TransformUndoHistory`
+  persistent-ID rebinding, Edit-mode simulation gating, and `PlayModeSession`
+  authored-scene snapshot/transactional restore with runtime script/audio/physics/
+  projectile/particle cleanup and Player/selection rebinding. Debug full build and
+  23/23 tests (2.61 s); Release full build/staging and 23/23 tests (2.37 s).
+- Loop 4 gate PASS: configurable aggregate `SceneReconstructionBudget`
+  (`maxEntities`, `maxTotalMeshVertices`, `maxTotalMeshIndices`, `maxTotalMeshBytes`,
+  `maxTotalTextureBytes`, `maxSingleAssetFileBytes`), project-root asset path
+  resolution (`ResourceManager::SetProjectRoot`, `ResolveAssetPath`,
+  `IsSafeAssetPath`), canonical texture identity (`CanonicalAssetKey` in
+  `ResourceManager` and `TextureManager` so same-stem textures in different folders
+  never collide), and `GameBuilderPanel` `assets/models` fallback spawn path
+  resolution (`ASSET-01`).
+- Loop 5 gate PASS: `AudioSystem::ResolveAudioPath` preventing double
+  `assets/audio/assets/audio/` prefixing (`AUD-02`), `AudioSystem::Update` opening
+  MCI aliases when `AudioSource::isPlaying` is set and `ScriptGlue::AudioSource_Play`
+  supporting both `AudioSource` and `AudioSourceComponent` (`AUD-01`), world-space
+  distance culling and light positions in `RenderSystem::Update` (`REND-01`), and
+  `Terrain::LoadFromHeightmap` missing-file leak fix, rectangular (`m_Cols`/`m_Rows`)
+  heightmap support, headless OpenGL guards, and horizontal `scale.x`/`scale.z` +
+  bounds validation in `Terrain::GetHeightAt` (`TERR-01`).
+- Loops 4 & 5 final verification PASS: Debug all-target build and 23/23 CTest
+  (2.02 s); Release all-target build/staging and 23/23 CTest (1.65 s).
 
 ## Current status
 
-- Phase: bounded stabilization cycle verified; broader engine work incomplete
+- Phase: bounded stabilization cycle verified through Loop 5; broader engine work incomplete
 - Starting revision: `662d628` (clean working tree before this cycle)
 - Initial stabilization pushed to origin/main as `3d1cd9d`; ownership follow-up
   is recorded in the subsequent integration commit (see Git history).
 - Fresh baseline: Debug all targets PASS; 14/14 contracts PASS (0.78 s)
 - Final build: Debug and Release all targets PASS (VS2022/MSVC x64, C++17)
-- Latest tests: Debug 22/22 PASS (1.77 s), Release 22/22 PASS (1.68 s)
+- Latest tests: Debug 23/23 PASS (2.02 s), Release 23/23 PASS (1.65 s)
 - Runtime: both configurations rendered 16 OpenGL frames and shut down; unsupported backend failed as expected
 - Headless server: help PASS; no-backend startup exited 2 with explicit error
 - Runtime networking: unavailable because SDL_net is absent; no authoritative simulation implemented
-- OpenAL enabled configuration, full editor lifecycle, audio, Mono reload, image regressions and packaged deployment: untested
+- OpenAL enabled configuration, real audio output, Mono reload, image regressions and packaged deployment: untested
 
 ## Completed in this cycle
 
@@ -53,6 +76,13 @@ Last updated: 2026-10-18
   an engine service cannot cause it to be deleted on content reload. `.project`
   persists ownership; legacy records default to authored; `.scene` rejects service
   promotion. Both cross-boundary hierarchy guards remain in force.
+- Loops 4 & 5: configurable aggregate scene reconstruction budgets, project-root
+  asset resolution and traversal rejection, canonical texture identity,
+  `GameBuilderPanel` `assets/models` fallback (`ASSET-01`), audio path
+  normalization and runtime alias opening (`AUD-01`, `AUD-02`), world-space
+  render culling/light positions (`REND-01`), and `Terrain` missing-file leak fix,
+  rectangular heightmap dimensions, headless GL guards, and scaled bounds-checked
+  `GetHeightAt` (`TERR-01`).
 
 ## Current invariants
 
@@ -64,20 +94,17 @@ Last updated: 2026-10-18
 
 ## Next queue
 
-1. Persistent scene identity is implemented and verified (Loop 1); preserve its
-   v2 migration, collision, rollback and old-handle invalidation regressions.
-2. Weapon configuration is implemented and verified (Loop 2); remaining component,
-   editable geometry/material codecs and aggregate resource budgets stay queued.
-3. NEXT: validate editor selections; implement authored-state Play/Stop restoration,
-   including runtime script/audio/physics cleanup and stable Player references.
-4. Separate runtime packaging and validate a sample game outside the repository.
-5. Enable/test SDL_net, then implement authoritative world/input/snapshot vertical
-   slice with a dedicated server and two real clients.
-
-Next concrete work unit: snapshot the complete authored scene before Play, bind
-runtime references through persistent IDs after replacement, and restore it on
-Stop with script/audio/physics cleanup. Add repeated lifecycle integration tests.
-
-Do not treat old backlog statements about fabricated networking/no parser as
-current evidence. Audit confirms transport pumping and truthful console already
-exist. Shader, terrain, audio and timing findings remain queued in ENGINE_AUDIT.
+1. Persistent scene identity is implemented and verified (Loop 1).
+2. Weapon configuration is implemented and verified (Loop 2).
+3. Editor selection lifetime and authored-state Play/Stop restoration are
+   implemented and verified (Loop 3).
+4. Configurable aggregate resource budgets, project-root asset resolution, and
+   `ASSET-01` are implemented and verified (Loop 4).
+5. `AUD-01`, `AUD-02`, `REND-01`, and `TERR-01` are implemented and verified
+   (Loop 5).
+6. NEXT: standalone runtime packaging (`PKG-01`) and sample game validation
+   outside the repository.
+7. Enable/test SDL_net, then implement authoritative world/input/snapshot vertical
+   slice (`NET-01`) with a dedicated server and two real clients.
+8. Previous/current transform render interpolation (`TIME-01`) and retained
+   runtime UI (`UI-01`).

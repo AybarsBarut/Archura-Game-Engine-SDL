@@ -99,10 +99,27 @@ bool RenderSystem::InitShadowMap() {
     return complete;
 }
 
+void RenderSystem::SetIsolatedEntity(Entity* entity) {
+    if (!entity || (m_Scene && !m_Scene->OwnsEntityPointer(entity))) {
+        m_IsolationTarget = nullptr;
+        m_IsolationTargetHandleValue = 0;
+        return;
+    }
+    m_IsolationTarget = entity;
+    m_IsolationTargetHandleValue = entity->GetHandle().Value();
+}
+
 void RenderSystem::Update(float deltaTime) {
     (void)deltaTime;
     m_LastFrameCounters = {};
     if (!m_Initialized || !RenderThread::IsCurrent() || !m_Scene || !m_Camera) return;
+    if (m_IsolationTargetHandleValue != 0 || m_IsolationTarget != nullptr) {
+        m_IsolationTarget =
+            m_Scene->GetEntity(EntityHandle::FromValue(m_IsolationTargetHandleValue));
+        if (!m_IsolationTarget) {
+            m_IsolationTargetHandleValue = 0;
+        }
+    }
     m_LastFrameCounters.available = true;
 
     // --- Shader Hot-Reload (sadece DEBUG modda dosyalar degistiyse yeniden derle) ---
@@ -191,7 +208,7 @@ void RenderSystem::Update(float deltaTime) {
         if (!meshRenderer || !transform || !renderMesh) continue;
 
         // Frustum Culling
-        glm::vec3 entityPos = transform->position;
+        glm::vec3 entityPos = glm::vec3(entityPtr->GetWorldTransform()[3]);
         float distance = glm::length(entityPos - viewPos);
         if (distance > 1000.0f) {
             ++m_LastFrameCounters.culledEntities;
@@ -244,7 +261,7 @@ void RenderSystem::Update(float deltaTime) {
         
         if (lightComp && transform) {
             LightData ld;
-            ld.position = transform->position; // Point light pos
+            ld.position = glm::vec3(entityPtr->GetWorldTransform()[3]); // Point light world pos
             
             // Rotation'dan direction cikarimi (Directional light icin)
             // Basitce Z ekseni rotasyonu varsayalim veya transform forward
