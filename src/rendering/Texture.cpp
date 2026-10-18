@@ -1,6 +1,7 @@
 #include "Texture.h"
 #include "RenderThread.h"
 #include "../core/Logger.h"
+#include "../core/ResourceManager.h"
 #include <glad/glad.h>
 #include <iostream>
 #include <limits>
@@ -27,6 +28,7 @@ Texture& Texture::operator=(Texture&& other) noexcept {
     m_Height = std::exchange(other.m_Height, 0);
     m_Channels = std::exchange(other.m_Channels, 0);
     m_Path = std::move(other.m_Path);
+    m_CanonicalPath = std::move(other.m_CanonicalPath);
     return *this;
 }
 
@@ -45,10 +47,17 @@ void Texture::Release() noexcept {
 
 bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
                            bool srgb) {
-    if (!RenderThread::IsCurrent()) {
-        ARCH_LOG_ERROR("Texture::LoadFromFile must run on the OpenGL render thread");
+    if (!ResourceManager::IsSafeAssetPath(path)) {
+        ARCH_LOG_ERROR("Unsafe or empty texture path rejected: " + path);
         return false;
     }
+
+    const std::filesystem::path resolved =
+        ResourceManager::Get().ResolveAssetPath(path, {}, true);
+    const std::string loadPath = resolved.empty() ? path : resolved.string();
+    const std::string canonicalKey =
+        ResourceManager::Get().CanonicalAssetKey(loadPath);
+
     int width = 0;
     int height = 0;
     int channels = 0;
@@ -56,7 +65,7 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
     // stb_image ile resim yukle
     // The thread-local variant avoids races with terrain/asset worker loads.
     stbi_set_flip_vertically_on_load_thread(1);
-    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+    unsigned char* data = stbi_load(loadPath.c_str(), &width, &height, &channels, 0);
     
     if (!data) {
         ARCH_LOG_ERROR("Failed to load texture: " + path);
@@ -68,6 +77,20 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
         stbi_image_free(data);
         ARCH_LOG_ERROR("Invalid texture dimensions or channel count: " + path);
         return false;
+    }
+
+    if (!RenderThread::IsCurrent()) {
+        // Headless CPU validation path (mirroring Mesh::SetupMesh when
+        // RenderThread is detached): image file and dimensions are verified,
+        // while OpenGL object creation is skipped.
+        stbi_image_free(data);
+        m_TextureID = 0;
+        m_Width = width;
+        m_Height = height;
+        m_Channels = channels;
+        m_Path = path;
+        m_CanonicalPath = canonicalKey;
+        return true;
     }
 
     GLint maxTextureSize = 0;
@@ -116,8 +139,6 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
     // Bellegi serbest birak
     stbi_image_free(data);
 
-    // std::cout << "Loaded texture: " << path << " (" << m_Width << "x" << m_Height << ", " << m_Channels << " channels)" << std::endl;
-    
     glBindTexture(GL_TEXTURE_2D, 0);
 
     const unsigned int oldTexture = m_TextureID;
@@ -126,6 +147,7 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
     m_Height = height;
     m_Channels = channels;
     m_Path = path;
+    m_CanonicalPath = canonicalKey;
     if (oldTexture) glDeleteTextures(1, &oldTexture);
     return true;
 }
@@ -157,6 +179,7 @@ bool Texture::CreateSolid(unsigned char r, unsigned char g, unsigned char b, uns
     m_Height = 1;
     m_Channels = 4;
     m_Path.clear();
+    m_CanonicalPath.clear();
     if (oldTexture) glDeleteTextures(1, &oldTexture);
     return true;
 }
@@ -197,16 +220,34 @@ Texture* TextureManager::Load(const std::string& name, const std::string& path, 
 std::shared_ptr<Texture> TextureManager::LoadShared(const std::string& name,
                                                     const std::string& path,
                                                     bool generateMipmaps) {
-    // Zaten var mi kontrol et
-    auto it = m_Textures.find(name);
-    if (it != m_Textures.end()) {
-        return it->second;
+    const std::string canonicalKey = ResourceManager::Get().CanonicalAssetKey(path);
+    if (!canonicalKey.empty()) {
+        auto canonIt = m_TexturesByCanonicalPath.find(canonicalKey);
+        if (canonIt != m_TexturesByCanonicalPath.end() && canonIt->second) {
+            if (!name.empty()) {
+                m_Textures[name] = canonIt->second;
+            }
+            return canonIt->second;
+        }
     }
 
-    // Yeni doku olustur
+    auto it = m_Textures.find(name);
+    if (it != m_Textures.end() && it->second) {
+        if (path.empty() || it->second->GetCanonicalPath() == canonicalKey) {
+            return it->second;
+        }
+    }
+
     auto texture = std::make_shared<Texture>();
     if (texture->LoadFromFile(path, generateMipmaps)) {
-        m_Textures[name] = texture;
+        if (!canonicalKey.empty()) {
+            texture->SetCanonicalPath(canonicalKey);
+            m_TexturesByCanonicalPath[canonicalKey] = texture;
+            m_Textures[canonicalKey] = texture;
+        }
+        if (!name.empty()) {
+            m_Textures[name] = texture;
+        }
         return texture;
     }
 
@@ -218,6 +259,13 @@ Texture* TextureManager::Get(const std::string& name) {
 }
 
 std::shared_ptr<Texture> TextureManager::GetShared(const std::string& name) {
+    const std::string canonicalKey = ResourceManager::Get().CanonicalAssetKey(name);
+    if (!canonicalKey.empty()) {
+        auto canonIt = m_TexturesByCanonicalPath.find(canonicalKey);
+        if (canonIt != m_TexturesByCanonicalPath.end()) {
+            return canonIt->second;
+        }
+    }
     auto it = m_Textures.find(name);
     if (it != m_Textures.end()) {
         return it->second;
@@ -227,6 +275,7 @@ std::shared_ptr<Texture> TextureManager::GetShared(const std::string& name) {
 
 void TextureManager::Clear() {
     m_Textures.clear();
+    m_TexturesByCanonicalPath.clear();
 }
 
 } // namespace Archura

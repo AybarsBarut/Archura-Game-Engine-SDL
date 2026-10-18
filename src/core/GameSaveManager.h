@@ -5,10 +5,22 @@
 #include <string_view>
 #include <iosfwd>
 
+#include <cstddef>
+#include <filesystem>
+
 namespace Archura {
 
 class Scene;
 namespace Serialization { struct Json; }
+
+struct SceneReconstructionBudget {
+    size_t maxEntities = 100000;
+    size_t maxTotalMeshVertices = 4 * 1024 * 1024;
+    size_t maxTotalMeshIndices = 12 * 1024 * 1024;
+    size_t maxTotalMeshBytes = 256ull * 1024ull * 1024ull;
+    size_t maxTotalTextureBytes = 256ull * 1024ull * 1024ull;
+    size_t maxSingleAssetFileBytes = 64ull * 1024ull * 1024ull;
+};
 
 /**
  * @brief Kaydedilmiş bir oyun projesinin meta verisi
@@ -41,6 +53,10 @@ public:
         return instance;
     }
 
+    static void SetReconstructionBudget(const SceneReconstructionBudget& budget) noexcept;
+    static SceneReconstructionBudget GetReconstructionBudget() noexcept;
+    static void ResetReconstructionBudget() noexcept;
+
     // Diskteki kayıtlı projeleri tara (saves/*.scene)
     void RefreshProjects();
 
@@ -59,7 +75,11 @@ public:
     // Dosya adı oluştur (isimden güvenli dosya adı türet)
     // Common scene codec used by project and legacy .scene files.
     static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem);
-    static bool LoadEntities(const Serialization::Json& root, Scene* scene, bool keepSystem, bool validateOnly = false);
+    static bool LoadEntities(const Serialization::Json& root,
+                             Scene* scene,
+                             bool keepSystem,
+                             bool validateOnly = false,
+                             const std::filesystem::path& documentRoot = {});
 
     static std::string MakeSafeFileName(std::string_view name);
 

@@ -1,4 +1,6 @@
 #include "core/ProjectSerializer.h"
+#include "core/GameSaveManager.h"
+#include "core/ResourceManager.h"
 #include "ecs/Component.h"
 #include "rendering/Mesh.h"
 #include "game/AudioSource.h"
@@ -179,6 +181,22 @@ int main() {
   Check(!Archura::ProjectSerializer::SaveProject(path.string(), config, &source), "non-finite scene rejects save");
   std::ifstream after(path, std::ios::binary); std::ostringstream retained; retained << after.rdbuf(); after.close();
   Check(retained.str() == saved.str(), "failed save preserves previous destination");
+  {
+    Archura::SceneReconstructionBudget tightBudget;
+    tightBudget.maxEntities = 1;
+    Archura::GameSaveManager::Get().SetReconstructionBudget(tightBudget);
+    const auto priorHandle = loadedScene.GetEntities().front()->GetHandle();
+    const auto priorCount = loadedScene.GetEntities().size();
+    Check(!Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig, &loadedScene) &&
+              loadedScene.GetEntities().size() == priorCount &&
+              loadedScene.IsAlive(priorHandle),
+          "ProjectSerializer::LoadProject enforces SceneReconstructionBudget without mutating live scene");
+    Archura::GameSaveManager::Get().ResetReconstructionBudget();
+    Check(Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig, &loadedScene) &&
+              !Archura::ResourceManager::Get().GetProjectRoot().empty(),
+          "ProjectSerializer::LoadProject registers project directory as ResourceManager project root");
+    Archura::ResourceManager::Get().ClearProjectRoot();
+  }
   std::filesystem::remove(path, ec);
   std::filesystem::remove(path.string() + ".bak", ec);
   return failures == 0 ? 0 : 1;
