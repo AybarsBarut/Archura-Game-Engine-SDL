@@ -84,3 +84,21 @@ the source directory away and launches only the package from an unrelated CWD.
 It verifies exactly four authored entities, editor disabled, actual OpenGL/Mono,
 16 frames and shutdown. Missing imported OBJ, wrong player, malformed scene and
 missing default manifest must fail without opening the editor/demo.
+
+Loop 8 adds `Archura.Network.AuthoritativeWorld`: canonical input/welcome/full-world
+wire encoding, axis/identity/count/size bounds and unchanged destination on failed
+read; replay/wraparound rejection; input spam cannot increase per-tick travel;
+diagonal normalization, fixed128Hz speed, timeout/bounds, stale/malformed snapshots,
+and generation/lifetime-safe client ECS spawn/despawn preserving authored entities.
+
+`Archura.Network.ProcessIntegration` uses actual SDL_net and TCP loopback, an
+ArchuraServer process and two separate ArchuraNetClient processes. It verifies a
+listener survives an empty peer set (Windows regression), fragmented hello and
+coalesced movement commands, assigned identities, movement and identical states
+at common ticks, disconnect/despawn, invalid NaN/range/size/zero sequence, replayed
+frame/input, forged position/world, old protocol, handshake and established-idle
+timeouts. Only test-owned processes and temporary files are cleaned up. These are
+headless network/ECS clients; graphical multiplayer, map physics and combat are
+not certified. The no-backend target remains compiled without ARCHURA_HAS_SDL_NET
+and must still pass. Full final gates: Debug31/31 (17.58s), Release31/31 (12.21s),
+with OpenAL OFF and the real SDL_net backend enabled.

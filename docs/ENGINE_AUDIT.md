@@ -69,7 +69,7 @@ ASSET-01, AUD-01/02, REND-01 and TERR-01 have the bounded repairs above.
 | SER-03 / P0 | Both loaders parse selected lines rather than complete JSON. Project loader destroys old entities before allocating replacements; rollback removes only new objects. Both writers truncate the destination directly. | Invalid/truncated/compact JSON, unknown types/versions, failed resource construction and failed disk writes must preserve live scene, config and prior file; test backup recovery. | Repaired (bounded JSON preflight, transactional commit, atomic save + .bak, configurable `SceneReconstructionBudget`) |
 | EDIT-01 / P0 | `src/editor/Editor.cpp:1974-2007`: undo stores `Entity*`, ignores supplied Scene and dereferences pointer after destruction. Inspector/gizmo/selection also retain raw pointers. | Gizmo-move selected entity, delete, Ctrl+Z; repeat with script deletion and scene reload. Run address diagnostics where available; resolve handles before any access. | Repaired (`TransformUndoHistory` + `EditorSelectionState` + isolation handle validation; covered by CTest) |
 | EDIT-02 / P0 | `src/core/Application.cpp:415-425`: Play/Stop callbacks only change cursor/pause. `UpdateGameLogic:726` gates on pause alone, so physics/scripts also run in Edit; authored scene has no snapshot/restore. | Record authored transforms/components, Play, move/spawn/destroy, Stop; compare to original. Repeat 20 cycles, including pause and selected-object deletion. | Repaired (`PlayModeSession` snapshot/restore + Edit simulation gating; 20-cycle CTest passes) |
-| NET-01 / P0 | `src/server/server_main.cpp:45-54` pumps transport only; gameplay, world state, collision and snapshots are TODOs. No authoritative multiplayer simulation exists. | One real SDL_net server plus two processes: identities, spawn/despawn, validated movement, snapshots, disconnect cleanup and invalid input rejection. | Transport partial; simulation not implemented |
+| NET-01 / P0 | `src/server/server_main.cpp:45-54` pumps transport only; gameplay, world state, collision and snapshots are TODOs. No authoritative multiplayer simulation exists. | One real SDL_net server plus two processes: identities, spawn/despawn, validated movement, snapshots, disconnect cleanup and invalid input rejection. | Headless authoritative XZ movement +native two-client ECS replication implemented (Loop8); graphical gameplay/map collision/combat remain |
 | PKG-01 / P0-P1 | CMake builds Engine/editor, Server and Launcher; no game-only target/startup-scene flow. `GameBuilderPanel` adds scene content; it does not package a game. `Build.bat` archives an executable and a few DLLs. | Build sample game into clean directory; launch from unrelated CWD with source/build folders unavailable; verify script/assets/runtime dependencies and startup scene. | CLI standalone startup/package workflow implemented (Loop 7); editor export UI and clean-OS deployment remain |
 | AUD-01 / P1 | `src/scripting/ScriptGlue.cpp:297` sets legacy `AudioSource::isPlaying` only. MCI `AudioSystem::Update` sends volume to an alias but does not open it. OpenAL uses a separate `AudioSourceComponent`, so this managed call does not start that backend either. | Attach configured audio source, invoke C# Play, confirm actual sound/error and native state. Exercise both backends and missing clips. | Repaired in source/CTest (`AudioSystem::Update` opens `sound_<id>`, `ScriptGlue::AudioSource_Play` triggers both `AudioSource` and `AudioSourceComponent`); live audio hardware untested |
 | AUD-02 / P1 | `GameBuilderPanel.cpp:277-280` passes `assets/audio/name` to `AudioSystem::PlayOneShot`, which prefixes `assets/audio/` again. MCI volume/status commands run in fixed ticks. | Preview existing clip; rapid one-shots, stop/reload/delete source, category changes; measure MCI work before optimizing. | Path normalization repaired (`AudioSystem::ResolveAudioPath`, covered by CTest); MCI tick cost unmeasured |
@@ -150,3 +150,27 @@ OpenAL OFF; SDL_net unavailable. A retained Release sample under
 Documents/Archura_Game_Engine/ArchuraStandaloneSample-20261018-Loop7 also passed
 16-frame OpenGL/Mono startup from Temp CWD. No frame-time improvement or custom
 managed-script/clean-OS distribution certification is claimed.
+
+## Loop 8 — SDL_net and headless authoritative movement
+
+The real backend exposed an existing Windows transport failure: UpdateServer
+called SDLNet_CheckSockets with an empty socket set. Winsock rejected that select
+call, CloseAllSockets closed the listener on its first tick and the process kept
+running. The first process integration test timed out (2.22s). Empty-peer polling
+now skips select, and dedicated runtime detects a failed listener and exits with
+a failure status. The repaired actual-process test passes.
+
+Version2 assigns peer identity through the handshake and defines bounded movement
+input. Dedicated server binds commands to connections, owns fixed128Hz XZ movement
+and publishes canonical full snapshots; ClientWorld and NetworkSceneReplica reject
+stale/malformed input and apply transient entity spawn/despawn with handle/lifetime
+checks. Legacy client-position relay is refused in dedicated authoritative mode.
+Native clients agree at common server ticks, and invalid/forged/replayed frames or
+timeouts close the offending connection without killing the listener.
+
+All-target VS2022 x64 Debug/Release compile/link/staging PASS; CTest31/31 each,
+17.58s/12.21s. Includes native process networking, standalone OpenGL/Mono package,
+Play/Stop and existing shadow/console tests. SDL_net enabled, OpenAL OFF. This is
+not a physics/combat/graphical multiplayer acceptance or performance benchmark.
+NET-01 remains partial: graphical Application integration, map collision/physics,
+authentication and prediction/reconciliation still require separate work.

@@ -30,7 +30,7 @@ pass 23/23 (Debug 2.02 s, Release 1.65 s). Execution gates: `.gauntlet/LOOP_PLAN
 | Done, Loop 3 | Authored Play/Stop boundary in `Application`/`Editor`/`PlayModeSession`/`ScriptSystem`, generation-checked `EditorSelectionState`, rebinding runtime references through persistent IDs, and transient audio/physics/script/projectile/particle cleanup. | Edit does not simulate; 20-cycle Play/Stop restores authored values and removes runtime-only entities; Debug/Release 23/23 pass. |
 | Done, Loops 4 & 5 | Configurable aggregate `SceneReconstructionBudget`, project-root asset resolution (`ResourceManager`), canonical texture keys (`ASSET-01`), `GameBuilderPanel` `assets/models` fallback, `AudioSystem::ResolveAudioPath` & runtime alias opening (`AUD-01`, `AUD-02`), world-space render culling (`REND-01`), and `Terrain` heightmap leak/rectangular/scale/bounds repairs (`TERR-01`). | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation, duplicate texture stems, `assets/models` fallback, audio paths, and rectangular scaled terrain pass in Debug/Release 23/23. |
 | Done, Loop 7 CLI | Manifest-selected runtime startup, portable package builder and sample (`PKG-01`). | External-CWD OpenGL/Mono launch loads the exact authored scene with no Editor; broader dependency/clean-OS/export-UI work remains. |
-| P0 | Enable real SDL_net validation, then authoritative input/world/snapshot modules and client consumption (`NET-01`). | One dedicated server and two separate clients replicate movement/spawn/despawn and reject invalid input. |
+| P0, partial Loop8 | Real SDL_net/headless authoritative movement+ECS replicas implemented (`NET-01`); next bind graphical input/camera/remote meshes and shared map collision. | Two graphical clients consume server state through reconnect and Edit/Play boundaries; map collisions agree with server authority. Headless two-client movement/spawn/despawn/hostile-input checks already pass. |
 | P1 | Previous/current transform render interpolation (`TIME-01`) and retained runtime UI backend (`UI-01`). | Cross-FPS gameplay assertions and retained UI interaction tests pass. |
 
 Keep these as sequential acceptance gates. Performance, renderer and UI expansion
@@ -58,3 +58,12 @@ separate runtime linkage, broader managed dependency discovery and clean-OS
 prerequisite deployment. The next engine gauntlet is real SDL_net transport
 validation and an authoritative server/two-client world slice (NET-01), followed
 by previous/current transform interpolation (TIME-01).
+
+Loop 8 completes a real SDL_net/headless authoritative movement slice (31/31
+Debug/Release tests): version2 input and assigned identity, server-owned bounded
+128Hz movement, full snapshots and safe client ECS replicas. Native process tests
+prove two clients agree on movement/spawn/despawn and reject malformed/replay/spoof
+traffic. NET-01 remains partial. Next: integrate snapshots/input with graphical
+Application/camera/remote meshes and local-mode boundaries, then load shared map
+collision into authoritative simulation. Keep TCP limitations explicit. TIME-01
+render interpolation follows a measured network/gameplay integration gate.

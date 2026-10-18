@@ -77,6 +77,7 @@ bool IsKnownPacketType(PacketType type) noexcept {
     case PacketType::WorldState:
     case PacketType::ConnectAck:
     case PacketType::Heartbeat:
+    case PacketType::PlayerInput:
         return true;
     }
     return false;
@@ -221,6 +222,42 @@ bool DeserializePlayerShoot(const std::vector<std::uint8_t>& payload,
     return std::isfinite(packet.originX) && std::isfinite(packet.originY) &&
            std::isfinite(packet.originZ) && std::isfinite(packet.dirX) &&
            std::isfinite(packet.dirY) && std::isfinite(packet.dirZ);
+}
+
+bool ValidPlayerInput(const PlayerInputPacket& input) noexcept {
+    return input.sequence != 0 && std::isfinite(input.moveX) && std::isfinite(input.moveZ) &&
+           std::abs(input.moveX) <= 1.0F && std::abs(input.moveZ) <= 1.0F;
+}
+
+std::vector<std::uint8_t> SerializePlayerInput(const PlayerInputPacket& input) {
+    if (!ValidPlayerInput(input)) throw std::invalid_argument("invalid player input");
+    std::vector<std::uint8_t> bytes;
+    AppendU32(bytes, input.sequence); AppendFloat(bytes, input.moveX); AppendFloat(bytes, input.moveZ);
+    return bytes;
+}
+
+bool DeserializePlayerInput(const std::vector<std::uint8_t>& bytes, PlayerInputPacket& input) noexcept {
+    if (bytes.size() != 12) return false;
+    PlayerInputPacket parsed{ReadU32(bytes.data()), ReadFloat(bytes.data() + 4), ReadFloat(bytes.data() + 8)};
+    if (!ValidPlayerInput(parsed)) return false;
+    input = parsed;
+    return true;
+}
+
+std::vector<std::uint8_t> SerializeWelcome(std::uint64_t token, std::uint32_t peerID) {
+    if (!token || peerID < 2) throw std::invalid_argument("invalid welcome identity");
+    auto result = SerializeSessionToken(token);
+    AppendU32(result, peerID);
+    return result;
+}
+
+bool DeserializeWelcome(const std::vector<std::uint8_t>& bytes, std::uint64_t& token, std::uint32_t& peerID) noexcept {
+    if (bytes.size() != 12) return false;
+    const auto parsedToken = ReadU64(bytes.data());
+    const auto parsedID = ReadU32(bytes.data() + 8);
+    if (!parsedToken || parsedID < 2) return false;
+    token = parsedToken; peerID = parsedID;
+    return true;
 }
 
 std::vector<std::uint8_t> SerializeSessionToken(std::uint64_t token) {

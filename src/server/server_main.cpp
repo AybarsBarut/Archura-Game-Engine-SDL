@@ -1,5 +1,6 @@
 #include "network/ServerConfig.h"
 #include "network/NetworkManager.h"
+#include "network/AuthoritativeWorld.h"
 #include <algorithm>
 #include <csignal>
 #include <iostream>
@@ -19,6 +20,9 @@ using namespace Archura;
 // Global server state
 static volatile std::sig_atomic_t g_ServerRunning = 1;
 static ServerConfig g_Config;
+static Net::AuthoritativeWorld g_World;
+static std::vector<std::pair<std::uint32_t, Net::PlayerInputPacket>> g_Inputs;
+static float g_SnapshotAccumulator = 0;
 
 void HandleTerminationSignal(int) noexcept {
     g_ServerRunning = 0;
@@ -43,14 +47,29 @@ void PrintServerInfo() {
 }
 
 void ServerTick(float deltaTime) {
-    (void)deltaTime;
-    NetworkManager::Get().UpdateServer();
-    // TODO: Implement server game logic
-    // - Process client inputs
-    // - Update physics
-    // - Check collisions
-    // - Generate snapshots
-    // - Send to clients
+    auto& network = NetworkManager::Get();
+    g_Inputs.clear();
+    network.UpdateServer();
+    if (network.GetState() != ConnectionState::Listening) {
+        std::cerr << "Network listener failed: " << network.GetLastError() << std::endl;
+        g_ServerRunning = 0;
+        return;
+    }
+    if (!g_World.SynchronizePeers(network.GetConnectedPeerIds())) {
+        g_ServerRunning = 0;
+        return;
+    }
+    for (const auto& command : g_Inputs) {
+        if (!g_World.AcceptInput(command.first, command.second)) {
+            network.DisconnectPeer(command.first);
+        }
+    }
+    g_World.Tick();
+    g_SnapshotAccumulator += deltaTime;
+    if (g_SnapshotAccumulator >= g_Config.GetSnapshotInterval()) {
+        g_SnapshotAccumulator -= g_Config.GetSnapshotInterval();
+        network.SendWorldState(Net::EncodeWorldSnapshot(g_World.Snapshot()));
+    }
 }
 
 void RunServerLoop() {
@@ -122,22 +141,19 @@ int main(int argc, char** argv) {
         std::cerr << "Invalid server configuration!\n";
         return 1;
     }
+    if (g_Config.tickRate != 128 || !g_Config.password.empty() || g_Config.enableRcon) {
+        std::cerr << "Authoritative movement currently requires 128 Hz; password/RCON are not implemented\n";
+        return 1;
+    }
     
     PrintServerInfo();
     
-    // TODO: Initialize server systems
-    // - NetworkManager
-    // - ServerGameState
-    // - Physics
-    // - etc.
-    
     std::cout << "Initializing server systems...\n";
-    
-    // TODO: Load map
-    std::cout << "Loading map: " << g_Config.map << "\n";
+    std::cout << "World: bounded XZ movement arena (map collision/combat not implemented)\n";
     
     std::cout << "Starting network listener on port " << g_Config.port << "...\n";
     NetworkLimits limits;
+    limits.authoritativeInputOnly = true;
     limits.maxClients = static_cast<std::size_t>(g_Config.maxPlayers);
     limits.handshakeTimeoutMs = static_cast<std::uint32_t>(
         std::max(0.1f, g_Config.connectionTimeout) * 1000.0f);
@@ -149,12 +165,19 @@ int main(int argc, char** argv) {
         network.Shutdown();
         return 2;
     }
+    network.SetOnPlayerInput([&network](std::uint32_t id, const Net::PlayerInputPacket& input) {
+        if (g_Inputs.size() < 4096) g_Inputs.emplace_back(id, input);
+        else network.DisconnectPeer(id);
+    });
+    std::cout << "NETWORK_READY " << g_Config.port << std::endl;
     
     // Run server loop
     RunServerLoop();
     
+    const bool failed = network.GetState() == ConnectionState::Failed;
+    network.SetOnPlayerInput({});
     network.Shutdown();
     std::cout << "Cleanup complete.\n";
     
-    return 0;
+    return failed ? 2 : 0;
 }

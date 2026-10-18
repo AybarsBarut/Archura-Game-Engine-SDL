@@ -423,6 +423,21 @@ target_link_libraries(ArchuraServer PRIVATE
 if(ARCHURA_SDL_NET_TARGET)
     target_link_libraries(ArchuraServer PRIVATE SDL2 ${ARCHURA_SDL_NET_TARGET})
     target_compile_definitions(ArchuraServer PRIVATE ARCHURA_HAS_SDL_NET=1)
+    add_executable(ArchuraNetClient src/client/network_client_main.cpp ${SHARED_SOURCES})
+    target_include_directories(ArchuraNetClient PRIVATE src external/glm)
+    target_link_libraries(ArchuraNetClient PRIVATE SDL2 ${ARCHURA_SDL_NET_TARGET})
+    target_compile_definitions(ArchuraNetClient PRIVATE ARCHURA_HAS_SDL_NET=1)
+    # Executables must carry the transport backend; do not rely on developer PATH.
+    foreach(network_target IN ITEMS ArchuraEngine ArchuraServer ArchuraNetClient)
+        add_custom_command(TARGET ${network_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${network_target}>/licenses"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_NET_BASE_PATH}/LICENSE.txt"
+                "$<TARGET_FILE_DIR:${network_target}>/licenses/SDL2_net.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SDL2_NET_BASE_PATH}/lib/x64/SDL2_net.dll" "$<TARGET_FILE_DIR:${network_target}>/SDL2_net.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SDL2_BasePath}/lib/x64/SDL2.dll" "$<TARGET_FILE_DIR:${network_target}>/SDL2.dll")
+    endforeach()
 endif()
 
 include(CTest)
@@ -710,6 +725,10 @@ if(BUILD_TESTING)
     add_executable(ArchuraGameManifestTests tests/GameManifestTests.cpp)
     target_include_directories(ArchuraGameManifestTests PRIVATE src)
     add_test(NAME Archura.Core.GameManifest COMMAND ArchuraGameManifestTests)
+    add_executable(ArchuraAuthoritativeWorldTests tests/network/AuthoritativeWorldTests.cpp
+        src/network/AuthoritativeWorld.cpp src/network/NetworkProtocol.cpp src/ecs/Entity.cpp src/ecs/Component.cpp)
+    target_include_directories(ArchuraAuthoritativeWorldTests PRIVATE src external/glm)
+    add_test(NAME Archura.Network.AuthoritativeWorld COMMAND ArchuraAuthoritativeWorldTests)
     find_package(Python3 3.9 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME Archura.Packaging.Contracts
@@ -717,6 +736,13 @@ if(BUILD_TESTING)
     endif()
     get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)
+    if(Python3_Interpreter_FOUND AND ARCHURA_SDL_NET_TARGET)
+        add_test(NAME Archura.Network.ProcessIntegration
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/NetworkProcessTests.py"
+                --server "$<TARGET_FILE:ArchuraServer>" --client "$<TARGET_FILE:ArchuraNetClient>")
+        set_tests_properties(Archura.Network.ProcessIntegration PROPERTIES
+            LABELS "network;integration" TIMEOUT 40 RUN_SERIAL TRUE)
+    endif()
     if(ARCHURA_BUILD_STARTUP_TESTS)
         if(Python3_Interpreter_FOUND)
             add_test(NAME Archura.Startup.StandalonePackage

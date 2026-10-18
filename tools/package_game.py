@@ -139,6 +139,8 @@ def build_package(manifest_path, runtime_dir, output):
         shutil.copy2(runtime / "ArchuraEngine.exe", stage / "ArchuraGame.exe")
         for dll in runtime.glob("*.dll"):
             shutil.copy2(dll, stage / dll.name)
+        if (runtime / "licenses").is_dir():
+            shutil.copytree(runtime / "licenses", stage / "licenses")
         shutil.copytree(runtime / "mono/lib/mono/4.5", stage / "mono/lib/mono/4.5")
         if (runtime / "mono/etc").is_dir():
             shutil.copytree(runtime / "mono/etc", stage / "mono/etc")

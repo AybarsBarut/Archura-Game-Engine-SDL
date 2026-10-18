@@ -138,7 +138,7 @@ Target machines need Windows x64, OpenGL 3.3 and the Microsoft Visual C++
 2015-2022 x64 runtime. Use Release for distribution; Debug relies on developer
 runtime libraries. No clean-Windows VM or installer prerequisite deployment has
 been certified. Optional SDL_net/OpenAL DLLs must already be staged beside the
-engine when those backends are enabled; this cycle uses neither backend.
+engine when those backends are enabled; Loop7 used neither backend; Loop8 enables the bundled SDL_net backend.
 
 To enable all native package/startup checks on a fresh preset:
 
@@ -147,3 +147,48 @@ cmake --preset windows-x64 -DARCHURA_BUILD_STARTUP_TESTS=ON
 cmake --build --preset windows-release
 ctest --preset windows-release
 ```
+
+## Loop 8 — Real SDL_net and authoritative movement
+
+The Windows x64 subset of the official SDL2_net2.2.0 VC package is bundled under
+external/SDL2_net; source URL/archive SHA256 and unmodified-file provenance are
+recorded in PROVENANCE.txt. This is a pinned SDL2-compatible dependency, not a
+claim about the latest upstream release. Engine, Server and NetClient stage
+SDL2_net.dll and its license; standalone packaging also copies staged licenses.
+
+```powershell
+cmake --preset windows-x64 -DARCHURA_REQUIRE_SDL_NET=ON -DARCHURA_BUILD_STARTUP_TESTS=ON
+cmake --build --preset windows-release
+ctest --preset windows-release
+```
+
+Run each command below in its own terminal from the repository root:
+
+```powershell
+.\build\windows-x64\bin\Release\ArchuraServer.exe --port 27015
+.\build\windows-x64\bin\Release\ArchuraNetClient.exe --port 27015 --duration-ms 10000 --move-x 1
+.\build\windows-x64\bin\Release\ArchuraNetClient.exe --port 27015 --duration-ms 10000 --move-z -1
+```
+
+NetClient is a headless native tool, not a graphical game mode. It consumes full
+snapshots into generation-checked transient ECS entities and prints server tick,
+assigned connection identity and player positions. The server owns a bounded XZ
+movement arena:128Hz simulation,6 units/second speed, diagonal normalization,
+[-256,256] bounds and input expiry after32 ticks. Every connection spawns one
+player; disconnected clients disappear from subsequent full snapshots. Clients
+send sequence plus movement axes, never player identity, position, speed or dt.
+The default snapshot rate is64Hz. Dedicated runtime requires128Hz; unsupported
+password/RCON options fail explicitly rather than implying authentication.
+
+Wire protocol is now version2: acknowledgement carries token plus server-assigned
+peer identity, and PlayerInput is a new message. Version1 peers fail negotiation.
+Duplicate/out-of-order input, invalid axes/NaNs, client position/shoot packets and
+forged world state are rejected by the authoritative dedicated server. The legacy
+transport relay APIs remain for existing engine-host callers; using StartHost in
+the graphical application does not enable this authoritative simulation yet.
+
+This is a localhost transport/movement slice. Map loading/collision, combat,
+graphical Application integration, authentication, prediction/reconciliation,
+interpolation and a separate unreliable state channel remain open. SDL_net TCP
+connect/send are synchronous; bounded queues do not certify nonblocking service
+against slow receivers or Internet-scale performance.

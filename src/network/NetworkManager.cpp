@@ -67,6 +67,8 @@ struct NetworkManager::Impl {
     std::function<void(const PlayerShootPacket&)> onPlayerShoot;
     std::function<void(const std::vector<std::uint8_t>&)> onWorldState;
     std::function<void(DisconnectReason)> onDisconnected;
+    std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> onPlayerInput;
+    std::uint32_t localPeerId = 0;
 
 #if defined(ARCHURA_HAS_SDL_NET)
     enum class PeerPhase : std::uint8_t { AwaitingHello, AwaitingWelcome, Established };
@@ -97,6 +99,8 @@ struct NetworkManager::Impl {
         PlayerUpdatePacket update;
         PlayerShootPacket shoot;
         std::vector<std::uint8_t> worldState;
+        std::uint32_t peerId = 0;
+        Net::PlayerInputPacket input;
     };
 
     TCPsocket listener = nullptr;
@@ -158,6 +162,8 @@ struct NetworkManager::Impl {
             ClosePeer(*peer);
         }
         peers.clear();
+        events.clear();
+        localPeerId = 0;
         if (listener != nullptr) {
             SDLNet_TCP_Close(listener);
             listener = nullptr;
@@ -278,7 +284,7 @@ struct NetworkManager::Impl {
             }
             peer.phase = PeerPhase::Established;
             if (!Queue(peer, Net::PacketType::ConnectAck,
-                       Net::SerializeSessionToken(peer.sessionToken))) {
+                       Net::SerializeWelcome(peer.sessionToken, peer.peerId))) {
                 lastError = "connection acknowledgement exceeded send queue";
                 return false;
             }
@@ -288,7 +294,7 @@ struct NetworkManager::Impl {
         if (peer.phase == PeerPhase::AwaitingWelcome) {
             std::uint64_t echoedToken = 0;
             if (server || frame.header.type != Net::PacketType::ConnectAck ||
-                !Net::DeserializeSessionToken(frame.payload, echoedToken) ||
+                !Net::DeserializeWelcome(frame.payload, echoedToken, localPeerId) ||
                 echoedToken != clientSessionToken) {
                 lastError = "invalid server handshake acknowledgement";
                 return false;
@@ -300,7 +306,22 @@ struct NetworkManager::Impl {
         }
 
         switch (frame.header.type) {
+        case Net::PacketType::PlayerInput: {
+            Event event;
+            if (!server || !Net::DeserializePlayerInput(frame.payload, event.input)) {
+                lastError = "invalid client movement input";
+                return false;
+            }
+            event.type = Net::PacketType::PlayerInput;
+            event.peerId = peer.peerId;
+            events.push_back(event);
+            return true;
+        }
         case Net::PacketType::PlayerUpdate: {
+            if (server && limits.authoritativeInputOnly) {
+                lastError = "client positions are forbidden by authoritative server";
+                return false;
+            }
             PlayerUpdatePacket packet;
             if (!Net::DeserializePlayerUpdate(frame.payload, packet)) {
                 lastError = "invalid player update payload";
@@ -320,6 +341,10 @@ struct NetworkManager::Impl {
             return true;
         }
         case Net::PacketType::PlayerShoot: {
+            if (server && limits.authoritativeInputOnly) {
+                lastError = "client shooting is not implemented by authoritative server";
+                return false;
+            }
             PlayerShootPacket packet;
             if (!Net::DeserializePlayerShoot(frame.payload, packet)) {
                 lastError = "invalid player shoot payload";
@@ -417,7 +442,8 @@ struct NetworkManager::Impl {
     void DispatchEvents(std::vector<Event> pending,
                         std::function<void(const PlayerUpdatePacket&)> updateCallback,
                         std::function<void(const PlayerShootPacket&)> shootCallback,
-                        std::function<void(const std::vector<std::uint8_t>&)> worldCallback) {
+                        std::function<void(const std::vector<std::uint8_t>&)> worldCallback,
+                        std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> inputCallback) {
         for (const auto& event : pending) {
             try {
                 if (event.type == Net::PacketType::PlayerUpdate && updateCallback) {
@@ -426,6 +452,8 @@ struct NetworkManager::Impl {
                     shootCallback(event.shoot);
                 } else if (event.type == Net::PacketType::WorldState && worldCallback) {
                     worldCallback(event.worldState);
+                } else if (event.type == Net::PacketType::PlayerInput && inputCallback) {
+                    inputCallback(event.peerId, event.input);
                 }
             } catch (const std::exception& error) {
                 std::cerr << "[Network] callback exception: " << error.what() << '\n';
@@ -453,6 +481,7 @@ NetworkManager::~NetworkManager() {
         m_Impl->onPlayerShoot = {};
         m_Impl->onWorldState = {};
         m_Impl->onDisconnected = {};
+        m_Impl->onPlayerInput = {};
     }
     Shutdown();
 }
@@ -487,6 +516,7 @@ void NetworkManager::Shutdown() {
     DisconnectReason reason = DisconnectReason::None;
     {
         std::lock_guard<std::mutex> lock(m_Impl->mutex);
+        m_Impl->localPeerId = 0;
         if (!m_Impl->initialized) {
             if (m_Impl->state != ConnectionState::Failed) {
                 m_Impl->state = ConnectionState::Stopped;
@@ -683,6 +713,7 @@ void NetworkManager::UpdateServer() {
     std::function<void(const PlayerUpdatePacket&)> updateCallback;
     std::function<void(const PlayerShootPacket&)> shootCallback;
     std::function<void(const std::vector<std::uint8_t>&)> worldCallback;
+    std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> inputCallback;
     {
         std::lock_guard<std::mutex> lock(m_Impl->mutex);
         if (!m_Impl->server || m_Impl->state != ConnectionState::Listening) {
@@ -716,7 +747,10 @@ void NetworkManager::UpdateServer() {
             m_Impl->peers.push_back(std::move(peer));
         }
 
-        const int ready = SDLNet_CheckSockets(m_Impl->socketSet, 0);
+        // Winsock select rejects an empty socket set. An idle listener has no
+        // accepted peers yet; polling that set used to close the listener on
+        // its very first tick while the process continued reporting "started".
+        const int ready = m_Impl->peers.empty() ? 0 : SDLNet_CheckSockets(m_Impl->socketSet, 0);
         if (ready < 0) {
             m_Impl->SetFailure(DisconnectReason::TransportError,
                                Impl::SdlError("SDLNet_CheckSockets failed"));
@@ -761,9 +795,10 @@ void NetworkManager::UpdateServer() {
         updateCallback = m_Impl->onPlayerUpdate;
         shootCallback = m_Impl->onPlayerShoot;
         worldCallback = m_Impl->onWorldState;
+        inputCallback = m_Impl->onPlayerInput;
     }
     m_Impl->DispatchEvents(std::move(events), std::move(updateCallback),
-                           std::move(shootCallback), std::move(worldCallback));
+                           std::move(shootCallback), std::move(worldCallback), std::move(inputCallback));
 #endif
 }
 
@@ -773,6 +808,7 @@ void NetworkManager::UpdateClient() {
     std::function<void(const PlayerUpdatePacket&)> updateCallback;
     std::function<void(const PlayerShootPacket&)> shootCallback;
     std::function<void(const std::vector<std::uint8_t>&)> worldCallback;
+    std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> inputCallback;
     std::function<void(DisconnectReason)> disconnectCallback;
     DisconnectReason disconnected = DisconnectReason::None;
     {
@@ -821,9 +857,10 @@ void NetworkManager::UpdateClient() {
         updateCallback = m_Impl->onPlayerUpdate;
         shootCallback = m_Impl->onPlayerShoot;
         worldCallback = m_Impl->onWorldState;
+        inputCallback = m_Impl->onPlayerInput;
     }
     m_Impl->DispatchEvents(std::move(events), std::move(updateCallback),
-                           std::move(shootCallback), std::move(worldCallback));
+                           std::move(shootCallback), std::move(worldCallback), std::move(inputCallback));
     if (disconnectCallback) {
         try {
             disconnectCallback(disconnected);
@@ -835,6 +872,52 @@ void NetworkManager::UpdateClient() {
         }
     }
 #endif
+}
+
+std::uint32_t NetworkManager::GetLocalPeerId() const {
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+    return m_Impl->state == ConnectionState::Connected ? m_Impl->localPeerId : 0;
+}
+
+std::vector<std::uint32_t> NetworkManager::GetConnectedPeerIds() const {
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+    std::vector<std::uint32_t> ids;
+#if defined(ARCHURA_HAS_SDL_NET)
+    if (m_Impl->server) for (const auto& peer : m_Impl->peers)
+        if (peer->phase == Impl::PeerPhase::Established) ids.push_back(peer->peerId);
+#endif
+    return ids;
+}
+
+bool NetworkManager::DisconnectPeer(std::uint32_t id) {
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+#if defined(ARCHURA_HAS_SDL_NET)
+    if (m_Impl->server) for (auto& peer : m_Impl->peers) {
+        if (peer->peerId == id) {
+            peer->pendingDisconnect = DisconnectReason::ProtocolViolation;
+            return true;
+        }
+    }
+#else
+    (void)id;
+#endif
+    return false;
+}
+
+bool NetworkManager::SendPlayerInput(const Net::PlayerInputPacket& input) {
+    if (!Net::ValidPlayerInput(input)) return false;
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+#if defined(ARCHURA_HAS_SDL_NET)
+    return !m_Impl->server && m_Impl->state == ConnectionState::Connected && !m_Impl->peers.empty() &&
+        m_Impl->Queue(*m_Impl->peers.front(), Net::PacketType::PlayerInput, Net::SerializePlayerInput(input));
+#else
+    return false;
+#endif
+}
+
+void NetworkManager::SetOnPlayerInput(std::function<void(std::uint32_t, const Net::PlayerInputPacket&)> callback) {
+    std::lock_guard<std::mutex> lock(m_Impl->mutex);
+    m_Impl->onPlayerInput = std::move(callback);
 }
 
 bool NetworkManager::SendPlayerUpdate(const PlayerUpdatePacket& packet) {
