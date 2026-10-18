@@ -13,6 +13,12 @@ a real OpenGL context, renders 16 frames and shuts down; unsupported-backend
 failure is also checked. Missing-backend headless-server failure was observed
 separately. Interactive acceptance below remains pending.
 
+Ownership follow-up extends both existing codec executables: authored Player/Floor
+names and hierarchy survive saves; arbitrary renamed engine services survive
+content loads; repeated reloads replace authored objects rather than accumulating
+names; `.project` restores ownership; legacy records become authored; invalid or
+promoted engine ownership in `.scene` rejects without changing the scene.
+
 ## Automated layers
 
 | Layer | Existing coverage inspected | Required follow-up |

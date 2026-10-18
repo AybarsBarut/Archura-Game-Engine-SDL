@@ -29,6 +29,7 @@ int main() {
 
   Archura::Scene source("source");
   auto* entity = source.CreateEntity("quoted \"entity\"");
+  entity->SetOwnership(Archura::EntityOwnership::Engine);
   entity->GetComponent<Archura::Transform>()->position = {1.0f, 2.0f, 3.0f};
   entity->AddComponent<Archura::MeshRenderer>()->SetMeshAsset(Archura::Mesh::CreateCapsuleShared(0.75f, 3.25f));
   entity->AddComponent<Archura::AudioSource>()->clipName = "ambient.wav";
@@ -46,7 +47,7 @@ int main() {
         "project save should succeed");
 
   Archura::Scene loadedScene("loaded");
-  loadedScene.CreateEntity("sentinel");
+  loadedScene.CreateEntity("sentinel")->SetOwnership(Archura::EntityOwnership::Engine);
   Archura::ProjectConfig loadedConfig;
   Check(Archura::ProjectSerializer::LoadProject(path.string(), loadedConfig,
                                                 &loadedScene),
@@ -54,6 +55,8 @@ int main() {
   Check(loadedConfig.name == config.name, "project name should round-trip");
   Check(loadedScene.GetEntities().size() == 2,
         "project entities should round-trip");
+  Check(loadedScene.GetEntities()[0]->IsEngineOwned() && !loadedScene.GetEntities()[1]->IsEngineOwned(),
+        "project restores explicit engine/authored ownership and replaces prior engine entities");
   Check(loadedScene.GetEntities()[0]->GetName() == "quoted \"entity\"",
         "entity names should be escaped and restored");
 

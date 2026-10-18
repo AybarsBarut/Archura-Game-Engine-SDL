@@ -17,9 +17,16 @@ File IDs establish hierarchy references and are remapped to fresh runtime entity
 handles on load. They are not persistent UUIDs across loads. Hierarchies deeper
 than 127 links, missing parents, duplicate IDs and cycles are rejected.
 
-`.scene` preserves its historical name-based system-entity exclusion policy.
-Project files include every entity. A `.scene` save rejects hierarchy edges that
-cross the exclusion boundary instead of writing an unreadable file.
+Entities default to authored ownership. Application bootstrap explicitly marks
+its Player, Skybox, Sun, AmbientLight, Floor and boundary walls as engine-owned.
+`.scene` omits and preserves these by ownership, never by display name; authored
+entities named Player/Floor and renamed engine services therefore behave correctly.
+Project files include every entity and persist optional boolean `engine_owned`
+metadata. Legacy records without it migrate as authored, including system-like
+names. `.scene` input cannot promote content to retained engine ownership.
+A `.scene` save rejects hierarchy edges crossing the ownership boundary instead
+of writing an unreadable file. Data already omitted by older saves cannot be
+recovered by this migration.
 
 Unknown serialized component names and unhandled live component types are
 rejected. This includes Weapon/Projectile/Particle/Lifetime and custom component

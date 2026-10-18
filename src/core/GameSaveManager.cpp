@@ -23,18 +23,6 @@
 
 namespace Archura {
 
-static constexpr const char* s_SystemEntities[] = {
-    "Player", "Skybox", "Sun", "AmbientLight",
-    "Wall_North", "Wall_South", "Wall_East", "Wall_West", "Floor"
-};
-
-static bool IsSystemEntity(std::string_view name) {
-    for (const char* sysName : s_SystemEntities) {
-        if (name == sysName) return true;
-    }
-    return false;
-}
-
 // ---------------------------------------------------------------------------
 // Ctor
 // ---------------------------------------------------------------------------
@@ -213,8 +201,8 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
 
     for (const auto& ePtr : entities) {
         Entity* e = ePtr.get();
-        if (omitSystem && IsSystemEntity(e->GetName())) {
-            if (e->GetParent() && !IsSystemEntity(e->GetParent()->GetName())) {
+        if (omitSystem && e->IsEngineOwned()) {
+            if (e->GetParent() && !e->GetParent()->IsEngineOwned()) {
                 std::cerr << "[SaveManager] Saved parent has an excluded system child; save cancelled\n";
                 return false;
             }
@@ -224,7 +212,7 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
             std::cerr << "[SaveManager] Unsupported component on entity: " << e->GetName() << "; save cancelled\n";
             return false;
         }
-        if (omitSystem && e->GetParent() && IsSystemEntity(e->GetParent()->GetName())) {
+        if (omitSystem && e->GetParent() && e->GetParent()->IsEngineOwned()) {
             std::cerr << "[SaveManager] Parent is excluded system entity; save cancelled: " << e->GetName() << '\n';
             return false;
         }
@@ -455,6 +443,9 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
         if (current.colliderShape < 0 || current.colliderShape > 1 || current.lightType < 0 || current.lightType > 2 ||
             current.lightIntensity < 0 || current.lightRange < 0) return false;
         if (!Serialization::ReadComponents(data, current.extra)) return false;
+        // .scene replaces authored content only; imported records cannot make
+        // themselves permanent engine services. Full project files retain it.
+        if (keepSystem && current.extra.engineOwned) return false;
         loaded.push_back(std::move(current));
     }
 
@@ -465,7 +456,7 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root, Scene* scene
     // validated. A malformed save can no longer erase the current scene.
     std::vector<EntityID> toDelete;
     for (const auto& ePtr : scene->GetEntities()) {
-        if (!keepSystem || !IsSystemEntity(ePtr->GetName())) toDelete.push_back(ePtr->GetID());
+        if (!keepSystem || !ePtr->IsEngineOwned()) toDelete.push_back(ePtr->GetID());
     }
 
     std::vector<EntityHandle> created;

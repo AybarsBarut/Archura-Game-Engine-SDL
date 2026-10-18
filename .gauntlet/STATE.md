@@ -6,10 +6,11 @@ Last updated: 2026-10-18
 
 - Phase: bounded stabilization cycle verified; broader engine work incomplete
 - Starting revision: `662d628` (clean working tree before this cycle)
-- Current changes: uncommitted, source/build/test/docs together in working tree
+- Initial stabilization pushed to origin/main as `3d1cd9d`; ownership follow-up
+  is recorded in the subsequent integration commit (see Git history).
 - Fresh baseline: Debug all targets PASS; 14/14 contracts PASS (0.78 s)
 - Final build: Debug and Release all targets PASS (VS2022/MSVC x64, C++17)
-- Final tests: Debug 21/21 PASS (2.17 s), Release 21/21 PASS (2.74 s)
+- Latest tests: Debug 21/21 PASS (1.84 s), Release 21/21 PASS (1.88 s)
 - Runtime: both configurations rendered 16 OpenGL frames and shut down; unsupported backend failed as expected
 - Headless server: help PASS; no-backend startup exited 2 with explicit error
 - Runtime networking: unavailable because SDL_net is absent; no authoritative simulation implemented
@@ -31,6 +32,11 @@ Last updated: 2026-10-18
 - Startup failure/exception status, bounded startup tests and Release warning/error
   logging; CMake presets/dependency diagnostics/BUILD_TESTING controls; batch CWD fix.
 - Required audit, roadmap, build guide and test plan created; history retained.
+- Follow-up: EntityOwnership explicitly distinguishes engine bootstrap services
+  from authored content. User Player/Floor names no longer disappear; renaming
+  an engine service cannot cause it to be deleted on content reload. `.project`
+  persists ownership; legacy records default to authored; `.scene` rejects service
+  promotion. Both cross-boundary hierarchy guards remain in force.
 
 ## Current invariants
 
@@ -42,8 +48,8 @@ Last updated: 2026-10-18
 
 ## Next queue
 
-1. Add persistent scene identifiers and explicit system ownership metadata; replace
-   `.scene` name exclusions, preserving legacy migration and live handle validity.
+1. Add persistent scene identifiers independent of runtime handles, preserving
+   legacy hierarchy migration, transactional staging and live handle validity.
 2. Cover gameplay configuration (Weapon etc.), editable geometry/shader materials;
    add aggregate resource budgets and project-relative asset resolution.
 3. Validate all editor selections; implement authored-state Play/Stop restoration,
