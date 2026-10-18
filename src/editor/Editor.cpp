@@ -31,7 +31,7 @@ namespace Archura {
 
 Editor::Editor()
     : m_Enabled(true), m_SelectedEntity(nullptr), m_Window(nullptr),
-      m_Mode(EditorMode::Edit), m_EditorCamera(glm::vec3(0.0f, 8.0f, 20.0f)) {}
+      m_EditorCamera(glm::vec3(0.0f, 8.0f, 20.0f)) {}
 
 Editor::~Editor() { Shutdown(); }
 
@@ -62,21 +62,18 @@ void Editor::Shutdown() {
   }
 }
 
-void Editor::SetMode(EditorMode mode) {
-  if (m_Mode == mode)
-    return;
+bool Editor::SetMode(EditorMode mode) {
+  const bool changing = GetMode() != mode;
+  if (!m_ModeState.Request(mode, mode == EditorMode::Play ? m_OnPlay : m_OnStop)) {
+    Log("[Editor] Mode transition rejected; previous mode retained.");
+    return false;
+  }
+  if (!changing) return true;
   m_GizmoActive = GizmoOp::None;
   m_GizmoHovered = GizmoOp::None;
   m_GizmoSSValid = false;
   m_GizmoTargetHandle = {};
-  m_Mode = mode;
-  if (m_Mode == EditorMode::Play) {
-    if (m_OnPlay)
-      m_OnPlay();
-  } else {
-    if (m_OnStop)
-      m_OnStop();
-  }
+  return true;
 }
 
 void Editor::SetSelectedEntity(Entity *entity) {
@@ -348,7 +345,7 @@ void Editor::DrawToolbar(Scene * /*scene*/) {
   ImGui::PopStyleColor();
 
   // ── Left: mode badge ───────────────────────────────────────────────────
-  const bool playing = (m_Mode == EditorMode::Play);
+  const bool playing = IsGameRunning();
   if (playing)
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.37f, 0.85f, 0.52f, 1.0f));
   else
@@ -528,7 +525,7 @@ void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
 
   if (ImGui::Begin("##Overlay", nullptr, flags)) {
     // Mode ribbon
-    if (m_Mode == EditorMode::Edit)
+    if (GetMode() == EditorMode::Edit)
       ImGui::TextColored(ImVec4(0.55f, 0.79f, 1.0f, 1.0f), "EDITOR CAM");
     else
       ImGui::TextColored(ImVec4(0.37f, 0.85f, 0.52f, 1.0f), "PLAY CAM");
@@ -537,7 +534,7 @@ void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
     // Always show editor camera position when in Edit mode
     glm::vec3 pos3;
     float yaw, pitch;
-    if (m_Mode == EditorMode::Edit) {
+    if (GetMode() == EditorMode::Edit) {
       pos3 = m_EditorCamera.GetPosition();
       yaw = m_EditorCamera.GetYaw();
       pitch = m_EditorCamera.GetPitch();
@@ -552,7 +549,7 @@ void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
     ImGui::Text("Pos  (%.1f, %.1f, %.1f)", pos3.x, pos3.y, pos3.z);
     ImGui::Text("Y/P  (%.1f, %.1f)", yaw, pitch);
 
-    if (m_Mode == EditorMode::Edit)
+    if (GetMode() == EditorMode::Edit)
       ImGui::TextDisabled("[RMB + WASD] to fly");
 
     // Axis gizmo

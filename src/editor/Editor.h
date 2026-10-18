@@ -23,6 +23,7 @@
 struct SDL_Window;
 
 #include "EditorCamera.h"
+#include "EditorModeState.h"
 #include "EditorSelectionState.h"
 #include "ObjectManipulationTool.h"
 #include "GameBuilderPanel.h"
@@ -38,13 +39,6 @@ class Camera;
 class Input;
 class Mesh;
 class Texture;
-
-/**
- * @brief Edit / Play mode discriminator.
- * Edit  → editor camera active, cursor free, Game systems paused.
- * Play  → FPS controller active, cursor locked, full simulation.
- */
-enum class EditorMode { Edit, Play };
 
 /**
  * @brief ImGui Editor – main editor coordinator.
@@ -94,14 +88,20 @@ public:
     bool IsEnabled() const        { return m_Enabled; }
 
     // ── State Machine ────────────────────────────────────────────────────────
-    EditorMode  GetMode()    const { return m_Mode; }
-    bool IsGameRunning()     const { return m_Mode == EditorMode::Play; }
-    void SetMode(EditorMode mode);
+    EditorMode  GetMode()    const { return m_ModeState.GetMode(); }
+    bool IsGameRunning()     const { return GetMode() == EditorMode::Play; }
+    bool SetMode(EditorMode mode);
 
     /** Called when toolbar Play button is clicked. */
-    void RegisterOnPlay(std::function<void()> cb)  { m_OnPlay  = std::move(cb); }
+    void RegisterOnPlay(std::function<void()> cb) {
+        m_OnPlay = [cb = std::move(cb)] { if (!cb) return false; cb(); return true; };
+    }
     /** Called when toolbar Stop button is clicked. */
-    void RegisterOnStop(std::function<void()> cb)  { m_OnStop  = std::move(cb); }
+    void RegisterOnStop(std::function<void()> cb) {
+        m_OnStop = [cb = std::move(cb)] { if (!cb) return false; cb(); return true; };
+    }
+    void RegisterPlayTransition(std::function<bool()> cb) { m_OnPlay = std::move(cb); }
+    void RegisterStopTransition(std::function<bool()> cb) { m_OnStop = std::move(cb); }
 
     // ── Editor Camera ────────────────────────────────────────────────────────
     EditorCamera* GetEditorCamera() { return &m_EditorCamera; }
@@ -168,10 +168,10 @@ private:
 
 private:
     bool       m_Enabled = true;
-    EditorMode m_Mode    = EditorMode::Edit;
+    EditorModeState m_ModeState;
 
-    std::function<void()> m_OnPlay;
-    std::function<void()> m_OnStop;
+    std::function<bool()> m_OnPlay;
+    std::function<bool()> m_OnStop;
 
     EditorCamera         m_EditorCamera;
     ObjectManipulationTool m_ObjectTool;

@@ -62,3 +62,11 @@ replacement, v1 numeric hierarchy migration, retained-service collision rollback
 pending-destroy lookup, duplicate/malformed IDs and 128/129-node depth boundaries.
 
 Run Debug and Release independently using the commands in [BUILD_GUIDE.md](BUILD_GUIDE.md). Preserve logs and explicitly report optional SDL_net/OpenAL availability. Run `ctest --test-dir <build> --output-on-failure -C <config>` after a successful build.
+
+Loop 6 expands `Archura.Editor.PlayStopLifecycle` with unsupported-component and
+unowned-resource rejection, foreign/expired Scene guards, snapshot owner release,
+failed-transition mode retention and reentrant/throwing callback handling.
+`Archura.Startup.PlayStop` exercises actual Editor/Application callbacks, native
+script runtime start/stop and OpenGL over two cycles. Each cycle checks transform
+restoration, deletion of runtime spawns and old-handle invalidation. It does not
+execute a configured managed ScriptComponent or certify audible output.

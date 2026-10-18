@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 
 #include "editor/EditorSelectionState.h"
+#include "editor/EditorModeState.h"
 #include "editor/PlayModeSession.h"
 #include "editor/TransformUndoHistory.h"
 #include "ecs/Component.h"
@@ -19,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 namespace {
 
@@ -42,6 +44,96 @@ bool Near(float a, float b, float eps = 1e-4f) {
 
 bool NearVec3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f) {
     return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
+}
+
+void TestRejectedSnapshotsAndWrongSceneStop() {
+    struct Unhandled final : Component { int authored = 71; };
+    Scene scene("guarded authoring");
+    auto* authored = scene.CreateEntity("custom authored state");
+    const auto originalHandle = authored->GetHandle();
+    authored->AddComponent<Unhandled>();
+    PlayModeSession session;
+    PlayModeContext ctx{};
+    ctx.scene = &scene;
+    int started = 0, stopped = 0;
+    ctx.onRuntimeStart = [&](Scene*) { ++started; };
+    ctx.onRuntimeStop = [&](Scene*) { ++stopped; };
+    EditorModeState modes;
+    const bool entered = modes.Request(EditorMode::Play, [&] { return session.EnterPlayMode(ctx); });
+    EXPECT_FALSE(entered);
+    EXPECT_TRUE(started == 0 && !session.HasSnapshot() && !session.IsPlaying());
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Edit);
+    if (entered) session.ExitPlayMode(ctx);
+    EXPECT_TRUE(scene.IsAlive(originalHandle));
+    if (scene.IsAlive(originalHandle)) scene.GetEntity(originalHandle)->RemoveComponent<Unhandled>();
+
+    // Independent scenario: a snapshot must never replace another live scene.
+    PlayModeSession boundSession;
+    EXPECT_TRUE(modes.Request(EditorMode::Play, [&] { return boundSession.EnterPlayMode(ctx); }));
+    Scene unrelated("unrelated authored project");
+    const auto unrelatedHandle = unrelated.CreateEntity("must survive")->GetHandle();
+    auto wrong = ctx;
+    wrong.scene = &unrelated;
+    const int stopsBefore = stopped;
+    EXPECT_FALSE(modes.Request(EditorMode::Edit, [&] { return boundSession.ExitPlayMode(wrong); }));
+    EXPECT_TRUE(unrelated.IsAlive(unrelatedHandle) && stopped == stopsBefore);
+    EXPECT_TRUE(boundSession.IsPlaying() && boundSession.HasSnapshot());
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Play);
+    EXPECT_FALSE(boundSession.TickSimulation(wrong, nullptr, false, 1.0f / 128.0f));
+    EXPECT_TRUE(modes.Request(EditorMode::Edit, [&] { return boundSession.ExitPlayMode(ctx); }));
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Edit);
+}
+
+void TestSnapshotLifetimeAndShutdownRelease() {
+    PlayModeSession session;
+    PlayModeContext stale{};
+    std::weak_ptr<Mesh> capturedAsset;
+    {
+        Scene source("temporary source");
+        auto* entity = source.CreateEntity("asset owner");
+        auto asset = Mesh::CreateCubeShared();
+        capturedAsset = asset;
+        auto* mesh = entity->AddComponent<MeshRenderer>();
+        mesh->mesh = asset.get();
+        PlayModeContext ctx{}; ctx.scene = &source;
+        EXPECT_FALSE(session.EnterPlayMode(ctx)); // Raw resources have no lifetime contract.
+        mesh->SetMeshAsset(asset);
+        EXPECT_TRUE(session.EnterPlayMode(ctx));
+        stale = ctx;
+    }
+    EXPECT_FALSE(capturedAsset.expired()); // Snapshot is now the last GPU owner.
+    EXPECT_FALSE(session.ExitPlayMode(stale)); // Must check lifetime before touching stale.scene.
+    Scene unrelated;
+    auto* survivor = unrelated.CreateEntity("authored survivor");
+    const auto survivorHandle = survivor->GetHandle();
+    PlayModeContext wrong{}; wrong.scene = &unrelated;
+    EXPECT_FALSE(session.ExitPlayMode(wrong));
+    EXPECT_TRUE(unrelated.IsAlive(survivorHandle));
+    session.DiscardSnapshot();
+    EXPECT_TRUE(capturedAsset.expired()); // Application discards before context shutdown.
+    EXPECT_FALSE(session.IsPlaying() || session.HasSnapshot());
+    EXPECT_TRUE(session.EnterPlayMode(wrong));
+    EXPECT_TRUE(session.ExitPlayMode(wrong));
+}
+
+void TestEditorModeFailureAndReentrancy() {
+    EditorModeState modes;
+    EXPECT_FALSE(modes.Request(EditorMode::Play, {}));
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Edit);
+    EXPECT_FALSE(modes.Request(EditorMode::Play, [&] {
+        EXPECT_TRUE(modes.GetMode() == EditorMode::Edit);
+        return modes.Request(EditorMode::Edit, [] { return true; });
+    }));
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Edit);
+    bool threw = false;
+    try {
+        modes.Request(EditorMode::Play, []() -> bool { throw std::runtime_error("runtime transition failed"); });
+    } catch (const std::runtime_error&) { threw = true; }
+    EXPECT_TRUE(threw && modes.GetMode() == EditorMode::Edit);
+    EXPECT_TRUE(modes.Request(EditorMode::Play, [] { return true; }));
+    EXPECT_FALSE(modes.Request(EditorMode::Edit, [] { return false; }));
+    EXPECT_TRUE(modes.GetMode() == EditorMode::Play);
+    EXPECT_TRUE(modes.Request(EditorMode::Edit, [] { return true; }));
 }
 
 void TestSelectionClearedWhenSelectedEntityDestroyed() {
@@ -521,6 +613,9 @@ extern "C" int SDLCALL SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
 extern "C" int SDLCALL SDL_ShowCursor(int) { return 0; }
 
 int main() {
+    TestRejectedSnapshotsAndWrongSceneStop();
+    TestSnapshotLifetimeAndShutdownRelease();
+    TestEditorModeFailureAndReentrancy();
     TestSelectionClearedWhenSelectedEntityDestroyed();
     TestSelectionRejectsReplacementEntityAfterDestroy();
     TestMultiSelectionPrunesDestroyedAndPromotesRemainingPrimary();

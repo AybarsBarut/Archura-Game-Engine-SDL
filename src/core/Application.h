@@ -17,7 +17,7 @@ namespace Archura {
         static Application& Get() { return *s_Instance; }
         static Application* TryGet() noexcept { return s_Instance; }
 
-        void Run(uint32_t frameLimit = 0);
+        void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false);
         void Quit() { m_Running = false; }
 
         Window& GetWindow() { return *m_Window; }

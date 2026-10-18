@@ -38,3 +38,14 @@ follow the measured/reproducible work units below; no FPS improvement is inferre
 from a structural change alone.
 
 Updated 2026-10-18. Implementation status and evidence: [ENGINE_AUDIT.md](ENGINE_AUDIT.md), [TEST_PLAN.md](TEST_PLAN.md), `.gauntlet/STATE.md` and `.gauntlet/METRICS.md`. A source implementation is not a completed acceptance test.
+
+Play/Stop safety follow-up (Loop 6): rejected transitions preserve the editor mode;
+unsupported authored snapshot state fails before Play; snapshots are bound to a
+live source Scene and release GPU owners before context shutdown. Focused lifecycle
+regressions and an opt-in native two-cycle Play/Stop startup check were added.
+PKG-01 remains the next acceptance gate, followed by SDL_net and interpolation.
+
+Loop 6 final verification: all-target Debug/Release builds and 24/24 CTest each
+passed (3.79 s / 2.98 s). The additional test is the native OpenGL Play/Stop
+integration check; packaging, live SDL_net replication and managed script scenarios
+remain separate acceptance work.

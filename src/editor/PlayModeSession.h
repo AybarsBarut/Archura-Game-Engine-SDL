@@ -57,6 +57,9 @@ public:
 
     bool EnterPlayMode(const PlayModeContext& ctx);
     bool ExitPlayMode(const PlayModeContext& ctx);
+    // Shutdown/unloaded-scene cleanup: release captured GPU asset owners while
+    // the context still exists. Does not restore or run runtime callbacks.
+    void DiscardSnapshot() noexcept;
 
     bool TickSimulation(const PlayModeContext& ctx, Input* input, bool isPaused, float dt);
 
@@ -126,6 +129,7 @@ private:
     ControllerSnapshot m_ControllerSnapshot;
     SelectionPersistentSnapshot m_SelectionSnapshot;
     std::string m_PlayerPersistentID;
+    std::weak_ptr<Scene*> m_SnapshotScene;
 };
 
 } // namespace Archura

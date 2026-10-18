@@ -94,6 +94,9 @@ Application::Application(GraphicsLaunchOptions graphicsOptions)
 }
 
 Application::~Application() {
+  // A Play snapshot can own the last references to GL assets deleted in Play.
+  // Release those owners before Engine::Shutdown destroys the graphics context.
+  m_PlaySession.DiscardSnapshot();
   // Every owner that can issue glDelete* must die while the main context is
   // current. Engine::Shutdown destroys that context, so explicit ordering here
   // is part of the renderer lifetime contract.
@@ -314,7 +317,10 @@ bool Application::Init() {
         if (scene) {
           Application &app = Application::Get();
           if (app.m_Editor && app.m_Editor->GetMode() == EditorMode::Play) {
-            app.m_Editor->SetMode(EditorMode::Edit);
+            if (!app.m_Editor->SetMode(EditorMode::Edit)) {
+              std::cerr << "[Load] Cannot replace scene: Stop transition failed\n";
+              return;
+            }
           }
           const bool loaded = GameSaveManager::Get().LoadProject(filePath, scene);
           if (loaded) {
@@ -374,7 +380,7 @@ bool Application::Init() {
   return true;
 }
 
-void Application::Run(uint32_t frameLimit) {
+void Application::Run(uint32_t frameLimit, bool playStopSmokeTest) {
   LogStartup("Run() started");
 
   LogStartup("Calling Init()");
@@ -444,7 +450,7 @@ void Application::Run(uint32_t frameLimit) {
 
   // ── Play / Stop callbacks ────────────────────────────────────────────
   m_Editor->GetSelectionState().BindScene(m_Scene.get());
-  m_Editor->RegisterOnPlay([this]() {
+  m_Editor->RegisterPlayTransition([this]() {
     PlayModeContext playCtx{};
     playCtx.scene = m_Scene.get();
     playCtx.camera = m_Camera.get();
@@ -461,7 +467,10 @@ void Application::Run(uint32_t frameLimit) {
         m_ScriptSystem->StartRuntime(scene);
       }
     };
-    m_PlaySession.EnterPlayMode(playCtx);
+    if (!m_PlaySession.EnterPlayMode(playCtx)) {
+      std::cerr << "[Editor] Play failed; authored scene retained\n";
+      return false;
+    }
     if (m_Editor) {
       m_Editor->SanitizeSelection(m_Scene.get());
     }
@@ -469,8 +478,9 @@ void Application::Run(uint32_t frameLimit) {
     m_Input->SetCursorMode(2);
     m_IsPaused = false;
     std::cout << "[Editor] Entered Play mode" << std::endl;
+    return true;
   });
-  m_Editor->RegisterOnStop([this]() {
+  m_Editor->RegisterStopTransition([this]() {
     PlayModeContext playCtx{};
     playCtx.scene = m_Scene.get();
     playCtx.camera = m_Camera.get();
@@ -491,7 +501,10 @@ void Application::Run(uint32_t frameLimit) {
         m_RenderSystem->SetIsolatedEntity(nullptr);
       }
     };
-    m_PlaySession.ExitPlayMode(playCtx);
+    if (!m_PlaySession.ExitPlayMode(playCtx)) {
+      std::cerr << "[Editor] Stop failed; Play snapshot retained for retry\n";
+      return false;
+    }
     if (m_Editor) {
       m_Editor->SanitizeSelection(m_Scene.get());
     }
@@ -499,6 +512,7 @@ void Application::Run(uint32_t frameLimit) {
     m_Accumulator = 0.0f;
     m_Input->SetCursorMode(0);
     std::cout << "[Editor] Returned to Edit mode" << std::endl;
+    return true;
   });
 
   // Create Player entity (store as member)
@@ -636,8 +650,35 @@ void Application::Run(uint32_t frameLimit) {
   std::cout << "Starting 128 tickrate main loop..." << std::endl;
 
   uint32_t renderedFrames = 0;
+  std::string smokeProbeID;
+  std::string smokeSpawnID;
+  EntityHandle smokeOriginalHandle;
+  if (playStopSmokeTest) {
+    if (frameLimit < 16 || !m_Editor)
+      throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
+    smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
+  }
   try {
     while (!m_EngineWindow->ShouldClose() && m_Running) {
+      if (playStopSmokeTest) {
+        if (renderedFrames == 2 || renderedFrames == 8) {
+          auto* probe = m_Scene->GetEntityByPersistentID(smokeProbeID);
+          if (!probe) throw std::runtime_error("Play/Stop smoke: authored probe missing");
+          smokeOriginalHandle = probe->GetHandle();
+          if (!m_Editor->SetMode(EditorMode::Play) || !m_PlaySession.IsPlaying())
+            throw std::runtime_error("Play/Stop smoke: Play rejected");
+          probe->GetComponent<Transform>()->position.x = 123.0f;
+          smokeSpawnID = m_Scene->CreateEntity("PlayStopRuntimeSpawn")->GetPersistentID();
+        } else if (renderedFrames == 5 || renderedFrames == 11) {
+          if (!m_Editor->SetMode(EditorMode::Edit) || m_PlaySession.IsPlaying())
+            throw std::runtime_error("Play/Stop smoke: Stop rejected");
+          const auto* probe = m_Scene->GetEntityByPersistentID(smokeProbeID);
+          if (!probe || probe->GetComponent<Transform>()->position.x != 0.0f ||
+              m_Scene->GetEntity(smokeOriginalHandle) ||
+              m_Scene->GetEntityByPersistentID(smokeSpawnID))
+            throw std::runtime_error("Play/Stop smoke: authored restore failed");
+        }
+      }
       // Calculate frame time
       float frameStartTime = SDL_GetTicks() / 1000.0f;
       float frameTime = frameStartTime - m_LastFrameTime;
@@ -815,7 +856,10 @@ void Application::UpdateGameLogic(float dt) {
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
   if (!inEditMode && !m_IsPaused) {
     if (!m_PlaySession.IsPlaying() && m_Editor) {
-      m_Editor->SetMode(EditorMode::Play);
+      if (!m_Editor->SetMode(EditorMode::Play)) {
+        m_IsPaused = true;
+        return;
+      }
     }
     if (m_Scene && !m_Scene->GetEntity(EntityHandle::FromValue(m_PlayerHandleValue)) &&
         !m_PlayerPersistentID.empty()) {

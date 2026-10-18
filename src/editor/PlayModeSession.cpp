@@ -4,6 +4,7 @@
 #include "../game/PhysicsSystem.h"
 #include "../game/ProjectileSystem.h"
 #include <unordered_map>
+#include <iostream>
 
 namespace Archura {
 
@@ -36,9 +37,31 @@ bool PlayModeSession::ShouldTickSimulation(bool isPaused) const noexcept {
 }
 
 bool PlayModeSession::EnterPlayMode(const PlayModeContext& ctx) {
-    if (!ctx.scene || ctx.scene->IsIterating() || m_Mode == PlaySessionMode::Play) {
+    if (m_Mode == PlaySessionMode::Play || !ctx.scene || ctx.scene->IsIterating()) {
         return false;
     }
+
+    // Snapshot coverage must be complete. Unknown authored components or raw
+    // resources without retained owners cannot be restored safely after Play.
+    for (const auto& entity : ctx.scene->GetEntities()) {
+        const size_t supported = static_cast<size_t>(entity->HasComponent<Transform>()) +
+            entity->HasComponent<MeshRenderer>() + entity->HasComponent<BoxCollider>() +
+            entity->HasComponent<LightComponent>() + entity->HasComponent<RigidBody>() +
+            entity->HasComponent<Health>() + entity->HasComponent<Weapon>() +
+            entity->HasComponent<ScriptComponent>() + entity->HasComponent<SpawnPoint>() +
+            entity->HasComponent<SkyboxComponent>() + entity->HasComponent<AudioSource>() +
+            entity->HasComponent<AudioSourceComponent>() + entity->HasComponent<SurfaceProperty>() +
+            entity->HasComponent<Lifetime>() + entity->HasComponent<Particle>() + entity->HasComponent<Projectile>();
+        const auto* mesh = entity->GetComponent<MeshRenderer>();
+        if (supported != entity->GetComponentCount() ||
+            (mesh && ((mesh->GetMesh() && !mesh->meshAsset) ||
+                      (mesh->GetShader() && !mesh->shaderAsset) ||
+                      (mesh->GetTexture() && !mesh->textureAsset)))) {
+            std::cerr << "[Play] Unsupported snapshot state on entity: " << entity->GetName() << '\n';
+            return false;
+        }
+    }
+    m_SnapshotScene = ctx.scene->GetLifetimeToken();
 
     if (ctx.selection) {
         m_SelectionSnapshot = ctx.selection->CapturePersistentSnapshot(ctx.scene);
@@ -189,9 +212,12 @@ bool PlayModeSession::EnterPlayMode(const PlayModeContext& ctx) {
 }
 
 bool PlayModeSession::ExitPlayMode(const PlayModeContext& ctx) {
-    if (!ctx.scene || ctx.scene->IsIterating() || m_Mode != PlaySessionMode::Play || !m_HasSnapshot) {
+    if (!ctx.scene || m_Mode != PlaySessionMode::Play || !m_HasSnapshot) {
         return false;
     }
+    const auto source = m_SnapshotScene.lock();
+    if (!source || *source != ctx.scene) return false;
+    if (ctx.scene->IsIterating()) return false;
 
     if (ctx.onRuntimeStop) {
         ctx.onRuntimeStop(ctx.scene);
@@ -387,13 +413,26 @@ bool PlayModeSession::ExitPlayMode(const PlayModeContext& ctx) {
     m_Mode = PlaySessionMode::Edit;
     m_HasSnapshot = false;
     m_EntitySnapshots.clear();
+    m_SnapshotScene.reset();
     return true;
+}
+
+void PlayModeSession::DiscardSnapshot() noexcept {
+    m_EntitySnapshots.clear();
+    m_SnapshotScene.reset();
+    m_PlayerPersistentID.clear();
+    m_CameraSnapshot.valid = false;
+    m_ControllerSnapshot.valid = false;
+    m_HasSnapshot = false;
+    m_Mode = PlaySessionMode::Edit;
 }
 
 bool PlayModeSession::TickSimulation(const PlayModeContext& ctx, Input* input, bool isPaused, float dt) {
     if (!ctx.scene || !ShouldTickSimulation(isPaused)) {
         return false;
     }
+    const auto source = m_SnapshotScene.lock();
+    if (!source || *source != ctx.scene) return false;
 
     EntityHandle playerHandle{};
     if (ctx.playerHandleValue && *ctx.playerHandleValue != 0) {
