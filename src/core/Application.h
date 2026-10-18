@@ -15,7 +15,7 @@ namespace Archura {
 
         static Application& Get() { return *s_Instance; }
 
-        void Run();
+        void Run(uint32_t frameLimit = 0);
         void Quit() { m_Running = false; }
 
         Window& GetWindow() { return *m_Window; }
@@ -41,7 +41,7 @@ namespace Archura {
 
     private:
         static Application* s_Instance;
-        Window* m_Window; // Reference to Engine's window (owned by Engine)
+        Window* m_Window = nullptr; // Reference to Engine's window (owned by Engine)
         std::unique_ptr<class ImGuiLayer> m_ImGuiLayer;
         bool m_Running = true;
         GraphicsLaunchOptions m_GraphicsOptions;

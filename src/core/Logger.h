@@ -9,7 +9,7 @@ namespace Archura {
 /**
  * @brief Logger - Debug logging sistemi
  * 
- * Release modunda otomatik olarak deaktif olur
+ * Debug/info logging is omitted in Release; warnings/errors stay observable.
  */
 class Logger {
 public:
@@ -24,8 +24,10 @@ public:
     static bool IsEnabled() { return s_Enabled; }
 
     static void Log(Level level, const std::string& message) {
-#ifdef _DEBUG
         if (!s_Enabled) return;
+#ifndef _DEBUG
+        if (level == Level::Debug || level == Level::Info) return;
+#endif
         
         switch (level) {
             case Level::Debug:
@@ -41,7 +43,6 @@ public:
                 std::cerr << "[ERROR] " << message << "\n";
                 break;
         }
-#endif
     }
 
     static void Debug(const std::string& msg) { Log(Level::Debug, msg); }
@@ -59,11 +60,9 @@ private:
 #ifdef _DEBUG
     #define ARCH_LOG_DEBUG(msg) Archura::Logger::Debug(msg)
     #define ARCH_LOG_INFO(msg)  Archura::Logger::Info(msg)
-    #define ARCH_LOG_ERROR(msg) Archura::Logger::Error(msg)
-    #define ARCH_LOG_WARN(msg)  Archura::Logger::Warning(msg)
 #else
     #define ARCH_LOG_DEBUG(msg)
     #define ARCH_LOG_INFO(msg)
-    #define ARCH_LOG_ERROR(msg)
-    #define ARCH_LOG_WARN(msg)
 #endif
+#define ARCH_LOG_ERROR(msg) Archura::Logger::Error(msg)
+#define ARCH_LOG_WARN(msg)  Archura::Logger::Warning(msg)

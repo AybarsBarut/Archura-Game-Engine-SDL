@@ -1,0 +1,88 @@
+#include "core/GameSaveManager.h"
+#include "ecs/Entity.h"
+#include "rendering/Mesh.h"
+#include "rendering/Shader.h"
+#include "rendering/Texture.h"
+#include <filesystem>
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+namespace {
+int failures=0;
+void Check(bool condition,const char* message){if(!condition){++failures;std::cerr<<"FAIL: "<<message<<'\n';}}
+}
+int main(){
+    const auto original = std::filesystem::current_path();
+    const auto work = std::filesystem::temp_directory_path() / ("archura_save_tests_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(work);
+    std::filesystem::current_path(work);
+    auto& saves=Archura::GameSaveManager::Get();
+    Archura::Scene scene;
+    auto* originalEntity=scene.CreateEntity("original");
+    const auto handle=originalEntity->GetHandle();
+    auto write=[](const std::string& text){std::ofstream f("input.scene",std::ios::binary);f<<text;};
+    { std::ofstream broken("broken.obj"); broken << "not an OBJ model"; }
+    write(R"({"entities":[{"name":"stage succeeds","has_mesh_renderer":false},{"name":"invalid model","mesh_type":"obj","model_path":"broken.obj"}]})");
+    Check(!saves.LoadProject("input.scene",&scene),"failed asset instantiate returns failure");
+    Check(scene.GetEntities().size()==1 && scene.IsAlive(handle),"failed instantiate rolls back staged entities and preserves original handle");
+    write(R"({"entities":[{"name":"legacy sphere","mesh_type":"sphere","position":[1,2,3]}]})");
+    Check(saves.LoadProject("input.scene",&scene),"legacy scene loads");
+    Check(scene.GetEntities().size()==1,"legacy scene replaces original");
+    Check(scene.GetEntities()[0]->GetComponent<Archura::MeshRenderer>()->GetMesh()->GetSource().type==Archura::MeshSourceType::Sphere,"legacy sphere retains source type");
+    auto* mesh=scene.GetEntities()[0]->GetComponent<Archura::MeshRenderer>();
+    mesh->SetMeshAsset(Archura::Mesh::CreateSphereShared(2.5f,12));
+    auto* child=scene.CreateEntity("child");child->TrySetParent(scene.GetEntities()[0].get());
+    child->AddComponent<Archura::ScriptComponent>()->className="Example.Script";
+    Check(saves.SaveProject("roundtrip",&scene),"scene save succeeds");
+    Archura::Scene restored;
+    auto* system=restored.CreateEntity("Player");const auto systemHandle=system->GetHandle();
+    Check(saves.LoadProject("saves/roundtrip.scene",&restored),"scene reload succeeds");
+    Check(restored.IsAlive(systemHandle),"system entity survives load");
+    Check(restored.GetEntities().size()==3,"all user entities reload");
+    const auto& source=restored.GetEntities()[1]->GetComponent<Archura::MeshRenderer>()->GetMesh()->GetSource();
+    Check(source.type==Archura::MeshSourceType::Sphere && source.radius==2.5f && source.segments==12,"mesh type and dimensions survive roundtrip");
+    Check(restored.GetEntities()[2]->GetParent()==restored.GetEntities()[1].get(),"hierarchy survives roundtrip");
+    Check(restored.GetEntities()[2]->GetComponent<Archura::ScriptComponent>()->className=="Example.Script","script config survives roundtrip");
+    const auto oldCount=restored.GetEntities().size();
+    write(R"({"entities":[{"name":"missing","mesh_type":"obj","model_path":"missing.obj"}]})");
+    Check(!saves.LoadProject("input.scene",&restored) && restored.GetEntities().size()==oldCount,"missing model rejects without changing scene");
+    write(R"({"entities":[{"name":"malformed","position":[1 2 3]}]})");
+    Check(!saves.LoadProject("input.scene",&restored),"malformed arrays reject");
+    Check(saves.SaveProject("roundtrip",&scene),"atomic replacement succeeds");
+    Check(std::filesystem::is_regular_file("saves/roundtrip.scene.bak"),"replacement retains backup");
+    std::ifstream previous("saves/roundtrip.scene",std::ios::binary);std::ostringstream expected;expected<<previous.rdbuf();previous.close();
+    auto verifyPrevious = [&]() { std::ifstream f("saves/roundtrip.scene",std::ios::binary);std::ostringstream text;text<<f.rdbuf();return text.str()==expected.str(); };
+    auto* invalidLight = scene.GetEntities()[0]->AddComponent<Archura::LightComponent>();
+    invalidLight->intensity = -1.0f;
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"semantically invalid component fails save without overwrite");
+    scene.GetEntities()[0]->RemoveComponent<Archura::LightComponent>();
+    Archura::Shader assignedShader;
+    mesh->shader = &assignedShader;
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"assigned shader fails without overwriting previous file");
+    mesh->shader = nullptr;
+    Archura::Texture assignedTexture;
+    mesh->texture = &assignedTexture;
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"generated/source-less texture fails without overwrite");
+    mesh->texture = nullptr;
+    struct Unsupported final : Archura::Component {};
+    scene.GetEntities()[0]->AddComponent<Unsupported>();
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"unknown component fails without overwrite");
+    scene.GetEntities()[0]->RemoveComponent<Unsupported>();
+    auto* excluded = scene.CreateEntity("Player");
+    child->TrySetParent(excluded);
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"omitted parent fails without overwrite");
+    child->TrySetParent(scene.GetEntities()[0].get());
+    excluded->TrySetParent(child);
+    Check(!saves.SaveProject("roundtrip",&scene) && verifyPrevious(),"omitted child fails without overwrite");
+    excluded->TrySetParent(nullptr);
+    mesh->GetMesh()->GetVertices(); // Mutable access invalidates source metadata.
+    Check(!saves.SaveProject("roundtrip",&scene),"custom/edited mesh save fails explicitly");
+    std::ifstream retained("saves/roundtrip.scene",std::ios::binary);std::ostringstream actual;actual<<retained.rdbuf();retained.close();
+    Check(actual.str()==expected.str(),"unsupported mesh never overwrites prior save");
+    std::filesystem::current_path(original);
+    // This unique directory was created exclusively by this test.
+    std::error_code ec;std::filesystem::remove_all(work,ec);
+    return failures?1:0;
+}

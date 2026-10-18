@@ -1,5 +1,14 @@
 # Backlog
 
+## Current queue override — 2026-10-18
+
+The historical entries below are retained, but revalidated evidence and ordering
+now live in docs/ENGINE_AUDIT.md, docs/ENGINE_ROADMAP.md and STATE.md.
+Network console and transport pumping already exist; Project cache is now fixed.
+Shared structured project/save parsing is implemented. Highest next work is
+persistent IDs/system ownership, remaining component coverage and Play/Stop state
+restoration, followed by standalone packaging and authoritative multiplayer.
+
 Priority is conceptual: impact x confidence x frequency / risk / cost.
 
 ## Critical

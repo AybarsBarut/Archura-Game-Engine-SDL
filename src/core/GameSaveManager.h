@@ -3,10 +3,12 @@
 #include <string>
 #include <vector>
 #include <string_view>
+#include <iosfwd>
 
 namespace Archura {
 
 class Scene;
+namespace Serialization { struct Json; }
 
 /**
  * @brief Kaydedilmiş bir oyun projesinin meta verisi
@@ -55,6 +57,10 @@ public:
     const std::vector<ProjectSave>& GetProjects() const { return m_Projects; }
 
     // Dosya adı oluştur (isimden güvenli dosya adı türet)
+    // Common scene codec used by project and legacy .scene files.
+    static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem);
+    static bool LoadEntities(const Serialization::Json& root, Scene* scene, bool keepSystem, bool validateOnly = false);
+
     static std::string MakeSafeFileName(std::string_view name);
 
 private:

@@ -998,12 +998,17 @@ void Editor::DrawProjectPanel() {
   ImGui::Begin("Project", nullptr, window_flags);
 
   if (m_CurrentProjectDir != m_BaseProjectDir) {
-    if (ImGui::SmallButton(".."))
+    if (ImGui::SmallButton("..")) {
       m_CurrentProjectDir = m_CurrentProjectDir.parent_path();
+      m_SelectedFiles.clear();
+      m_LastClickedFile.clear();
+    }
     ImGui::SameLine();
   }
-  if (ImGui::SmallButton("Refresh"))
+  if (ImGui::SmallButton("Refresh")) {
     m_AssetCacheDirty = true;
+    m_ProjectDirectoryCache.Invalidate();
+  }
   ImGui::SameLine();
   ImGui::TextDisabled("%s", m_CurrentProjectDir.filename().string().c_str());
 
@@ -1018,32 +1023,30 @@ void Editor::DrawProjectPanel() {
 
   ImGui::Separator();
 
-  std::error_code ec;
-  std::vector<std::filesystem::path> currentFiles;
-  for (auto &entry : std::filesystem::directory_iterator(m_CurrentProjectDir, ec)) {
-    currentFiles.push_back(entry.path());
+  m_ProjectDirectoryCache.Update(m_CurrentProjectDir);
+  const auto snapshot = m_ProjectDirectoryCache.GetSnapshot();
+  if (!snapshot) {
+    ImGui::TextDisabled("Loading directory...");
+    ImGui::End();
+    return;
   }
-  
-  // Sort files: directories first, then alphabetical
-  std::sort(currentFiles.begin(), currentFiles.end(), [](const auto& a, const auto& b) {
-    bool dirA = std::filesystem::is_directory(a);
-    bool dirB = std::filesystem::is_directory(b);
-    if (dirA != dirB) return dirA;
-    return a.filename() < b.filename();
-  });
+  if (!snapshot->error.empty())
+    ImGui::TextWrapped("Directory error: %s", snapshot->error.c_str());
+  const auto& currentFiles = snapshot->entries;
+  std::filesystem::path pendingNavigation;
 
   std::filesystem::path pendingShiftFile;
 
-  for (const auto& p : currentFiles) {
-    std::string name = p.filename().string();
-    bool isDir = std::filesystem::is_directory(p);
+  for (const auto& entry : currentFiles) {
+    const auto& p = entry.path;
+    const auto& name = entry.name;
+    const bool isDir = entry.isDirectory;
     bool isSelected = std::find(m_SelectedFiles.begin(), m_SelectedFiles.end(), p) != m_SelectedFiles.end();
     
     if (isDir) {
       if (ImGui::Selectable((name + "/").c_str(), isSelected, ImGuiSelectableFlags_AllowDoubleClick)) {
         if (ImGui::IsMouseDoubleClicked(0)) {
-          m_CurrentProjectDir /= p.filename();
-          m_SelectedFiles.clear();
+          pendingNavigation = p;
         } else {
           ImGuiIO& io = ImGui::GetIO();
           if (io.KeyCtrl) {
@@ -1080,8 +1083,10 @@ void Editor::DrawProjectPanel() {
   }
 
   if (!pendingShiftFile.empty() && !m_LastClickedFile.empty()) {
-    auto it1 = std::find(currentFiles.begin(), currentFiles.end(), m_LastClickedFile);
-    auto it2 = std::find(currentFiles.begin(), currentFiles.end(), pendingShiftFile);
+    auto it1 = std::find_if(currentFiles.begin(), currentFiles.end(),
+        [this](const auto& entry) { return entry.path == m_LastClickedFile; });
+    auto it2 = std::find_if(currentFiles.begin(), currentFiles.end(),
+        [&pendingShiftFile](const auto& entry) { return entry.path == pendingShiftFile; });
     if (it1 != currentFiles.end() && it2 != currentFiles.end()) {
       size_t idx1 = std::distance(currentFiles.begin(), it1);
       size_t idx2 = std::distance(currentFiles.begin(), it2);
@@ -1090,11 +1095,18 @@ void Editor::DrawProjectPanel() {
       
       if (!ImGui::GetIO().KeyCtrl) m_SelectedFiles.clear();
       for (size_t i = startIdx; i <= endIdx; ++i) {
-        if (std::find(m_SelectedFiles.begin(), m_SelectedFiles.end(), currentFiles[i]) == m_SelectedFiles.end()) {
-          m_SelectedFiles.push_back(currentFiles[i]);
+        if (std::find(m_SelectedFiles.begin(), m_SelectedFiles.end(), currentFiles[i].path) == m_SelectedFiles.end()) {
+          m_SelectedFiles.push_back(currentFiles[i].path);
         }
       }
     }
+  }
+
+  if (!pendingNavigation.empty()) {
+    m_CurrentProjectDir = pendingNavigation;
+    m_SelectedFiles.clear();
+    m_LastClickedFile.clear();
+    m_ProjectDirectoryCache.Update(m_CurrentProjectDir);
   }
 
   ImGui::End();
@@ -1972,39 +1984,17 @@ void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::PushUndoSnapshot(Entity *entity) {
-  if (!entity)
-    return;
-  auto *tf = entity->GetComponent<Transform>();
-  if (!tf)
-    return;
-  if ((int)m_UndoStack.size() >= UNDO_LIMIT)
-    m_UndoStack.pop_front();
-  UndoSnapshot snap;
-  snap.entity = entity;
-  snap.id = entity->GetID();
-  snap.pos = tf->position;
-  snap.rot = tf->rotation;
-  snap.scale = tf->scale;
-  m_UndoStack.push_back(snap);
+  if (entity) m_UndoHistory.Capture(*entity);
 }
 
-void Editor::UndoLastAction(Scene * /*scene*/) {
-  if (m_UndoStack.empty()) {
-    Log("[Undo] Yok.");
-    return;
+void Editor::UndoLastAction(Scene *scene) {
+  Entity* restored = scene ? m_UndoHistory.Undo(*scene) : nullptr;
+  if (restored) {
+    SetSelectedEntity(restored);
+    Log("[Undo] Geri alindi: " + restored->GetName());
+  } else {
+    Log("[Undo] No live transform to restore.");
   }
-  auto &snap = m_UndoStack.back();
-  if (snap.entity) {
-    auto *tf = snap.entity->GetComponent<Transform>();
-    if (tf) {
-      tf->position = snap.pos;
-      tf->rotation = snap.rot;
-      tf->scale = snap.scale;
-      m_SelectedEntity = snap.entity; // re-select
-      Log("[Undo] Geri alindi: " + snap.entity->GetName());
-    }
-  }
-  m_UndoStack.pop_back();
 }
 
 void Editor::CopySelected() {

@@ -221,6 +221,11 @@ builds/release/*.meta
 builds/release/*.dll
 
 !README.md
+!docs/ENGINE_AUDIT.md
+!docs/ENGINE_ROADMAP.md
+!docs/BUILD_GUIDE.md
+!docs/TEST_PLAN.md
+!docs/serialization.md
 build_latest/
 build_latest_release/
 /build-codex-graphics-api/

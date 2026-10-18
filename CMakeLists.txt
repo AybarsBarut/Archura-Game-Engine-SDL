@@ -8,8 +8,9 @@ project(ArchuraEngine VERSION 1.0.0 LANGUAGES CXX C)
 
 # C++ Standard
 # Define APIENTRY globally to fix Windows SDK syntax errors
-add_compile_definitions(APIENTRY=__stdcall)
-add_compile_definitions(_APIENTRY_DEFINED)
+if(WIN32)
+    add_compile_definitions(APIENTRY=__stdcall _APIENTRY_DEFINED)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +24,7 @@ option(ARCHURA_BUILD_PHYSICS_TESTS "Build focused physics contract tests" ON)
 option(ARCHURA_DEBUG_PHYSICS "Build the F3 physics debug wireframe overlay" ON)
 option(ARCHURA_OPENAL "Build OpenAL Soft spatial audio support" OFF)
 option(ARCHURA_REQUIRE_SDL_NET "Fail configuration when SDL_net is unavailable" OFF)
+option(ARCHURA_BUILD_STARTUP_TESTS "Enable startup smoke tests (requires a desktop/OpenGL context)" OFF)
 
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
 if(MSVC)
@@ -156,8 +158,10 @@ target_include_directories(imgui PUBLIC
 target_link_libraries(imgui PUBLIC SDL2 SDL2main OpenGL::GL)
 
 # Force define APIENTRY to avoid Windows SDK syntax errors
-target_compile_definitions(imgui PRIVATE APIENTRY=__stdcall)
-target_compile_definitions(glad PRIVATE APIENTRY=__stdcall)
+if(WIN32)
+    target_compile_definitions(imgui PRIVATE APIENTRY=__stdcall)
+    target_compile_definitions(glad PRIVATE APIENTRY=__stdcall)
+endif()
 
 # ufbx (FBX Loader)
 add_library(ufbx external/ufbx/ufbx.c)
@@ -285,6 +289,24 @@ set(MONO_DIR "${CMAKE_SOURCE_DIR}/external/mono")
 set(MONO_INCLUDE_DIR "${MONO_DIR}/include/mono-2.0")
 set(MONO_LIB_DIR "${MONO_DIR}/lib")
 
+# Fail at configuration with the missing file, rather than at compile/link or
+# after a lengthy successful build during deployment. The current bundled SDK
+# layout targets Windows x64; portability needs separate dependency discovery.
+if(WIN32)
+    foreach(required_file IN ITEMS
+        "${SDL2_INCLUDE_DIR}/SDL.h" "${SDL2_LIBRARY}" "${SDL2MAIN_LIBRARY}"
+        "${SDL2_BasePath}/lib/x64/SDL2.dll"
+        "${SDL2_TTF_INCLUDE_DIR}/SDL_ttf.h" "${SDL2_TTF_LIBRARY}"
+        "${SDL2_TTF_BasePath}/lib/x64/SDL2_ttf.dll"
+        "${MONO_INCLUDE_DIR}/mono/jit/jit.h"
+        "${MONO_LIB_DIR}/mono-2.0-sgen.lib" "${MONO_DIR}/bin/mono-2.0-sgen.dll"
+        "${MONO_DIR}/lib/mono/4.5/mscorlib.dll")
+        if(NOT EXISTS "${required_file}")
+            message(FATAL_ERROR "Required bundled Windows x64 dependency missing: ${required_file}")
+        endif()
+    endforeach()
+endif()
+
 # Include Directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -404,6 +426,27 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(ArchuraLoggerTests tests/LoggerTests.cpp src/core/Logger.cpp)
+    target_include_directories(ArchuraLoggerTests PRIVATE src)
+    add_test(NAME Archura.Core.Logger COMMAND ArchuraLoggerTests)
+
+    add_executable(ArchuraProjectDirectoryCacheTests
+        tests/ProjectDirectoryCacheTests.cpp src/editor/ProjectDirectoryCache.cpp)
+    target_include_directories(ArchuraProjectDirectoryCacheTests PRIVATE src)
+    add_test(NAME Archura.Editor.ProjectDirectoryCache COMMAND ArchuraProjectDirectoryCacheTests)
+
+    add_executable(ArchuraTransformUndoTests
+        tests/TransformUndoHistoryTests.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
+    target_include_directories(ArchuraTransformUndoTests PRIVATE src external/glm)
+    add_test(NAME Archura.Editor.TransformUndo COMMAND ArchuraTransformUndoTests)
+
+    add_executable(ArchuraMeshIdentityTests
+        tests/MeshIdentityTests.cpp src/rendering/Mesh.cpp
+        src/rendering/Shader.cpp src/core/Logger.cpp)
+    target_include_directories(ArchuraMeshIdentityTests PRIVATE src external/glm external/glad/include)
+    target_link_libraries(ArchuraMeshIdentityTests PRIVATE glad ufbx fast_obj)
+    add_test(NAME Archura.Rendering.MeshIdentity COMMAND ArchuraMeshIdentityTests)
+
     add_executable(ArchuraGraphicsAPISelectionTests
         tests/GraphicsAPISelectionTests.cpp
         src/rendering/GraphicsAPI.cpp
@@ -439,14 +482,30 @@ if(BUILD_TESTING)
     add_executable(ArchuraProjectSerializerTests
         tests/ProjectSerializerTests.cpp
         src/core/ProjectSerializer.cpp
+        src/core/GameSaveManager.cpp
+        src/rendering/Mesh.cpp
+        src/rendering/Texture.cpp
+        src/rendering/Shader.cpp
+        src/core/Logger.cpp
         src/ecs/Component.cpp
         src/ecs/Entity.cpp
     )
     target_include_directories(ArchuraProjectSerializerTests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
     )
+    target_link_libraries(ArchuraProjectSerializerTests PRIVATE glad ufbx fast_obj)
     add_test(NAME Archura.Core.ProjectSerializer COMMAND ArchuraProjectSerializerTests)
+
+    add_executable(ArchuraGameSaveManagerTests
+        tests/GameSaveManagerTests.cpp src/core/GameSaveManager.cpp
+        src/rendering/Mesh.cpp src/rendering/Texture.cpp
+        src/rendering/Shader.cpp src/core/Logger.cpp
+        src/ecs/Component.cpp src/ecs/Entity.cpp)
+    target_include_directories(ArchuraGameSaveManagerTests PRIVATE src external/glm external/stb)
+    target_link_libraries(ArchuraGameSaveManagerTests PRIVATE glad ufbx fast_obj)
+    add_test(NAME Archura.Core.GameSaveManager COMMAND ArchuraGameSaveManagerTests)
 
     add_executable(ArchuraServerConfigTests
         tests/ServerConfigTests.cpp
@@ -554,7 +613,7 @@ if(ARCHURA_BUILD_ECS_BENCHMARKS)
     )
 endif()
 
-if(ARCHURA_BUILD_RENDERER_TESTS)
+if(BUILD_TESTING AND ARCHURA_BUILD_RENDERER_TESTS)
     add_executable(ArchuraRendererOwnershipTests
         tests/RendererOwnershipTests.cpp
     )
@@ -565,7 +624,7 @@ if(ARCHURA_BUILD_RENDERER_TESTS)
     add_test(NAME Archura.Renderer.Ownership COMMAND ArchuraRendererOwnershipTests)
 endif()
 
-if(ARCHURA_BUILD_ECS_TESTS)
+if(BUILD_TESTING AND ARCHURA_BUILD_ECS_TESTS)
     include(CTest)
     add_executable(ArchuraECSCoreTests
         tests/ECSCoreTests.cpp
@@ -579,7 +638,7 @@ if(ARCHURA_BUILD_ECS_TESTS)
     add_test(NAME Archura.ECS.Core COMMAND ArchuraECSCoreTests)
 endif()
 
-if(ARCHURA_BUILD_PHYSICS_TESTS)
+if(BUILD_TESTING AND ARCHURA_BUILD_PHYSICS_TESTS)
     include(CTest)
     add_executable(ArchuraPhysicsCoreTests
         tests/PhysicsCoreTests.cpp
@@ -592,6 +651,21 @@ if(ARCHURA_BUILD_PHYSICS_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
     )
     add_test(NAME Archura.Physics.Core COMMAND ArchuraPhysicsCoreTests)
+endif()
+
+if(BUILD_TESTING)
+    get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
+    set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)
+    if(ARCHURA_BUILD_STARTUP_TESTS)
+        add_test(NAME Archura.Startup.OpenGL
+            COMMAND ArchuraEngine --smoke-test --graphics=opengl --no-graphics-fallback)
+        add_test(NAME Archura.Startup.UnsupportedBackend
+            COMMAND ArchuraEngine --smoke-test --graphics=vulkan --no-graphics-fallback)
+        set_tests_properties(Archura.Startup.UnsupportedBackend PROPERTIES WILL_FAIL TRUE)
+        set_tests_properties(Archura.Startup.OpenGL Archura.Startup.UnsupportedBackend PROPERTIES
+            LABELS "startup;integration" TIMEOUT 60
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:ArchuraEngine>")
+    endif()
 endif()
 
 # ============================================

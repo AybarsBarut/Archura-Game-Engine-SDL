@@ -1,5 +1,30 @@
 # Regressions
 
+## Stabilization protections — 2026-10-18
+
+Verified in final MSVC x64 Debug/Release CTest (21/21 each):
+
+- Both project/save APIs use complete JSON/schema parsing; malformed/truncated,
+  duplicate-key, invalid-vector/version/hierarchy input preserves live entities
+  and project metadata. Failed second-entity model reconstruction rolls staged
+  entities back while preserving existing handles.
+- Scene/component/audio config, hierarchy and primitive recipes round-trip;
+  OBJ/FBX paths with spaces and CPU geometry survive mesh reconstruction.
+- Failed semantic/unsupported-component/material/edited-mesh saves retain the
+  prior file; atomic replacement keeps its preceding successful content as .bak.
+- Mesh moves preserve metadata/ownership; mutable geometry invalidates recipes.
+- Undo never dereferences destroyed entities or removed transforms and cannot
+  restore history into a different Scene; the history retains at most 50 entries.
+- Project rendering consumes immutable cached entries; idle updates do not scan;
+  navigation, refresh, polling, deletion, sorting and missing paths are covered.
+- Warning/error methods and macros emit in Release. Startup initialization and
+  frame-loop exceptions no longer return a false successful main exit.
+- Real OpenGL startup/16 frames/shutdown passes; unsupported-backend failure is
+  explicit. BUILD_TESTING=OFF disables focused tests too.
+
+Known limitations are tracked in docs/ENGINE_AUDIT.md and docs/serialization.md;
+these protections do not certify full editor lifecycle or standalone/multiplayer.
+
 No integrated GAUNTLET regressions are known at the Phase Zero baseline.
 
 ## GAUNTLET-0001 protections

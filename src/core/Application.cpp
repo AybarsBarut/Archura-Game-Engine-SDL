@@ -72,6 +72,7 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+#include <stdexcept>
 
 namespace Archura {
 
@@ -350,7 +351,7 @@ bool Application::Init() {
   return true;
 }
 
-void Application::Run() {
+void Application::Run(uint32_t frameLimit) {
   LogStartup("Run() started");
 
   LogStartup("Calling Init()");
@@ -358,7 +359,7 @@ void Application::Run() {
   if (!Init()) {
     LogStartup("Init() FAILED");
     fprintf(stderr, "Application::Init Failed\n");
-    return;
+    throw std::runtime_error("Application initialization failed; see startup diagnostics");
   }
 
   LogStartup("Init() completed successfully");
@@ -552,6 +553,7 @@ void Application::Run() {
 
   std::cout << "Starting 128 tickrate main loop..." << std::endl;
 
+  uint32_t renderedFrames = 0;
   try {
     while (!m_EngineWindow->ShouldClose() && m_Running) {
       // Calculate frame time
@@ -601,6 +603,8 @@ void Application::Run() {
       m_EngineWindow->Update();
       m_Input->EndFrame();
 
+      if (frameLimit != 0 && ++renderedFrames >= frameLimit) m_Running = false;
+
       LimitFrameRate(frameStartTime);
 
       // FPS Counter (every second)
@@ -620,8 +624,10 @@ void Application::Run() {
               << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "Exception: " << e.what() << std::endl;
+    throw;
   } catch (...) {
     std::cerr << "Unknown Exception" << std::endl;
+    throw;
   }
   std::cout << "DEBUG: Exiting Application::Run" << std::endl;
 }
