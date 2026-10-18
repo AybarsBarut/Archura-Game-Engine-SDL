@@ -43,6 +43,12 @@ full Release21/21 (3.27 s), both including actual OpenGL startup/shutdown.
   progression regressions remain green.
 - Verify and record using the same loop. Do not call this Play/Stop restoration.
 
+Loop 2 reproduction: saving an authored Weapon entity failed on Loop 1 revision
+with Unsupported component. A dedicated header-only codec and strict tests are
+integrated; focused tests 4/4 pass, including unchanged 128 Hz firing progression.
+Final Debug gate 22/22 passed (1.77 s); Release 22/22 passed (1.68 s). Persist all real
+stats/inventory/pattern data and reset only explicitly transient firing state.
+
 ## Subsequent queue
 
 Play/Stop authored-state boundary and selection lifetime; aggregate resource

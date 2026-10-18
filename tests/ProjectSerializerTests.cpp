@@ -2,6 +2,7 @@
 #include "ecs/Component.h"
 #include "rendering/Mesh.h"
 #include "game/AudioSource.h"
+#include "game/Weapon.h"
 #include "ecs/components/AudioSourceComponent.h"
 #include "core/SerializationJson.h"
 #include <limits>
@@ -31,6 +32,10 @@ int main() {
   Archura::Scene source("source");
   auto* entity = source.CreateEntity("quoted \"entity\"");
   entity->SetOwnership(Archura::EntityOwnership::Engine);
+  auto* authoredWeapon = entity->AddComponent<Archura::Weapon>();
+  authoredWeapon->InitInventory();
+  authoredWeapon->stats.currentMag = 5;
+  authoredWeapon->isReloading = true;
   entity->GetComponent<Archura::Transform>()->position = {1.0f, 2.0f, 3.0f};
   entity->AddComponent<Archura::MeshRenderer>()->SetMeshAsset(Archura::Mesh::CreateCapsuleShared(0.75f, 3.25f));
   entity->AddComponent<Archura::AudioSource>()->clipName = "ambient.wav";
@@ -70,6 +75,9 @@ int main() {
   Check(loadedScene.GetEntities()[0]->GetComponent<Archura::ScriptComponent>()->className == "Gameplay.Test", "script class round trips");
   Check(loadedScene.GetEntities()[1]->GetParent() == loadedScene.GetEntities()[0].get(), "hierarchy restored");
   Check(loadedScene.GetEntities()[1]->GetComponent<Archura::LightComponent>()->intensity == 4.0f, "light round trips");
+  const auto* restoredWeapon = loadedScene.GetEntities()[0]->GetComponent<Archura::Weapon>();
+  Check(restoredWeapon && restoredWeapon->stats.currentMag == 5 && restoredWeapon->inventory.size() == 4 && !restoredWeapon->isReloading,
+        "project persists real weapon configuration while resetting transient state");
   Check(loadedScene.GetEntities()[0]->GetPersistentID() == entity->GetPersistentID() &&
         loadedScene.GetEntities()[1]->GetPersistentID() == child->GetPersistentID(), "both entity identities restore");
 

@@ -13,8 +13,10 @@ Last updated: 2026-10-18
 - Intermediate global allocator injection opened an MSVC Debug abort dialog;
   stack diagnosis and test/API correction are recorded in REGRESSIONS. Debug ECS
   now passes 19 injected payload failure points in each configuration.
-- Loop 2 Weapon codec is prepared separately and can now integrate after the
-  passing Loop 1 gate. Play/Stop and the broader queue remain incomplete.
+- Loop 2 gate PASS: complete Weapon codec and both scene integrations; Debug
+  full build/22 tests (1.77 s), Release full build/staging/22 tests (1.68 s).
+  Ammo/stat/pattern validation, transient reset and 128 Hz progression all pass.
+  Play/Stop and the broader queue remain incomplete.
 
 ## Current status
 
@@ -24,7 +26,7 @@ Last updated: 2026-10-18
   is recorded in the subsequent integration commit (see Git history).
 - Fresh baseline: Debug all targets PASS; 14/14 contracts PASS (0.78 s)
 - Final build: Debug and Release all targets PASS (VS2022/MSVC x64, C++17)
-- Latest tests: Debug 21/21 PASS (1.84 s), Release 21/21 PASS (1.88 s)
+- Latest tests: Debug 22/22 PASS (1.77 s), Release 22/22 PASS (1.68 s)
 - Runtime: both configurations rendered 16 OpenGL frames and shut down; unsupported backend failed as expected
 - Headless server: help PASS; no-backend startup exited 2 with explicit error
 - Runtime networking: unavailable because SDL_net is absent; no authoritative simulation implemented
@@ -64,13 +66,17 @@ Last updated: 2026-10-18
 
 1. Persistent scene identity is implemented and verified (Loop 1); preserve its
    v2 migration, collision, rollback and old-handle invalidation regressions.
-2. Cover gameplay configuration (Weapon next), editable geometry/shader materials;
-   add aggregate resource budgets and project-relative asset resolution.
-3. Validate all editor selections; implement authored-state Play/Stop restoration,
+2. Weapon configuration is implemented and verified (Loop 2); remaining component,
+   editable geometry/material codecs and aggregate resource budgets stay queued.
+3. NEXT: validate editor selections; implement authored-state Play/Stop restoration,
    including runtime script/audio/physics cleanup and stable Player references.
 4. Separate runtime packaging and validate a sample game outside the repository.
 5. Enable/test SDL_net, then implement authoritative world/input/snapshot vertical
    slice with a dedicated server and two real clients.
+
+Next concrete work unit: snapshot the complete authored scene before Play, bind
+runtime references through persistent IDs after replacement, and restore it on
+Stop with script/audio/physics cleanup. Add repeated lifecycle integration tests.
 
 Do not treat old backlog statements about fabricated networking/no parser as
 current evidence. Audit confirms transport pumping and truthful console already

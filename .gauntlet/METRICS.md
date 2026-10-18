@@ -1,5 +1,24 @@
 # Metrics
 
+## GAUNTLET Loop 2 — Weapon persistence, 2026-10-18
+
+- Reproduced failure on Loop 1: authored Weapon save returned Unsupported
+  component; new integration assertion failed before codec integration.
+- Added validated WeaponData codec, actual project/content component support,
+  and dedicated WeaponSerialization CTest. No WeaponSystem timing code changed.
+- Focused codec/integration/128 Hz progression checks: 4/4 passed (0.65 s).
+- Final Debug all-target build exited 0; CTest 22/22 passed, 1.77 s.
+- Final Release all-target build/staging exited 0; CTest 22/22 passed, 1.68 s.
+- Exact fields: enum, active stats, independent inventory stats, ammo and vec2
+  recoil patterns. Transient cooldown/reload/recoil/shot-index state resets.
+- Invalid ammo saves retained previous file; malformed weapon loads retained
+  the live handle. Dedicated tests cover default/initialized/all six types,
+  pattern 4096 boundary, missing/invalid fields, duplicates, numeric bounds and
+  destination preservation. Both actual OpenGL startup checks passed.
+- Commands: docs/BUILD_GUIDE.md; logs loop2-final-debug.log,
+  loop2-final-release.log, loop2-focused.log and weapon-repro-build.log.
+- No gameplay performance claim or Play/Stop lifecycle certification.
+
 ## GAUNTLET Loop 1 — persistent identity, 2026-10-18
 
 - Fresh configured baseline: Debug21/21 (1.45 s), Release21/21 (1.80 s).
@@ -15,7 +34,7 @@
   malformed/duplicate/missing-parent/cyclic IDs, retained-service collision,
   invalidated runtime handles, numeric legacy migration and128/129-node depth.
 - Commands: cmake --build build-codex-graphics-api --config <Debug|Release>
-  --parallel4; ctest --test-dir build-codex-graphics-api -C <config>
+  --parallel 4; ctest --test-dir build-codex-graphics-api -C <config>
   --output-on-failure. Logs: loop1-final-debug.log, loop1-final-release.log,
   identity-repro-build.log, identity-fault-debug.log in the ignored build folder.
 - No large-import timing or allocation-memory/performance claim is made.

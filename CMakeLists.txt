@@ -426,6 +426,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(ArchuraWeaponSerializationTests tests/WeaponSerializationTests.cpp)
+    target_include_directories(ArchuraWeaponSerializationTests PRIVATE src external/glm)
+    add_test(NAME Archura.Core.WeaponSerialization COMMAND ArchuraWeaponSerializationTests)
+
     add_executable(ArchuraLoggerTests tests/LoggerTests.cpp src/core/Logger.cpp)
     target_include_directories(ArchuraLoggerTests PRIVATE src)
     add_test(NAME Archura.Core.Logger COMMAND ArchuraLoggerTests)

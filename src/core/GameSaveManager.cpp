@@ -294,7 +294,10 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
         }
 
         file << "      \"__end\": true";
-        Serialization::WriteComponents(file, e);
+        if (!Serialization::WriteComponents(file, e)) {
+            std::cerr << "[SaveManager] Invalid component configuration; save cancelled: " << e->GetName() << '\n';
+            return false;
+        }
         file << '\n';
         file << "    }";
     }

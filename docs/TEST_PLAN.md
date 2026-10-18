@@ -4,7 +4,7 @@ Updated 2026-10-18. Record actual executions in `.gauntlet/METRICS.md`; this pla
 
 ## Current execution
 
-Debug and Release builds passed, each CTest run passed 21/21 (19 contracts,
+Debug and Release builds passed, each latest CTest run passed 22/22 (20 contracts,
 two startup checks). Added coverage: Release logger diagnostics; async directory
 cache; deletion-safe undo; primitive/OBJ/FBX identity and moves; shared scene
 codec; malformed/Unicode/schema input; legacy formats; hierarchy; audio config;
@@ -20,6 +20,15 @@ names; `.project` restores ownership; legacy records become authored; invalid or
 promoted engine ownership in `.scene` rejects without changing the scene.
 
 ## Automated layers
+
+Weapon loop adds `Archura.Core.WeaponSerialization`: default and initialized
+inventory, all six types, independent active/stored stats, precise float and
+4096-offset boundary round-trips, transient reset, malformed enum/field/array,
+duplicate inventory, ammo/rate bounds and failed-read destination preservation.
+Both project/content integrations persist Weapon; invalid saves preserve the
+preceding file and malformed loads preserve the live handle. Existing fixed-tick
+progression tests are required to stay green. With all options22 tests register
+(20 contracts, two real startup checks).
 
 Persistent-ID loop adds v2 identity/hierarchy determinism, repeated same-ID
 replacement, v1 numeric hierarchy migration, retained-service collision rollback,
