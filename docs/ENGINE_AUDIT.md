@@ -73,7 +73,7 @@ ASSET-01, AUD-01/02, REND-01 and TERR-01 have the bounded repairs above.
 | PKG-01 / P0-P1 | CMake builds Engine/editor, Server and Launcher; no game-only target/startup-scene flow. `GameBuilderPanel` adds scene content; it does not package a game. `Build.bat` archives an executable and a few DLLs. | Build sample game into clean directory; launch from unrelated CWD with source/build folders unavailable; verify script/assets/runtime dependencies and startup scene. | CLI standalone startup/package workflow implemented (Loop 7); editor export UI and clean-OS deployment remain |
 | AUD-01 / P1 | `src/scripting/ScriptGlue.cpp:297` sets legacy `AudioSource::isPlaying` only. MCI `AudioSystem::Update` sends volume to an alias but does not open it. OpenAL uses a separate `AudioSourceComponent`, so this managed call does not start that backend either. | Attach configured audio source, invoke C# Play, confirm actual sound/error and native state. Exercise both backends and missing clips. | Repaired in source/CTest (`AudioSystem::Update` opens `sound_<id>`, `ScriptGlue::AudioSource_Play` triggers both `AudioSource` and `AudioSourceComponent`); live audio hardware untested |
 | AUD-02 / P1 | `GameBuilderPanel.cpp:277-280` passes `assets/audio/name` to `AudioSystem::PlayOneShot`, which prefixes `assets/audio/` again. MCI volume/status commands run in fixed ticks. | Preview existing clip; rapid one-shots, stop/reload/delete source, category changes; measure MCI work before optimizing. | Path normalization repaired (`AudioSystem::ResolveAudioPath`, covered by CTest); MCI tick cost unmeasured |
-| TIME-01 / P1 | `Application.cpp:589,755` computes alpha then discards it; simulation runs 128 Hz while PhysicsSystem internally accumulates 60 Hz. Five application ticks bound each frame but leftover backlog is retained. | Same scripted input at 30/60/120/144/240 render FPS and frame stalls; compare trajectories, cooldown/jump and bounded recovery. Keep simulation transforms unchanged by rendering. | Interpolation absent; cadence effects untested |
+| TIME-01 / P1 | `Application.cpp:589,755` computes alpha then discards it; simulation runs 128 Hz while PhysicsSystem internally accumulates 60 Hz. Five application ticks bound each frame but leftover backlog is retained. | Same scripted input at 30/60/120/144/240 render FPS and frame stalls; compare trajectories, cooldown/jump and bounded recovery. Keep simulation transforms unchanged by rendering. | Network presentation implemented/tested (Loop10); local transform interpolation and physics cadence remain |
 | ASSET-01 / P1 | `GameBuilderPanel.cpp:319` scans fallback `assets/models`; spawn path at :177 still uses `assets/objects`. ResourceManager caches by caller-supplied name, not canonical asset identity. | Remove objects folder, add OBJ in models, spawn. Also assign two different texture paths with same stem and verify each material. | Repaired (`GameBuilderPanel::ResolveModelSpawnPath` + `CanonicalAssetKey` in `ResourceManager`/`TextureManager`; covered by CTest) |
 | TERR-01 / P1 | `Terrain.cpp`: missing-heightmap fallback leaks the object allocated before `stbi_load`. Rectangular images record min(width,height) as query stride while BuildMesh uses width; GetHeightAt ignores horizontal scale. | Missing image repeated load; asymmetric rectangular heightmap and non-unit X/Z scale: compare sampled heights to rendered mesh. Validate grid dimensions before allocation/division. | Repaired (leak eliminated, `m_Cols`/`m_Rows` stored, headless GL guarded, `GetHeightAt` applies `scale.x`/`scale.z` and bounds check; covered by CTest) |
 | REND-01 / P1 | `RenderSystem.cpp:194` distance culling uses local position although draw matrices use world transforms. A parent can move the child into view while its local position is >1000. | Parent at -1500 X, child local +1500 X near camera; child must render and lights must agree with hierarchy. | Repaired in source (`GetWorldTransform()[3]` used for distance culling and light positions) |
@@ -202,3 +202,28 @@ authored scene/camera preservation, shared obstacle stopping and server loss.
 SDL_net ON, OpenAL OFF. Existing headless hostile-peer, standalone package,
 Play/Stop, shadow and console contracts remain green. No visual-quality/FPS,
 Internet, custom-level, vertical-physics or combat certification is implied.
+
+## Loop10 — Bounded network presentation (2026-10-19)
+
+Previously GraphicalNetworkSession::Apply assigned each received position directly
+to the camera and remote mesh transforms. SnapshotInterpolation now retains at most
+32 validated snapshots and samples a monotonic presentation cursor four server ticks
+(31.25ms) behind the arrival-anchored timeline. Rendering updates camera/avatar
+positions each frame; ClientWorld/NetworkSceneReplica retain latest authority and
+the dedicated simulation remains128Hz. Membership/acknowledgements use latest
+authority, so despawns are immediate. Stop, handshake and reconnect reset history.
+
+Starvation clamps to the last snapshot with no extrapolation. Tick gaps over32
+discard history; per-player displacements exceeding the6u/s speed envelope snap.
+Reused peer IDs cannot interpolate across a disappearance. Late/bunched packets
+cannot reverse the cursor; malformed/stale/backward-arrival input preserves history.
+The fixed delay is a presentation tradeoff, not prediction or Internet jitter control.
+
+All-target VS2022 x64 Debug/Release builds/staging PASS. Full CTest33/33 each:
+21.59s/15.26s; actual two-OpenGL-client fixture10.40s/5.43s. Deterministic tests sample
+one authoritative trajectory at30/60/120/144/240FPS, including fractional positions,
+clock reversal, stalls, jitter, invalid input, bounded memory, large ticks, spawn/
+despawn/reuse, teleport and reconnect. Authority bytes remain unchanged. Actual
+native camera/mesh checks use presentation separately from common-tick authority.
+TIME-01 remains partial: singleplayer transforms, physics cadence, jump/cooldown
+cross-FPS acceptance and hierarchical render interpolation are separate work.

@@ -43,10 +43,13 @@ def states(lines):
         tick, identity = int(words[1]), int(words[3])
         camera = tuple(float(value) for value in words[5:8])
         remote_count, visible, paused = int(words[9]), int(words[11]), int(words[13])
-        players = {int(words[i+1]): (float(words[i+2]), float(words[i+3])) for i in range(14, len(words), 4)}
+        divider = words.index("VIEW")
+        players = {int(words[i+1]): (float(words[i+2]), float(words[i+3])) for i in range(14, divider, 4)}
+        view = {int(words[i+1]): (float(words[i+2]), float(words[i+3])) for i in range(divider+1, len(words), 4)}
         assert identity in players and remote_count == len(players)-1 and visible > 0
-        assert abs(camera[0]-players[identity][0]) < 0.00001 and abs(camera[2]-players[identity][1]) < 0.00001
-        assert abs(camera[1]-1.6) < 0.00001, "Camera must use authoritative feet+eye height"
+        assert view.keys() == players.keys(), "Presentation resurrected/despawned peers"
+        assert abs(camera[0]-view[identity][0]) < 0.00001 and abs(camera[2]-view[identity][1]) < 0.00001
+        assert abs(camera[1]-1.6) < 0.00001, "Camera must use interpolated feet+eye height"
         result.append((tick, identity, camera, paused, players))
     return result
 
@@ -77,8 +80,10 @@ try:
     # The moving Z client is away from obstacles; pause must stop its input promptly.
     paused = [state for state in states(second_lines) if state[3]]
     assert len(paused) >= 7, "Pause transition was not exercised"
-    middle = [state[2][2] for state in paused[3:7]]
+    middle = [state[2][2] for state in paused if state[0] >= paused[0][0]+20]
+    assert len(middle) >= 2, "Pause did not outlast presentation delay"
     assert max(middle)-min(middle) <= 0.12, "Paused client continued moving"
+    assert any(abs(state[2][2]-state[4][state[1]][1]) > 0.001 for state in states(second_lines)), "View still snaps to latest authority"
     # The X client must stop at the obstacle represented by its rendered cube.
     initial_id = states(first_lines)[0][1]
     initial_x = [state[2][0] for state in states(first_lines) if state[1] == initial_id]

@@ -118,3 +118,20 @@ normal shutdown and server loss with live GPU owners. Actual OS keyboard/mouse
 interaction, custom levels, vertical physics, combat and Internet performance remain
 outside this automated fixture. The test requires a desktop/OpenGL session and
 Python3.9+; it is registered only with startup tests and SDL_net enabled.
+
+Loop10 adds `Archura.Network.SnapshotInterpolation`: a single fixed128Hz server
+trajectory is sampled at30/60/120/144/240 render FPS and checked against the analytic
+31.25ms-delayed path. Tests require fractional presentation positions, monotonic
+bounded motion, unchanged encoded authority and32-snapshot memory bounds. Additional
+cases cover jitter/bunched arrivals, render stalls, starvation, reversed/invalid
+clocks, invalid/stale snapshots, spawn/despawn/ID reuse, teleports, long gaps, reconnect
+with lower ticks and near-uint64-limit server ticks.
+
+The graphical process fixture now compares camera to VIEW positions and separately
+compares latest authority between clients. It requires observable presentation lag
+on the moving Z client and checks pause settling after20 ticks; collision, authored
+safety, Stop/rejoin and server-loss checks remain. Remote transforms/assets are
+validated natively against the sampled view. Full all-target Debug/Release builds
+plus33/33 CTest each passed21.59s/15.26s (graphical10.40s/5.43s), SDL_net ON/OpenAL OFF.
+This does not certify singleplayer interpolation, jump/cooldown cross-FPS behavior,
+adaptive Internet buffering, prediction, GPU performance or subjective visual quality.

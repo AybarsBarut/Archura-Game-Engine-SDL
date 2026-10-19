@@ -2,9 +2,15 @@
 #include "RenderSystem.h"
 #include "../rendering/Mesh.h"
 #include <cmath>
+#include <chrono>
 #include <stdexcept>
 
 namespace Archura {
+namespace {
+double ViewTime() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+}
 GraphicalNetworkSession::GraphicalNetworkSession() {
     m_Cube = Mesh::CreateCubeShared();
     auto cube = [&](const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec3 color) {
@@ -38,12 +44,14 @@ GraphicalNetworkSession::~GraphicalNetworkSession() = default;
 void GraphicalNetworkSession::ResetConnection() {
     if (!m_Replica.Clear()) throw std::runtime_error("Network scene is being iterated");
     m_LocalID = 0; m_InputState.Reset();
+    m_Interpolation.Reset(); m_View = {};
 }
 
 bool GraphicalNetworkSession::Apply(const std::vector<std::uint8_t>& bytes, std::uint32_t localID) {
     if (localID < 2) return false;
     if (m_LocalID && localID != m_LocalID) ResetConnection();
     if (!m_Replica.Apply(m_Scene, bytes)) return false;
+    if (!m_Interpolation.Push(Snapshot(), ViewTime())) return false;
     m_LocalID = localID;
     bool foundSelf = false;
     for (const auto& player : Snapshot().players) {
@@ -52,7 +60,6 @@ bool GraphicalNetworkSession::Apply(const std::vector<std::uint8_t>& bytes, std:
         if (player.id == m_LocalID) {
             foundSelf = true;
             entity->RemoveComponent<MeshRenderer>();
-            m_Camera.SetPosition({player.x, Net::kArenaEyeHeight, player.z});
         } else {
             auto* transform = entity->GetComponent<Transform>();
             transform->position.y = 0.9F;
@@ -63,7 +70,19 @@ bool GraphicalNetworkSession::Apply(const std::vector<std::uint8_t>& bytes, std:
             mesh->color = (player.id % 2) ? glm::vec3(0.25F, 0.8F, 0.5F) : glm::vec3(0.3F, 0.55F, 1.0F);
         }
     }
+    PrepareView();
     return foundSelf;
+}
+
+void GraphicalNetworkSession::PrepareView() {
+    m_View = m_Interpolation.Sample(ViewTime());
+    for (const auto& player : m_View.players) {
+        auto* entity = m_Replica.Resolve(m_Scene, player.id);
+        if (!entity) continue;
+        if (player.id == m_LocalID)
+            m_Camera.SetPosition({player.x, Net::kArenaEyeHeight, player.z});
+        else entity->GetComponent<Transform>()->position = {player.x, 0.9F, player.z};
+    }
 }
 
 Net::PlayerInputPacket GraphicalNetworkSession::Input(float x, float z, bool active) {
@@ -81,7 +100,7 @@ std::size_t GraphicalNetworkSession::RemoteCount() const {
 bool GraphicalNetworkSession::ValidateView() const {
     if (!m_LocalID || !Snapshot().tick) return false;
     bool self = false;
-    for (const auto& player : Snapshot().players) {
+    for (const auto& player : m_View.players) {
         const auto* entity = m_Replica.Resolve(m_Scene, player.id);
         if (!entity) return false;
         if (player.id == m_LocalID) {
@@ -96,7 +115,7 @@ bool GraphicalNetworkSession::ValidateView() const {
     return self;
 }
 void GraphicalNetworkSession::AimAtRemote() {
-    for (const auto& player : Snapshot().players) if (player.id != m_LocalID) {
+    for (const auto& player : m_View.players) if (player.id != m_LocalID) {
         const auto diff = glm::vec2(player.x-m_Camera.GetPosition().x, player.z-m_Camera.GetPosition().z);
         if (glm::length(diff) > 0.1F) {
             m_Camera.SetYaw(glm::degrees(std::atan2(diff.y, diff.x)));

@@ -730,6 +730,10 @@ if(BUILD_TESTING)
         src/network/AuthoritativeWorld.cpp src/network/NetworkProtocol.cpp src/ecs/Entity.cpp src/ecs/Component.cpp)
     target_include_directories(ArchuraAuthoritativeWorldTests PRIVATE src external/glm)
     add_test(NAME Archura.Network.AuthoritativeWorld COMMAND ArchuraAuthoritativeWorldTests)
+    add_executable(ArchuraSnapshotInterpolationTests tests/network/SnapshotInterpolationTests.cpp
+        src/network/AuthoritativeWorld.cpp src/network/NetworkProtocol.cpp)
+    target_include_directories(ArchuraSnapshotInterpolationTests PRIVATE src)
+    add_test(NAME Archura.Network.SnapshotInterpolation COMMAND ArchuraSnapshotInterpolationTests)
     find_package(Python3 3.9 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME Archura.Packaging.Contracts

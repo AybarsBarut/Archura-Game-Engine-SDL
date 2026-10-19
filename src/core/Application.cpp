@@ -1115,6 +1115,7 @@ void Application::RenderFrame(float /*alpha*/) {
   const bool networkView = IsNetworkViewActive();
   auto* sceneRenderer = GetRenderSystem();
   auto* renderCamera = GetCamera();
+  if (networkView) m_NetworkGame->PrepareView();
   if (networkView && m_NetworkLaunch && m_NetworkLaunch->smoke) m_NetworkGame->AimAtRemote();
   glm::mat4 activeView = renderCamera->GetViewMatrix();
   glm::mat4 activeProjection =
@@ -1143,6 +1144,9 @@ void Application::RenderFrame(float /*alpha*/) {
         static_cast<unsigned long long>(m_LastNetworkLoggedTick), m_NetworkGame->LocalID(), pos.x,pos.y,pos.z,
         m_NetworkGame->RemoteCount(), static_cast<unsigned long long>(counters.visibleInstances), int(m_IsPaused));
     for (const auto& player : m_NetworkGame->Snapshot().players)
+      std::printf(" PLAYER %u %.6f %.6f", player.id, player.x, player.z);
+    std::printf(" VIEW");
+    for (const auto& player : m_NetworkGame->View().players)
       std::printf(" PLAYER %u %.6f %.6f", player.id, player.x, player.z);
     std::printf("\n"); std::fflush(stdout);
   }

@@ -227,7 +227,7 @@ bounds at128Hz. Unknown map names fail rather than claiming to load an absent ma
 This is static flat-arena collision: arbitrary authored levels, vertical movement,
 player-vs-player collision and combat remain separate work. Wire version2 and the
 full snapshot layout are unchanged; use client and server from the same build.
-There is no client prediction or render interpolation yet.
+Network camera/avatars now use bounded render interpolation (Loop10 below). Client prediction remains unimplemented.
 
 `Archura.Network.GraphicalIntegration` is opt-in with startup tests. It opens two
 actual OpenGL applications against a real dedicated server and checks rendering,
@@ -235,3 +235,28 @@ authoritative camera/remote transforms, pause, Stop/Edit, rejoin and live server
 cleanup. It also verifies a gravity-bearing authored probe and local camera remain
 unchanged. `--network-smoke-test` is the diagnostic entry used by this test;
 `--network-move-x`/`--network-move-z` supply test-only motion with that flag.
+
+## Loop10 — Network render interpolation
+
+The same join commands now display camera feet and remote avatars from a separate
+bounded presentation buffer. The configured delay is4 server ticks (31.25ms at128Hz);
+up to32 snapshots are retained. Mouse look remains immediate. This adds movement
+presentation latency; it does not predict input. The authoritative world, wire-v2
+payload and singleplayer rendering are unchanged.
+
+When snapshots stop, the view holds the last known position. A gap over32 server
+ticks or an implausible displacement snaps instead of interpolating a discontinuity.
+Pause input still sends zero; the delayed view settles after buffered movement.
+Disconnect/Stop/reconnect discard both snapshot history and presentation state.
+No adaptive jitter buffer, extrapolation or reconciliation is implemented.
+
+Run the pure presentation contract or the existing native graphical fixture:
+
+```powershell
+ctest --test-dir build/windows-x64 -C Debug -R SnapshotInterpolation --output-on-failure
+ctest --test-dir build/windows-x64 -C Debug -R GraphicalIntegration --output-on-failure
+```
+
+The diagnostic GFXSNAP line separates latest PLAYER authority from PLAYER positions
+after the VIEW marker; CAM must match the local VIEW player. Native validation also
+checks actual remote transforms/assets. These are correctness tests, not FPS benchmarks.
