@@ -315,3 +315,29 @@ full35/35 CTest each25.98s/15.75s. Presentation0.11s/0.04s; SurfaceAttachment0.0
 standalone package, two-client networking and old ball/ramp checks remain green.
 Independent review caught a pause/resume history rewind; presentation-only reset
 on local-view transitions and a regression corrected it before the final gate.
+
+## GRAB-01 — Force-driven holding (2026-10-19)
+
+Follow-up inspection of FPSController found E/right-mouse holding bypassed physics:
+it accepted any Transform except entities named Player/Floor, zeroed linear velocity
+and lerped local position toward a world target. This allowed static/kinematic
+objects to move, ignored contacts/mass, mishandled parents and discarded momentum.
+
+Physics now validates a live dynamic, pushable solid body's world collider center
+and applies a bounded damped center impulse, including gravity support within a
+500N budget. FPSController uses that path without editing Transform or body flags.
+Acquisition respects the closest ray hit, and holding releases on lost visibility,
+range/input/cursor/eligibility or target lifetime. Weak scene identity and entity
+generation prevent a replacement scene/entity from inheriting a previous hold.
+ResetRuntimeState used by Play/Stop clears the hold without touching the object.
+
+The existing collision solver remains authoritative; this is a force-driven hold,
+not a rigid joint or unlimited-speed continuous collision solver. No schema or
+physics/application timing changes are introduced.
+Holding uses a trigger-excluding point sweep for visibility and validates the Physics/Scene binding before any acquisition or impulse.
+
+GRAB-01 final VS2022 x64 gate: all-target Debug/Release builds and runtime staging
+PASS; full36/36 CTest each30.41s/24.36s. Physics.Grab0.17s/0.07s, real controller
+checks in PlayStopLifecycle0.06s/0.06s. Native OpenGL, package, network two-client
+and previous physics/decal/interpolation checks remain green. Independent review
+found no remaining actionable issue after the trigger/scene-binding edge fixes.

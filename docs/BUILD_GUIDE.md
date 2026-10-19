@@ -319,3 +319,17 @@ planes, not projected/wrapping mesh decals. Play-mode dynamic bodies now render
 between60Hz physics poses without changing simulation state. Pause/Stop and editor
 transitions discard presentation history. Network snapshots retain their separate
 presentation path. No new settings or scene migration are required.
+
+Object holding now uses the physics solver. Hold **E** or the **right mouse button**
+with the cursor locked while aiming at a Dynamic solid collider within15 units.
+The object must have **Pushable by Player** enabled. Static, Kinematic and trigger
+objects cannot be picked up. An intervening wall blocks acquisition and releases
+an existing hold if line of sight is lost.
+
+The hold applies a damped center impulse with a500N force ceiling,80m/s² commanded
+acceleration limit and8m/s target speed. Light objects can be supported against
+gravity; sufficiently heavy objects cannot be suspended. Positions remain under
+normal contact resolution. Releasing preserves momentum and gravity/material/body
+settings; cursor/input/target/scene loss also releases. Stop clears holding state.
+The existing bounded collision substeps remain relevant for fast or tiny objects.
+Trigger sensor volumes do not block aiming at or holding a solid dynamic object.
