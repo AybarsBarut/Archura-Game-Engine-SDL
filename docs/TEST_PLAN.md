@@ -144,3 +144,19 @@ angles (0/30/90/180/270), four speeds (0.5/2/4/8) and two starting heights produ
 tangent surface motion, jumping away, descending to flat floor, side/back faces
 and a low ceiling. Tests call the same physics query used by FPSController; they
 do not automate OS keyboard input or certify arbitrary mesh collision.
+
+PHYS-BALL extends Physics.Core with seven groups: rounded ray/sphere/character
+queries that miss the sphere's bounding-cube corners; sphere/box and sphere/sphere
+narrowphase; unequal-mass momentum/elastic energy; gravity toggle, settling and
+bounce on static/kinematic surfaces; friction-driven spin/orientation versus a
+frictionless slider and ramp descent; parent/negative/nonuniform world scale and
+center offset; and player pushing light/heavy spheres/boxes with opt-out/static/
+kinematic controls and sustained pushing against a wall. Old40 ramp cases remain.
+
+ProjectSerializer/GameSaveManager tests round-trip radius, angular velocity/drag
+and push flags, exercise legacy defaults and reject invalid fields without changing
+the scene or saved file. PlayStopLifecycle restores the complete sphere/body state
+over three cycles. The GameplayScroll physics stub follows the extended movement
+API; production FPSController opts into player pushing. Native startup/network/
+standalone checks exercise the updated renderer initialization and resource teardown.
+Inspector mouse interaction itself and subjective visual quality are not automated.

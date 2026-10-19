@@ -11,6 +11,8 @@
 #include <imgui.h>
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace Archura {
@@ -197,6 +199,23 @@ void DebugPhysicsSystem::BuildColliderLines(std::vector<LineVertex>& vertices) {
         }
 
         glm::mat4 model = entity->GetWorldTransform();
+        if (collider->shape == BoxCollider::Shape::Sphere) {
+            const glm::vec3 center(model*glm::vec4(collider->center,1));
+            const float radius=collider->radius*std::max({glm::length(glm::vec3(model[0])),
+                glm::length(glm::vec3(model[1])),glm::length(glm::vec3(model[2]))});
+            const glm::vec3 color=collider->isTrigger ? glm::vec3(1,.82f,.2f) : glm::vec3(.18f,1,.58f);
+            constexpr int segments=48;
+            for (int axis=0;axis<3;++axis) for(int i=0;i<segments;++i) {
+                for(int end=0;end<2;++end) {
+                    const float angle=6.2831853f*(i+end)/segments;
+                    glm::vec3 offset(0);
+                    offset[(axis+1)%3]=std::cos(angle)*radius;
+                    offset[(axis+2)%3]=std::sin(angle)*radius;
+                    vertices.push_back({center+offset,color});
+                }
+            }
+            continue;
+        }
         model = glm::translate(model, collider->center);
         model = glm::scale(model, collider->size);
 

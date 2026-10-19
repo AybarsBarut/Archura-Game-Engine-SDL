@@ -80,7 +80,9 @@ public:
                                           const glm::vec3& halfExtent,
                                           const glm::vec3& velocity,
                                           float deltaTime,
-                                          EntityHandle ignored = {}) const;
+                                          EntityHandle ignored = {},
+                                          bool pushDynamicBodies = false,
+                                          float characterMass = 80.0f) const;
 
 private:
     struct AABB { glm::vec3 min{0.0f}; glm::vec3 max{0.0f}; };

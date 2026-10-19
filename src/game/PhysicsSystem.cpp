@@ -3,6 +3,8 @@
 #include "../ecs/Component.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,6 +22,69 @@ struct ConvexPlane {
     glm::vec3 normal{0.0f}; // outward-facing, normalized
     float distance = 0.0f; // dot(normal, point) <= distance is solid
 };
+
+bool WorldSphere(const Entity& entity, const BoxCollider& collider, glm::vec3& center, float& radius) {
+    const auto world = entity.GetWorldTransform();
+    center = glm::vec3(world*glm::vec4(collider.center, 1));
+    radius = collider.radius*std::max({glm::length(glm::vec3(world[0])),
+        glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2]))});
+    return std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(center.z) &&
+           std::isfinite(radius) && radius > kEpsilon;
+}
+
+bool RaySphere(const glm::vec3& origin, const glm::vec3& direction, const glm::vec3& center,
+               float radius, float maximum, float& time, glm::vec3& normal) {
+    const auto offset = origin-center;
+    const float c = glm::dot(offset,offset)-radius*radius;
+    time = 0;
+    if (c > 0) {
+        const float b = glm::dot(offset,direction), discriminant = b*b-c;
+        if (b > 0 || discriminant < 0) return false;
+        time = -b-std::sqrt(discriminant);
+        if (time > maximum) return false;
+    }
+    normal = origin+direction*time-center;
+    const float length = glm::length(normal);
+    normal = length > kEpsilon ? normal/length : -direction;
+    return true;
+}
+
+// Normal is from box to sphere, including the case where its center is inside.
+bool SphereBox(const glm::vec3& center, float radius, const glm::vec3& minimum,
+               const glm::vec3& maximum, glm::vec3& point, glm::vec3& normal, float& depth) {
+    point = glm::clamp(center, minimum, maximum);
+    const glm::vec3 offset = center-point;
+    const float distance = glm::length(offset);
+    if (distance > radius) return false;
+    if (distance > kEpsilon) { normal = offset/distance; depth = radius-distance; return true; }
+    float nearest = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < 3; ++axis) for (float sign : {-1.f, 1.f}) {
+        const float clearance = sign < 0 ? center[axis]-minimum[axis] : maximum[axis]-center[axis];
+        if (clearance < nearest) {
+            nearest = clearance; normal = glm::vec3(0); normal[axis] = sign;
+        }
+    }
+    point = center+normal*nearest; depth = radius+nearest;
+    return true;
+}
+
+glm::vec3 ClosestTriangle(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+    const auto ab=b-a, ac=c-a, ap=p-a;
+    const float d1=glm::dot(ab,ap), d2=glm::dot(ac,ap);
+    if(d1<=0 && d2<=0) return a;
+    const auto bp=p-b; const float d3=glm::dot(ab,bp), d4=glm::dot(ac,bp);
+    if(d3>=0 && d4<=d3) return b;
+    const float vc=d1*d4-d3*d2;
+    if(vc<=0 && d1>=0 && d3<=0) return a+ab*(d1/(d1-d3));
+    const auto cp=p-c; const float d5=glm::dot(ab,cp), d6=glm::dot(ac,cp);
+    if(d6>=0 && d5<=d6) return c;
+    const float vb=d5*d2-d1*d6;
+    if(vb<=0 && d2>=0 && d6<=0) return a+ac*(d2/(d2-d6));
+    const float va=d3*d6-d5*d4;
+    if(va<=0 && d4-d3>=0 && d5-d6>=0) return b+(c-b)*((d4-d3)/((d4-d3)+(d5-d6)));
+    const float denominator=1/(va+vb+vc);
+    return a+ab*(vb*denominator)+ac*(vc*denominator);
+}
 
 bool BuildExpandedRampPlanes(const Entity& entity, const BoxCollider& collider,
                              const glm::vec3& extent,
@@ -76,6 +141,31 @@ bool PointInsideConvex(const glm::vec3& point,
         }
     }
     return strictlyInside;
+}
+
+bool SphereRamp(const Entity& ramp, const BoxCollider& collider, const glm::vec3& center,
+                float radius, glm::vec3& point, glm::vec3& normal, float& depth) {
+    std::array<ConvexPlane,6> planes;
+    if (!BuildExpandedRampPlanes(ramp,collider,glm::vec3(0),planes)) return false;
+    float exitDistance; glm::vec3 exitNormal;
+    const bool inside = PointInsideConvex(center,planes,exitDistance,exitNormal);
+    const auto half=glm::abs(collider.size)*.5f;
+    const auto low=collider.center-half, high=collider.center+half;
+    std::array<glm::vec3,6> vertices{{{low.x,low.y,high.z},{high.x,low.y,high.z},
+        {low.x,low.y,low.z},{high.x,low.y,low.z},{low.x,high.y,low.z},{high.x,high.y,low.z}}};
+    const auto world=ramp.GetWorldTransform();
+    for(auto& vertex:vertices) vertex=glm::vec3(world*glm::vec4(vertex,1));
+    constexpr int triangles[][3]={{0,1,3},{0,3,2},{0,4,5},{0,5,1},{0,2,4},{1,5,3},{2,3,5},{2,5,4}};
+    float closest=std::numeric_limits<float>::max();
+    for(const auto& triangle:triangles) {
+        const auto candidate=ClosestTriangle(center,vertices[triangle[0]],vertices[triangle[1]],vertices[triangle[2]]);
+        const float distance=glm::length(candidate-center);
+        if(distance<closest) { closest=distance; point=candidate; }
+    }
+    if(!inside && closest>radius) return false;
+    normal=closest>kEpsilon ? (inside ? point-center : center-point)/closest : exitNormal;
+    depth=inside ? radius+closest : radius-closest;
+    return true;
 }
 
 bool RayConvex(const glm::vec3& origin, const glm::vec3& direction,
@@ -269,12 +359,42 @@ void PhysicsSystem::Integrate(float deltaTime) {
         const float drag = std::isfinite(body->drag) ? std::max(0.0f, body->drag) : 0.0f;
         body->velocity *= std::exp(-drag * deltaTime);
         ApplyWorldTranslation(*entityPtr, body->velocity * deltaTime);
+        const auto* collider = entityPtr->GetComponent<BoxCollider>();
+        if (collider && collider->shape == BoxCollider::Shape::Sphere) {
+            if (!IsFinite(body->angularVelocity)) body->angularVelocity = glm::vec3(0);
+            const float angularDrag = std::isfinite(body->angularDrag) ? std::max(0.f,body->angularDrag) : 0;
+            body->angularVelocity *= std::exp(-angularDrag*deltaTime);
+            const float speed=glm::length(body->angularVelocity);
+            if (speed>kEpsilon) {
+                glm::vec3 oldCenter; float radius;
+                if (!WorldSphere(*entityPtr,*collider,oldCenter,radius)) continue;
+                glm::quat parentRotation(1,0,0,0);
+                if (const auto* parent=entityPtr->GetParent()) {
+                    glm::vec3 scale, translation, skew; glm::vec4 perspective;
+                    if (!glm::decompose(parent->GetWorldTransform(),scale,parentRotation,translation,skew,perspective)) continue;
+                    parentRotation=glm::normalize(parentRotation);
+                }
+                const auto delta=glm::angleAxis(speed*deltaTime,body->angularVelocity/speed);
+                const auto rotation=glm::normalize(glm::conjugate(parentRotation)*delta*parentRotation*
+                    glm::quat(glm::radians(transform->rotation)));
+                transform->rotation=glm::degrees(glm::eulerAngles(rotation));
+                glm::vec3 newCenter;
+                if (WorldSphere(*entityPtr,*collider,newCenter,radius))
+                    ApplyWorldTranslation(*entityPtr,oldCenter-newCenter);
+            }
+        }
     }
 }
 
 PhysicsSystem::AABB PhysicsSystem::WorldAABB(const Entity& entity,
                                              const BoxCollider& collider) const {
     const glm::mat4 world = entity.GetWorldTransform();
+    if (collider.shape == BoxCollider::Shape::Sphere) {
+        glm::vec3 center; float radius;
+        if (!WorldSphere(entity,collider,center,radius))
+            return {glm::vec3(std::numeric_limits<float>::quiet_NaN()),glm::vec3(0)};
+        return {center-glm::vec3(radius),center+glm::vec3(radius)};
+    }
     const glm::vec3 localHalf = glm::abs(collider.size) * 0.5f;
     AABB result{glm::vec3(std::numeric_limits<float>::max()),
                 glm::vec3(std::numeric_limits<float>::lowest())};
@@ -344,7 +464,30 @@ void PhysicsSystem::DetectAndResolve(
             const auto* colliderB = entityB->GetComponent<BoxCollider>();
             const bool rampA = colliderA && colliderA->shape == BoxCollider::Shape::Ramp;
             const bool rampB = colliderB && colliderB->shape == BoxCollider::Shape::Ramp;
-            if (rampA != rampB) {
+            const bool sphereA = colliderA && colliderA->shape == BoxCollider::Shape::Sphere;
+            const bool sphereB = colliderB && colliderB->shape == BoxCollider::Shape::Sphere;
+            glm::vec3 centerA(0),centerB(0); float radiusA=0,radiusB=0;
+            if (sphereA && !WorldSphere(*entityA,*colliderA,centerA,radiusA)) continue;
+            if (sphereB && !WorldSphere(*entityB,*colliderB,centerB,radiusB)) continue;
+            if (sphereA && sphereB) {
+                const auto separation=centerB-centerA;
+                const float distance=glm::length(separation);
+                if(distance>radiusA+radiusB) continue;
+                contact.normal=distance>kEpsilon ? separation/distance : glm::vec3(1,0,0);
+                contact.penetration=radiusA+radiusB-distance;
+                contact.point=centerA+contact.normal*radiusA;
+            } else if (sphereA || sphereB) {
+                const auto& otherBounds=sphereA ? proxies[j].bounds : proxies[i].bounds;
+                glm::vec3 normal;
+                const bool otherRamp=sphereA ? rampB : rampA;
+                const auto center=sphereA ? centerA : centerB;
+                const float radius=sphereA ? radiusA : radiusB;
+                const bool overlap=otherRamp ? SphereRamp(*(sphereA ? entityB : entityA),
+                    *(sphereA ? colliderB : colliderA),center,radius,contact.point,normal,contact.penetration) :
+                    SphereBox(center,radius,otherBounds.min,otherBounds.max,contact.point,normal,contact.penetration);
+                if(!overlap) continue;
+                contact.normal=sphereA ? -normal : normal;
+            } else if (rampA != rampB) {
                 Entity* rampEntity = rampA ? entityA : entityB;
                 const BoxCollider* rampCollider = rampA ? colliderA : colliderB;
                 const AABB& otherBounds = rampA ? proxies[j].bounds : proxies[i].bounds;
@@ -405,13 +548,23 @@ void PhysicsSystem::DetectAndResolve(
             const glm::vec3 velocityB = bodyB && (invB > 0.0f || bodyB->isKinematic) &&
                                                 IsFinite(bodyB->velocity)
                                             ? bodyB->velocity : glm::vec3(0.0f);
-            glm::vec3 relativeVelocity = velocityB - velocityA;
+            const glm::vec3 armA = sphereA ? solverNormal*radiusA : glm::vec3(0);
+            const glm::vec3 armB = sphereB ? -solverNormal*radiusB : glm::vec3(0);
+            const float inertiaA = sphereA ? 2.5f*invA/(radiusA*radiusA) : 0;
+            const float inertiaB = sphereB ? 2.5f*invB/(radiusB*radiusB) : 0;
+            auto spin = [&](const RigidBody* body, const glm::vec3& arm, bool sphere) {
+                return body && sphere && (InverseMass(body)>0 || body->isKinematic) && IsFinite(body->angularVelocity) ?
+                    glm::cross(body->angularVelocity,arm) : glm::vec3(0);
+            };
+            glm::vec3 relativeVelocity = velocityB + spin(bodyB,armB,sphereB) -
+                velocityA - spin(bodyA,armA,sphereA);
             const float normalSpeed = glm::dot(relativeVelocity, solverNormal);
             if (normalSpeed >= 0.0f) continue;
 
             const float restitutionA = bodyA ? Clamp01(bodyA->restitution) : 0.0f;
             const float restitutionB = bodyB ? Clamp01(bodyB->restitution) : 0.0f;
-            const float restitution = std::min(restitutionA, restitutionB);
+            // A bouncy ball must bounce on a static floor without a RigidBody.
+            const float restitution = std::max(restitutionA, restitutionB);
             const float normalImpulseMagnitude =
                 -(1.0f + restitution) * normalSpeed / inverseMassSum;
             const glm::vec3 normalImpulse = normalImpulseMagnitude * solverNormal;
@@ -422,14 +575,16 @@ void PhysicsSystem::DetectAndResolve(
                 (bodyB && (invB > 0.0f || bodyB->isKinematic) && IsFinite(bodyB->velocity)
                      ? bodyB->velocity : glm::vec3(0.0f)) -
                 (bodyA && (invA > 0.0f || bodyA->isKinematic) && IsFinite(bodyA->velocity)
-                     ? bodyA->velocity : glm::vec3(0.0f));
+                     ? bodyA->velocity : glm::vec3(0.0f)) +
+                spin(bodyB,armB,sphereB) - spin(bodyA,armA,sphereA);
             glm::vec3 tangent = relativeVelocity -
                                 glm::dot(relativeVelocity, solverNormal) * solverNormal;
             const float tangentLength = glm::length(tangent);
             if (tangentLength <= kEpsilon) continue;
             tangent /= tangentLength;
-            float tangentImpulseMagnitude = -glm::dot(relativeVelocity, tangent) /
-                                            inverseMassSum;
+            const float tangentMass = inverseMassSum + inertiaA*glm::dot(glm::cross(armA,tangent),glm::cross(armA,tangent)) +
+                inertiaB*glm::dot(glm::cross(armB,tangent),glm::cross(armB,tangent));
+            float tangentImpulseMagnitude = -glm::dot(relativeVelocity, tangent) / tangentMass;
             const float frictionA = bodyA && std::isfinite(bodyA->friction)
                                         ? std::max(0.0f, bodyA->friction) : 0.6f;
             const float frictionB = bodyB && std::isfinite(bodyB->friction)
@@ -441,6 +596,8 @@ void PhysicsSystem::DetectAndResolve(
             const glm::vec3 tangentImpulse = tangentImpulseMagnitude * tangent;
             if (bodyA) bodyA->velocity -= tangentImpulse * invA;
             if (bodyB) bodyB->velocity += tangentImpulse * invB;
+            if (bodyA && inertiaA > 0) bodyA->angularVelocity -= inertiaA*glm::cross(armA,tangentImpulse);
+            if (bodyB && inertiaB > 0) bodyB->angularVelocity += inertiaB*glm::cross(armB,tangentImpulse);
         }
     }
 }
@@ -596,6 +753,15 @@ bool PhysicsSystem::Raycast(const glm::vec3& origin, const glm::vec3& direction,
     for (const auto& entityPtr : m_Scene->GetEntities()) {
         const auto* collider = entityPtr->GetComponent<BoxCollider>();
         if (!collider) continue;
+        if (collider->shape == BoxCollider::Shape::Sphere) {
+            glm::vec3 center, normal; float radius, time;
+            if (WorldSphere(*entityPtr,*collider,center,radius) &&
+                RaySphere(origin,rayDirection,center,radius,closest,time,normal) &&
+                (!hit || time<closest || (time==closest && entityPtr->GetID()<hit->GetID()))) {
+                closest=time; hit=entityPtr.get();
+            }
+            continue;
+        }
         if (collider->shape == BoxCollider::Shape::Ramp) {
             std::array<ConvexPlane, 6> planes;
             if (!BuildExpandedRampPlanes(*entityPtr, *collider,
@@ -672,6 +838,15 @@ bool PhysicsSystem::SweepSphere(const glm::vec3& origin,
         if (handle == filter.ignoredA || handle == filter.ignoredB) continue;
         const auto* collider = entityPtr->GetComponent<BoxCollider>();
         if (!collider || (collider->isTrigger && !filter.includeTriggers)) continue;
+        if (collider->shape == BoxCollider::Shape::Sphere) {
+            glm::vec3 center, normal; float radius, time;
+            if (WorldSphere(*entityPtr,*collider,center,radius) &&
+                RaySphere(origin,direction,center,radius+sphereRadius,closest,time,normal) &&
+                (!hit || time<closest || (time==closest && handle.Value()<hit->GetHandle().Value()))) {
+                closest=time; hit=entityPtr.get(); hitNormal=normal; hitRamp=true;
+            }
+            continue;
+        }
         if (collider->shape == BoxCollider::Shape::Ramp) {
             std::array<ConvexPlane, 6> planes;
             if (!BuildExpandedRampPlanes(*entityPtr, *collider,
@@ -722,7 +897,8 @@ bool PhysicsSystem::SweepSphere(const glm::vec3& origin,
 
 PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
     const glm::vec3& position, const glm::vec3& halfExtent,
-    const glm::vec3& velocity, float deltaTime, EntityHandle ignored) const {
+    const glm::vec3& velocity, float deltaTime, EntityHandle ignored,
+    bool pushDynamicBodies, float characterMass) const {
     CharacterMoveResult result{position, velocity, false, false};
     if (!m_Scene || !IsFinite(position) || !IsFinite(halfExtent) ||
         !IsFinite(velocity) || !std::isfinite(deltaTime) || deltaTime <= 0.0f)
@@ -741,6 +917,15 @@ PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
             if (entityPtr->GetHandle() == ignored) continue;
             const auto* collider = entityPtr->GetComponent<BoxCollider>();
             if (!collider || collider->isTrigger) continue;
+            if (collider->shape == BoxCollider::Shape::Sphere) {
+                glm::vec3 center, point, normal; float radius, depth;
+                if (WorldSphere(*entityPtr,*collider,center,radius) &&
+                    SphereBox(center,radius,result.position-extent,result.position+extent,point,normal,depth) &&
+                    depth>kEpsilon && (depth<bestDistance || (depth==bestDistance && entityPtr->GetID()<bestID))) {
+                    bestDistance=depth; bestNormal=-normal; bestID=entityPtr->GetID(); foundOverlap=true;
+                }
+                continue;
+            }
             if (collider->shape == BoxCollider::Shape::Ramp) {
                 std::array<ConvexPlane, 6> planes;
                 if (!BuildExpandedRampPlanes(*entityPtr, *collider, extent, planes))
@@ -802,11 +987,29 @@ PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
         float closest = distance;
         glm::vec3 hitNormal(0.0f);
         EntityID hitID = std::numeric_limits<EntityID>::max();
+        Entity* hitEntity = nullptr;
         bool found = false;
         for (const auto& entityPtr : m_Scene->GetEntities()) {
             if (entityPtr->GetHandle() == ignored) continue;
             const auto* collider = entityPtr->GetComponent<BoxCollider>();
             if (!collider || collider->isTrigger) continue;
+            if (collider->shape == BoxCollider::Shape::Sphere) {
+                glm::vec3 center; float radius, time;
+                const AABB character{result.position-extent,result.position+extent};
+                if (!WorldSphere(*entityPtr,*collider,center,radius) ||
+                    !SweepSphereAABB(center,-direction,radius,character,closest,time)) continue;
+                const auto impact=result.position+direction*time;
+                const auto point=glm::clamp(center,impact-extent,impact+extent);
+                glm::vec3 normal=point-center;
+                const float length=glm::length(normal);
+                if(length>kEpsilon) normal/=length;
+                else { float depth; glm::vec3 unused; SphereBox(center,radius,impact-extent,impact+extent,unused,normal,depth); normal=-normal; }
+                if (!(time<=kEpsilon && glm::dot(direction,normal)>=-kEpsilon) &&
+                    (time<closest || (!found && time==closest) || (time==closest && entityPtr->GetID()<hitID))) {
+                    closest=time; hitNormal=normal; hitID=entityPtr->GetID(); hitEntity=entityPtr.get(); found=true;
+                }
+                continue;
+            }
             if (collider->shape == BoxCollider::Shape::Ramp) {
                 std::array<ConvexPlane, 6> planes;
                 if (!BuildExpandedRampPlanes(*entityPtr, *collider, extent, planes))
@@ -822,6 +1025,7 @@ PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
                     closest = time;
                     hitNormal = normal;
                     hitID = entityPtr->GetID();
+                    hitEntity = entityPtr.get();
                     found = true;
                 }
                 continue;
@@ -839,10 +1043,22 @@ PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
                 closest = time;
                 hitNormal = normal;
                 hitID = entityPtr->GetID();
+                hitEntity = entityPtr.get();
                 found = true;
             }
         }
         if (!found) { result.position += remaining; break; }
+        // A finite-mass player transfers a bounded contact impulse, never
+        // teleports objects through walls. Static/kinematic/opt-out bodies block.
+        if (pushDynamicBodies && hitEntity && std::isfinite(characterMass) && characterMass>0 && std::abs(hitNormal.y)<0.7f) {
+            auto* body=hitEntity->GetComponent<RigidBody>();
+            const float inverse=InverseMass(body);
+            if(body && body->canBePushed && inverse>0 && IsFinite(body->velocity)) {
+                const float closing=std::max(0.f,-glm::dot(result.velocity-body->velocity,hitNormal));
+                const auto impulse=-hitNormal*(closing/(inverse+1/characterMass));
+                body->velocity+=impulse*inverse;
+            }
+        }
         if (hitNormal.y > 0.0f && hitNormal.y < kMinWalkableNormalY) {
             const glm::vec2 horizontal(hitNormal.x, hitNormal.z);
             const float horizontalLength = glm::length(horizontal);
@@ -867,6 +1083,20 @@ PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
             if (entityPtr->GetHandle() == ignored) continue;
             const auto* collider = entityPtr->GetComponent<BoxCollider>();
             if (!collider || collider->isTrigger) continue;
+            if (collider->shape == BoxCollider::Shape::Sphere) {
+                glm::vec3 center; float radius,time;
+                const AABB character{result.position-extent,result.position+extent};
+                if (WorldSphere(*entityPtr,*collider,center,radius) &&
+                    SweepSphereAABB(center,-down,radius,character,2*kCharacterSkin,time)) {
+                    const auto impact=result.position+down*time;
+                    const auto point=glm::clamp(center,impact-extent,impact+extent);
+                    const float length=glm::length(point-center);
+                    if (length>kEpsilon && (point.y-center.y)/length>=kMinWalkableNormalY) {
+                        result.grounded=true; break;
+                    }
+                }
+                continue;
+            }
             if (collider->shape == BoxCollider::Shape::Ramp) {
                 std::array<ConvexPlane, 6> planes;
                 if (!BuildExpandedRampPlanes(*entityPtr, *collider, extent, planes))

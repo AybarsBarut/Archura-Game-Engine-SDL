@@ -10,6 +10,7 @@
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
 
@@ -51,6 +52,8 @@ void RenderSystem::Init(Scene* scene) {
 
     // Debug Mesh (Cube)
     m_DebugMesh = Mesh::CreateCubeShared(1.0f);
+    m_DebugSphere = Mesh::CreateSphereShared(1.0f, 24);
+    m_DebugRamp = Mesh::CreateRampShared(1.0f, 1.0f, 1.0f);
     
     m_Skybox = std::make_unique<Skybox>();
     if (!m_Skybox->Init()) {
@@ -509,12 +512,26 @@ void RenderSystem::DrawColliders() {
 
         // Calculate Transform: EntityModel * ColliderOffset * ColliderSize
         glm::mat4 model = entityPtr->GetWorldTransform();
-        model = glm::translate(model, collider->center);
-        model = glm::scale(model, collider->size);
+        auto* mesh = m_DebugMesh.get();
+        if (collider->shape == BoxCollider::Shape::Sphere) {
+            const glm::vec3 center(model*glm::vec4(collider->center,1));
+            const float radius=collider->radius*std::max({glm::length(glm::vec3(model[0])),
+                glm::length(glm::vec3(model[1])),glm::length(glm::vec3(model[2]))});
+            model=glm::scale(glm::translate(glm::mat4(1),center),glm::vec3(radius));
+            mesh=m_DebugSphere.get();
+        } else {
+            model = glm::translate(model, collider->center);
+            model = glm::scale(model, collider->size);
+            if (collider->shape == BoxCollider::Shape::Ramp) {
+                // Ramp mesh base is at y=0; collider center is at half height.
+                model=glm::translate(model,glm::vec3(0,-.5f,0));
+                mesh=m_DebugRamp.get();
+            }
+        }
         
         m_DefaultShader->SetMat4("uModel", model);
         
-        m_DebugMesh->Draw(m_DefaultShader.get());
+        if (mesh) mesh->Draw(m_DefaultShader.get());
     }
 
     // Restore state
@@ -537,6 +554,8 @@ void RenderSystem::Shutdown() {
     m_DepthShader.reset();
     m_DefaultShader.reset();
     m_DebugMesh.reset();
+    m_DebugSphere.reset();
+    m_DebugRamp.reset();
     ReleaseGPUResources();
     // std::cout << "RenderSystem shut down." << std::endl;
 }

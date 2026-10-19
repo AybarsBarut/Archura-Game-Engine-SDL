@@ -25,6 +25,40 @@
 
 namespace Archura {
 
+namespace {
+bool FitPrimitiveCollider(BoxCollider& collider, const Mesh* mesh) {
+  if (!mesh) return false;
+  const auto& source = mesh->GetSource();
+  if (source.type == MeshSourceType::Sphere) {
+    collider.shape = BoxCollider::Shape::Sphere;
+    collider.radius = source.radius;
+    collider.size = glm::vec3(2.0f * source.radius);
+    collider.center = glm::vec3(0.0f);
+  } else if (source.type == MeshSourceType::Ramp) {
+    collider.shape = BoxCollider::Shape::Ramp;
+    collider.size = {source.width, source.height, source.depth};
+    collider.center = {0.0f, source.height * 0.5f, 0.0f};
+  } else if (source.type == MeshSourceType::Cube) {
+    collider.shape = BoxCollider::Shape::Box;
+    collider.size = glm::vec3(source.size);
+    collider.center = glm::vec3(0.0f);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void ConfigureBall(RigidBody& body) {
+  body.mass = 1.0f;
+  body.useGravity = true;
+  body.isKinematic = false;
+  body.canBePushed = true;
+  body.continuous = true;
+  body.restitution = 0.6f;
+  body.friction = 0.5f;
+}
+} // namespace
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +500,8 @@ void Editor::DrawMenuBar(Scene *scene) {
           SpawnEntity(scene, "Cube");
         if (ImGui::MenuItem("Sphere"))
           SpawnEntity(scene, "Sphere");
+        if (ImGui::MenuItem("Ball (Dynamic Sphere)"))
+          SpawnEntity(scene, "Ball");
         if (ImGui::MenuItem("Capsule"))
           SpawnEntity(scene, "Capsule");
         if (ImGui::MenuItem("Stairs"))
@@ -619,6 +655,8 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
         SpawnEntity(scene, "Cube");
       if (ImGui::MenuItem("Sphere"))
         SpawnEntity(scene, "Sphere");
+      if (ImGui::MenuItem("Ball (Dynamic Sphere)"))
+        SpawnEntity(scene, "Ball");
       if (ImGui::MenuItem("Capsule"))
         SpawnEntity(scene, "Capsule");
       if (ImGui::MenuItem("Stairs"))
@@ -937,16 +975,67 @@ void Editor::DrawInspector(Scene *scene) {
     }
   }
 
-  // ── Box Collider ───────────────────────────────────────────────────────
+  // Collider configuration is separate from body motion: no body means static.
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
+  if (!bc && ImGui::Button("Add Collider")) {
+    bc = m_SelectedEntity->AddComponent<BoxCollider>();
+    FitPrimitiveCollider(*bc, mr ? mr->mesh : nullptr);
+  }
   if (bc && ImGui::CollapsingHeader("Collider")) {
-    const char *shapeNames[] = {"Box", "Ramp"};
+    const char *shapeNames[] = {"Box", "Ramp", "Sphere"};
     int shape = static_cast<int>(bc->shape);
-    if (ImGui::Combo("Shape", &shape, shapeNames, 2))
+    if (ImGui::Combo("Shape", &shape, shapeNames, 3))
       bc->shape = static_cast<BoxCollider::Shape>(shape);
-    ImGui::DragFloat3("Size", &bc->size.x, 0.05f);
+    if (bc->shape == BoxCollider::Shape::Sphere) {
+      ImGui::DragFloat("Radius", &bc->radius, 0.01f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::TextDisabled("World radius uses the largest scale axis.");
+    } else {
+      ImGui::DragFloat3("Size", &bc->size.x, 0.05f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+    }
     ImGui::DragFloat3("Center", &bc->center.x, 0.05f);
     ImGui::Checkbox("Is Trigger", &bc->isTrigger);
+    if (mr && mr->mesh) {
+      const auto type = mr->mesh->GetSource().type;
+      if ((type == MeshSourceType::Cube || type == MeshSourceType::Sphere || type == MeshSourceType::Ramp) &&
+          ImGui::Button("Fit Primitive Collider"))
+        FitPrimitiveCollider(*bc, mr->mesh);
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Physics")) {
+    auto* body = m_SelectedEntity->GetComponent<RigidBody>();
+    int motion = !body ? 0 : (body->isKinematic ? 2 : 1);
+    const char* motionNames[] = {"Static", "Dynamic", "Kinematic"};
+    if (ImGui::Combo("Motion", &motion, motionNames, 3)) {
+      if (motion == 0) {
+        m_SelectedEntity->RemoveComponent<RigidBody>();
+        body = nullptr;
+      } else {
+        if (!body) body = m_SelectedEntity->AddComponent<RigidBody>();
+        body->isKinematic = motion == 2;
+        if (!(body->mass > 0.0f)) body->mass = 1.0f;
+        body->velocity = body->force = body->angularVelocity = glm::vec3(0.0f);
+      }
+    }
+    if (!bc) ImGui::TextWrapped("Add a Collider for solid contacts and player pushing.");
+    if (body) {
+      if (body->isKinematic) ImGui::TextDisabled("Moved by gameplay; infinite collision mass.");
+      else {
+        ImGui::DragFloat("Mass (kg)", &body->mass, 0.1f, 0.001f, 1000000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::Checkbox("Use Gravity", &body->useGravity);
+        ImGui::Checkbox("Pushable by Player", &body->canBePushed);
+      }
+      ImGui::DragFloat("Bounce", &body->restitution, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::DragFloat("Friction", &body->friction, 0.01f, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::DragFloat("Linear Drag", &body->drag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      if (bc && bc->shape == BoxCollider::Shape::Sphere)
+        ImGui::DragFloat("Angular Drag", &body->angularDrag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::Checkbox("Continuous Collision", &body->continuous);
+    }
+    if (bc && bc->shape == BoxCollider::Shape::Sphere && ImGui::Button("Apply Ball Physics")) {
+      if (!body) body = m_SelectedEntity->AddComponent<RigidBody>();
+      ConfigureBall(*body);
+    }
   }
 
   // ── Weapon ─────────────────────────────────────────────────────────────
@@ -1477,9 +1566,15 @@ void Editor::DrawTutorialPanel() {
           "Texture",
           "Lists textures found in assets/textures/. "
           "Click a name to apply it. Press 'Refresh' to rescan the folder.");
-      Section("Box Collider",
-              "Defines the AABB used for physics and mouse picking. "
+      Section("Collider",
+              "Choose Box, Ramp, or Sphere; tune size or sphere radius and center. "
+              "Fit Primitive Collider matches an unchanged cube, sphere, or ramp mesh. "
               "'Is Trigger' objects generate events but don't block movement.");
+      Section("Physics",
+              "Static objects stay fixed. Dynamic objects have mass and optional gravity; "
+              "enable Pushable by Player for player contact impulses. Kinematic objects "
+              "are moved by gameplay. Use Apply Ball Physics on a sphere for a bouncy, "
+              "pushable body, or spawn a Ball from Create / Game Builder.");
       Section("Script Component",
               "Attaches a C# class name. The scripting backend will look up "
               "and execute the matching class at runtime.");
@@ -1672,8 +1767,11 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
 
   if (type == "Cube")
     mr->SetMeshAsset(Mesh::CreateCubeShared());
-  else if (type == "Sphere") {
+  else if (type == "Sphere" || type == "Ball") {
     mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f));
+    col->shape = BoxCollider::Shape::Sphere;
+    col->radius = 0.5f;
+    if (type == "Ball") ConfigureBall(*e->AddComponent<RigidBody>());
   } else if (type == "Capsule") {
     mr->SetMeshAsset(Mesh::CreateCapsuleShared(0.5f, 2.0f));
     col->size = {1, 2, 1};
@@ -1802,6 +1900,27 @@ Entity *Editor::PickEntityAtScreenPos(Scene *scene, Input *input, int screenW,
     // Skip entities with no spatial presence (no transform placed yet)
     if (!tf)
       continue;
+
+    if (bc && bc->shape == BoxCollider::Shape::Sphere) {
+      const glm::mat4 world = ent->GetWorldTransform();
+      const glm::vec3 center(world * glm::vec4(bc->center, 1.0f));
+      const float scale = glm::max(glm::length(glm::vec3(world[0])),
+          glm::max(glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2]))));
+      const float radius = bc->radius * scale;
+      const glm::vec3 offset = rayOrigin - center;
+      const float b = glm::dot(offset, rayDir);
+      const float discriminant = b * b - glm::dot(offset, offset) + radius * radius;
+      if (discriminant >= 0.0f) {
+        const float root = glm::sqrt(discriminant);
+        const float nearHit = -b - root;
+        const float hit = nearHit >= 0.0f ? nearHit : -b + root;
+        if (hit >= 0.0f && hit < bestT) {
+          bestT = hit;
+          bestEntity = ent;
+        }
+      }
+      continue;
+    }
 
     // Build AABB from BoxCollider size, or fall back to 1x1x1 if mesh present
     glm::vec3 halfSize(0.5f);
@@ -2098,6 +2217,7 @@ void Editor::CopySelected() {
   auto *mr = m_SelectedEntity->GetComponent<MeshRenderer>();
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
   auto *sc = m_SelectedEntity->GetComponent<ScriptComponent>();
+  auto *body = m_SelectedEntity->GetComponent<RigidBody>();
 
   m_Clipboard = {}; // reset
   m_Clipboard.valid = true;
@@ -2118,6 +2238,22 @@ void Editor::CopySelected() {
     m_Clipboard.bcCenter = bc->center;
     m_Clipboard.bcTrigger = bc->isTrigger;
     m_Clipboard.bcShape = static_cast<int>(bc->shape);
+    m_Clipboard.bcRadius = bc->radius;
+  }
+  if (body) {
+    m_Clipboard.hasBody = true;
+    m_Clipboard.bodyVelocity = body->velocity;
+    m_Clipboard.bodyForce = body->force;
+    m_Clipboard.bodyAngularVelocity = body->angularVelocity;
+    m_Clipboard.bodyMass = body->mass;
+    m_Clipboard.bodyDrag = body->drag;
+    m_Clipboard.bodyAngularDrag = body->angularDrag;
+    m_Clipboard.bodyBounce = body->restitution;
+    m_Clipboard.bodyFriction = body->friction;
+    m_Clipboard.bodyGravity = body->useGravity;
+    m_Clipboard.bodyKinematic = body->isKinematic;
+    m_Clipboard.bodyContinuous = body->continuous;
+    m_Clipboard.bodyPushable = body->canBePushed;
   }
   if (sc) {
     m_Clipboard.hasScript = true;
@@ -2149,6 +2285,22 @@ void Editor::PasteClipboard(Scene *scene) {
     bc->center = m_Clipboard.bcCenter;
     bc->isTrigger = m_Clipboard.bcTrigger;
     bc->shape = static_cast<BoxCollider::Shape>(m_Clipboard.bcShape);
+    bc->radius = m_Clipboard.bcRadius;
+  }
+  if (m_Clipboard.hasBody) {
+    auto* body = e->AddComponent<RigidBody>();
+    body->velocity = m_Clipboard.bodyVelocity;
+    body->force = m_Clipboard.bodyForce;
+    body->angularVelocity = m_Clipboard.bodyAngularVelocity;
+    body->mass = m_Clipboard.bodyMass;
+    body->drag = m_Clipboard.bodyDrag;
+    body->angularDrag = m_Clipboard.bodyAngularDrag;
+    body->restitution = m_Clipboard.bodyBounce;
+    body->friction = m_Clipboard.bodyFriction;
+    body->useGravity = m_Clipboard.bodyGravity;
+    body->isKinematic = m_Clipboard.bodyKinematic;
+    body->continuous = m_Clipboard.bodyContinuous;
+    body->canBePushed = m_Clipboard.bodyPushable;
   }
   if (m_Clipboard.hasScript) {
     auto *ns = e->AddComponent<ScriptComponent>();

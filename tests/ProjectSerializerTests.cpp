@@ -44,7 +44,17 @@ int main() {
   entity->GetComponent<Archura::AudioSource>()->isPlaying = true;
   entity->GetComponent<Archura::AudioSource>()->runtimeAlias = "old alias";
   entity->AddComponent<Archura::AudioSourceComponent>()->pitch = 1.25f;
-  entity->AddComponent<Archura::RigidBody>()->mass = 7.5f;
+  auto* body = entity->AddComponent<Archura::RigidBody>();
+  body->mass = 7.5f;
+  body->angularVelocity = {1.0f, -2.0f, 3.0f};
+  body->angularDrag = 0.35f;
+  body->canBePushed = false;
+  body->useGravity = false;
+  body->restitution = 0.8f;
+  auto* collider = entity->AddComponent<Archura::BoxCollider>();
+  collider->shape = Archura::BoxCollider::Shape::Sphere;
+  collider->radius = 0.75f;
+  collider->center = {0.25f, 0.5f, -0.25f};
   entity->AddComponent<Archura::Health>()->current = 23.0f;
   entity->AddComponent<Archura::ScriptComponent>()->className = "Gameplay.Test";
   auto* child = source.CreateEntity("child");
@@ -74,6 +84,14 @@ int main() {
   Check(audio && audio->clipName == "ambient.wav" && !audio->isPlaying && audio->runtimeAlias.empty(), "audio configuration round trips and runtime state resets");
   Check(loadedScene.GetEntities()[0]->GetComponent<Archura::AudioSourceComponent>()->pitch == 1.25f, "optional audio component config round trips");
   Check(loadedScene.GetEntities()[0]->GetComponent<Archura::RigidBody>()->mass == 7.5f, "rigid body mass round trips");
+  const auto* restoredBody = loadedScene.GetEntities()[0]->GetComponent<Archura::RigidBody>();
+  const auto* restoredCollider = loadedScene.GetEntities()[0]->GetComponent<Archura::BoxCollider>();
+  Check(restoredBody->angularVelocity == body->angularVelocity && restoredBody->angularDrag == body->angularDrag &&
+        !restoredBody->canBePushed && !restoredBody->useGravity && restoredBody->restitution == body->restitution,
+        "project preserves ball rotation, damping, player push, gravity and bounce configuration");
+  Check(restoredCollider && restoredCollider->shape == Archura::BoxCollider::Shape::Sphere &&
+        restoredCollider->radius == 0.75f && restoredCollider->center == collider->center,
+        "project preserves sphere collider radius and local center");
   Check(loadedScene.GetEntities()[0]->GetComponent<Archura::ScriptComponent>()->className == "Gameplay.Test", "script class round trips");
   Check(loadedScene.GetEntities()[1]->GetParent() == loadedScene.GetEntities()[0].get(), "hierarchy restored");
   Check(loadedScene.GetEntities()[1]->GetComponent<Archura::LightComponent>()->intensity == 4.0f, "light round trips");
@@ -140,7 +158,15 @@ int main() {
     R"({"format_version":2,"project":{"name":"bad"},"entities":[{"name":"a","persistent_id":"11111111111111111111111111111111","parent_persistent_id":"","id":1}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a","id":1,"parent_id":2},{"name":"b","id":2,"parent_id":1}]})",
     R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"future_component":{}}}]})",
-    R"({"project":{"name":"bad"},"entities":[{"name":"a","transform":{"scale":[1e90,1,1]}}]})"
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","transform":{"scale":[1e90,1,1]}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"collider":{"shape":3}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"collider":{"shape":2,"radius":0}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"collider":{"radius":-1}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"rigid_body":{"angular_velocity":[0,1e90,0]}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"rigid_body":{"angular_drag":-0.1}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"rigid_body":{"can_be_pushed":1}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"rigid_body":{"mass":-1}}}]})",
+    R"({"project":{"name":"bad"},"entities":[{"name":"a","components":{"rigid_body":{"restitution":1.1}}}]})"
   };
   for (const auto& text : invalid) {
     write(text);

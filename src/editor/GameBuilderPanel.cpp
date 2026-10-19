@@ -93,12 +93,36 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateSphereShared(1.0f, 16));
             mr->color = glm::vec3(0.9f, 0.5f, 0.2f);
-            e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
+            auto* collider = e->AddComponent<BoxCollider>();
+            collider->shape = BoxCollider::Shape::Sphere;
+            collider->radius = 1.0f;
+            collider->size = glm::vec3(2.0f);
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 3, 0);
             std::cout << "[GameBuilder] Sphere spawn edildi." << std::endl;
         }
     }
+
+    if (ImGui::Button("Top (Dynamic Ball)", ImVec2(btnW, btnH))) {
+        if (scene) {
+            Entity* e = scene->CreateEntity("MyObject_Ball");
+            auto* mr = e->AddComponent<MeshRenderer>();
+            mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f, 24));
+            mr->color = glm::vec3(0.9f, 0.5f, 0.2f);
+            auto* collider = e->AddComponent<BoxCollider>();
+            collider->shape = BoxCollider::Shape::Sphere;
+            collider->radius = 0.5f;
+            auto* body = e->AddComponent<RigidBody>();
+            body->mass = 1.0f;
+            body->useGravity = true;
+            body->canBePushed = true;
+            body->continuous = true;
+            body->restitution = 0.6f;
+            body->friction = 0.5f;
+            if (auto* t = e->GetComponent<Transform>()) t->position = glm::vec3(0, 3, 0);
+        }
+    }
+    ImGui::TextDisabled("Ball: gravity, 1 kg, player pushing. Tune in Inspector > Physics.");
 
     if (ImGui::Button("Kapsul (Capsule)", ImVec2(btnW, btnH))) {
         if (scene) {
