@@ -511,6 +511,232 @@ void TestProjectileSweepFilteringAndNearestHit() {
                               0.1f, hit, filter));
     CHECK(hit.entity == trigger->GetHandle());
 }
+
+Archura::Entity* AddSphere(Archura::Scene& scene, const char* name,
+                          glm::vec3 position, float radius, bool dynamic = false) {
+    auto* entity = AddBox(scene, name, position, glm::vec3(2 * radius), dynamic);
+    auto* collider = entity->GetComponent<Archura::BoxCollider>();
+    collider->shape = Archura::BoxCollider::Shape::Sphere;
+    collider->radius = radius;
+    return entity;
+}
+
+void Advance(Archura::PhysicsSystem& physics, int ticks) {
+    for (int i = 0; i < ticks; ++i) physics.Update(1.f / 60);
+}
+
+void TestSphereQueriesAndRoundedCharacterCorners() {
+    Archura::Scene scene("sphere-queries");
+    auto* sphere = AddSphere(scene, "sphere", {3, 0, 0}, 1);
+    Archura::PhysicsSystem physics; physics.Init(&scene);
+    Archura::Entity* hit = nullptr;
+    glm::vec3 point(0);
+    CHECK(physics.Raycast({0, .6f, 0}, {1, 0, 0}, 10, &hit, &point));
+    CHECK(hit == sphere);
+    CHECK(Near(point.x, 2.2f));
+    CHECK(!physics.Raycast({0, .8f, .8f}, {1, 0, 0}, 10, &hit, &point));
+    CHECK(hit == nullptr);
+    CHECK(physics.RaycastSphere({0, 0, 0}, {1, 0, 0}, 10, .2f, &hit, &point));
+    CHECK(Near(point.x, 1.8f));
+    CHECK(!physics.RaycastSphere({0, .9f, .9f}, {1, 0, 0}, 10, .2f, &hit, &point));
+    Archura::PhysicsSystem::ShapeCastHit cast;
+    CHECK(physics.SweepSphere({0, .6f, 0}, {10, 0, 0}, .2f, cast));
+    CHECK(cast.entity == sphere->GetHandle());
+    CHECK(Near(cast.distance, 3 - std::sqrt(1.44f - .36f)));
+    CHECK(cast.normal.x < -.8f && cast.normal.y > .4f);
+    // This path crosses the sphere's bounding cube but misses its rounded edge.
+    const auto corner = physics.MoveKinematicAABB({0, 1.05f, 1.05f}, glm::vec3(.1f), {6, 0, 0}, 1);
+    CHECK(Near(corner.position.x, 6));
+    const auto blocked = physics.MoveKinematicAABB({0, 0, 0}, glm::vec3(.1f), {6, 0, 0}, 1);
+    CHECK(blocked.position.x > 1.89f && blocked.position.x < 1.91f);
+}
+
+void TestSphereBoxAndSphereSphereRoundedContacts() {
+    {
+        Archura::Scene scene("sphere-box-corner");
+        AddSphere(scene, "sphere", {0, 0, 0}, 1);
+        auto* box = AddBox(scene, "corner", {.9f, .9f, 0}, glm::vec3(.2f), true);
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        int contacts = 0;
+        physics.SetOnCollisionEnter([&](const Archura::CollisionEvent&) { ++contacts; });
+        physics.Update(1.f / 60);
+        CHECK(contacts == 0);
+        CHECK(box->GetComponent<Archura::Transform>()->position == glm::vec3(.9f, .9f, 0));
+        box->GetComponent<Archura::Transform>()->position = {.75f, 0, 0};
+        physics.Update(1.f / 60);
+        CHECK(contacts == 1);
+        CHECK(box->GetComponent<Archura::Transform>()->position.x > .9f);
+    }
+    {
+        Archura::Scene scene("sphere-sphere-corner");
+        AddSphere(scene, "fixed", {0, 0, 0}, 1);
+        auto* sphere = AddSphere(scene, "diagonal", {1.5f, 1.5f, 0}, 1, true);
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        physics.Update(1.f / 60);
+        CHECK(physics.GetActiveContactCount() == 0);
+        CHECK(sphere->GetComponent<Archura::Transform>()->position == glm::vec3(1.5f, 1.5f, 0));
+    }
+}
+
+void TestSphereMassMomentumAndBounce() {
+    Archura::Scene scene("sphere-momentum");
+    auto* left = AddSphere(scene, "light", {-.49f, 0, 0}, .5f, true);
+    auto* right = AddSphere(scene, "heavy", {.49f, 0, 0}, .5f, true);
+    auto* a = left->GetComponent<Archura::RigidBody>();
+    auto* b = right->GetComponent<Archura::RigidBody>();
+    a->mass = 1; b->mass = 3;
+    a->velocity.x = 2; b->velocity.x = 0;
+    a->friction = b->friction = 0;
+    a->restitution = b->restitution = 1;
+    Archura::PhysicsSystem physics; physics.Init(&scene);
+    physics.Update(1.f / 60);
+    CHECK(a->velocity.x < -.9f);
+    CHECK(b->velocity.x > .9f);
+    CHECK(Near(a->mass * a->velocity.x + b->mass * b->velocity.x, 2, .01f));
+    CHECK(Near(a->mass * a->velocity.x * a->velocity.x +
+               b->mass * b->velocity.x * b->velocity.x, 4, .03f));
+}
+
+void TestSphereGravityToggleRestAndMaterialBounce() {
+    {
+        Archura::Scene scene("sphere-gravity");
+        AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30});
+        auto* sphere = AddSphere(scene, "ball", {0, 3, 0}, .5f, true);
+        auto* body = sphere->GetComponent<Archura::RigidBody>();
+        auto* transform = sphere->GetComponent<Archura::Transform>();
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        Advance(physics, 30);
+        CHECK(Near(transform->position.y, 3));
+        body->useGravity = true;
+        Advance(physics, 20);
+        CHECK(transform->position.y < 2.7f);
+        CHECK(body->velocity.y < -2);
+        Advance(physics, 160);
+        CHECK(transform->position.y > .48f && transform->position.y < .52f);
+        CHECK(std::abs(body->velocity.y) < .2f);
+    }
+    for (bool bouncyFloor : {false, true}) {
+        Archura::Scene scene("sphere-bounce-material");
+        auto* floor = AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30}, bouncyFloor);
+        if (bouncyFloor) {
+            auto* body = floor->GetComponent<Archura::RigidBody>();
+            body->isKinematic = true;
+            body->restitution = .8f;
+        }
+        auto* ball = AddSphere(scene, "ball", {0, .51f, 0}, .5f, true);
+        auto* body = ball->GetComponent<Archura::RigidBody>();
+        body->restitution = bouncyFloor ? 0 : .8f;
+        body->velocity.y = -3;
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        physics.Update(1.f / 60);
+        CHECK(body->velocity.y > 2.3f);
+    }
+}
+
+void TestSphereRollingAndRampDescent() {
+    {
+        Archura::Scene scene("sphere-rolling");
+        AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30});
+        auto* sphere = AddSphere(scene, "rolling", {0, .5f, 0}, .5f, true);
+        auto* body = sphere->GetComponent<Archura::RigidBody>();
+        body->useGravity = true;
+        body->velocity.x = 3;
+        body->angularDrag = 0;
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        Advance(physics, 60);
+        CHECK(sphere->GetComponent<Archura::Transform>()->position.x > 1);
+        CHECK(body->angularVelocity.z < -1);
+        CHECK(glm::length(sphere->GetComponent<Archura::Transform>()->rotation) > 1);
+        // With no contact friction, sliding does not invent a rolling spin.
+        auto* slider = AddSphere(scene, "frictionless", {0, .5f, 3}, .5f, true);
+        auto* sliding = slider->GetComponent<Archura::RigidBody>();
+        sliding->useGravity = true; sliding->friction = 0; sliding->velocity.x = 3;
+        Advance(physics, 30);
+        CHECK(glm::length(sliding->angularVelocity) < .001f);
+    }
+    {
+        Archura::Scene scene("sphere-ramp-descent");
+        AddRamp(scene, "ramp", {0, 0, 0}, {4, 2, 8});
+        AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30});
+        auto* sphere = AddSphere(scene, "ball", {0, 2.2f, -2}, .5f, true);
+        auto* body = sphere->GetComponent<Archura::RigidBody>();
+        body->useGravity = true; body->continuous = true;
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        Advance(physics, 180);
+        const auto position = sphere->GetComponent<Archura::Transform>()->position;
+        CHECK(position.z > 1);
+        CHECK(position.y > .45f);
+        CHECK(glm::length(body->angularVelocity) > .1f);
+        CHECK(std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z));
+    }
+}
+
+void TestSphereScaledParentAndCenterPolicy() {
+    Archura::Scene scene("sphere-world-scale");
+    auto* parent = scene.CreateEntity("parent");
+    auto* transform = parent->GetComponent<Archura::Transform>();
+    transform->position = {10, 0, 0};
+    transform->rotation.z = 90;
+    transform->scale = {-2, 3, 1};
+    auto* sphere = AddSphere(scene, "child", {1, 0, 0}, .5f);
+    sphere->GetComponent<Archura::BoxCollider>()->center = {.5f, 0, 0};
+    CHECK(sphere->TrySetParent(parent));
+    // Transformed center (10,-3,0), uniform world radius .5 * max(2,3,1).
+    Archura::PhysicsSystem physics; physics.Init(&scene);
+    Archura::Entity* hit = nullptr; glm::vec3 point;
+    CHECK(physics.Raycast({0, -3, 0}, {1, 0, 0}, 20, &hit, &point));
+    CHECK(hit == sphere && Near(point.x, 8.5f));
+    CHECK(physics.Raycast({10, -3, -5}, {0, 0, 1}, 20, &hit, &point));
+    CHECK(Near(point.z, -1.5f)); // remains a sphere, not a scaled ellipsoid
+}
+
+void TestCharacterPushMassAndOptOut() {
+    auto pushVelocity = [](float mass, bool push, bool enabled, bool kinematic) {
+        Archura::Scene scene("character-push");
+        auto* sphere = AddSphere(scene, "ball", {2, 0, 0}, .5f, true);
+        auto* body = sphere->GetComponent<Archura::RigidBody>();
+        body->mass = mass; body->canBePushed = enabled; body->isKinematic = kinematic;
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        const auto result = physics.MoveKinematicAABB({0, 0, 0}, {.3f, .9f, .3f}, {4, 0, 0}, 1, {}, push, 80);
+        CHECK(result.position.x < 1.21f); // contacts never teleport either participant
+        CHECK(Near(sphere->GetComponent<Archura::Transform>()->position.x, 2));
+        return body->velocity.x;
+    };
+    const float light = pushVelocity(1, true, true, false);
+    const float heavy = pushVelocity(800, true, true, false);
+    CHECK(light > 3 && light <= 4);
+    CHECK(heavy > 0 && heavy < light * .2f);
+    CHECK(Near(pushVelocity(1, false, true, false), 0));
+    CHECK(Near(pushVelocity(1, true, false, false), 0));
+    CHECK(Near(pushVelocity(1, true, true, true), 0));
+    CHECK(Near(pushVelocity(0, true, true, false), 0));
+    {
+        Archura::Scene boxes("push-box-and-static");
+        auto* movable = AddBox(boxes, "movable", {2, 0, 0}, glm::vec3(1), true);
+        auto* fixed = AddBox(boxes, "static", {2, 0, 3}, glm::vec3(1));
+        Archura::PhysicsSystem boxPhysics; boxPhysics.Init(&boxes);
+        const auto pushed = boxPhysics.MoveKinematicAABB({0, 0, 0}, {.3f, .9f, .3f}, {4, 0, 0}, 1, {}, true);
+        const auto blocked = boxPhysics.MoveKinematicAABB({0, 0, 3}, {.3f, .9f, .3f}, {4, 0, 0}, 1, {}, true);
+        CHECK(pushed.position.x < 1.21f && blocked.position.x < 1.21f);
+        CHECK(movable->GetComponent<Archura::RigidBody>()->velocity.x > 3);
+        CHECK(fixed->GetComponent<Archura::Transform>()->position == glm::vec3(2, 0, 3));
+        boxPhysics.Update(1.f / 60);
+        CHECK(movable->GetComponent<Archura::Transform>()->position.x > 2.04f);
+    }
+    Archura::Scene scene("push-ball-wall");
+    AddBox(scene, "wall", {3, 0, 0}, {.2f, 4, 4});
+    auto* ball = AddSphere(scene, "ball", {2, 0, 0}, .5f, true);
+    ball->GetComponent<Archura::RigidBody>()->continuous = true;
+    Archura::PhysicsSystem physics; physics.Init(&scene);
+    glm::vec3 character(0);
+    for (int i = 0; i < 120; ++i) {
+        character = physics.MoveKinematicAABB(character, {.3f, .9f, .3f}, {6, 0, 0}, 1.f / 60, {}, true).position;
+        physics.Update(1.f / 60);
+        CHECK(ball->GetComponent<Archura::Transform>()->position.x < 2.43f);
+        CHECK(character.x < 1.66f);
+    }
+    CHECK(ball->GetComponent<Archura::Transform>()->position.x > 2.3f);
+}
 } // namespace
 
 int main() {
@@ -533,6 +759,13 @@ int main() {
     TestDeterministicCanonicalPairOrder();
     TestSpiralBoundDropsExcessTime();
     TestProjectileSweepFilteringAndNearestHit();
+    TestSphereQueriesAndRoundedCharacterCorners();
+    TestSphereBoxAndSphereSphereRoundedContacts();
+    TestSphereMassMomentumAndBounce();
+    TestSphereGravityToggleRestAndMaterialBounce();
+    TestSphereRollingAndRampDescent();
+    TestSphereScaledParentAndCenterPolicy();
+    TestCharacterPushMassAndOptOut();
     if (gFailures != 0) {
         std::cerr << gFailures << " physics test(s) failed\n";
         return 1;

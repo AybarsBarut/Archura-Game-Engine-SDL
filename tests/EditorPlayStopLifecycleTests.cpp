@@ -46,6 +46,48 @@ bool NearVec3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f) {
     return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
 }
 
+void TestBallSettingsRestoreAcrossPlayStop() {
+    Scene scene("ball authoring");
+    auto* ball = scene.CreateEntity("Ball");
+    const auto persistentID = ball->GetPersistentID();
+    auto* collider = ball->AddComponent<BoxCollider>();
+    collider->shape = BoxCollider::Shape::Sphere;
+    collider->radius = 0.8f;
+    auto* body = ball->AddComponent<RigidBody>();
+    body->angularVelocity = {1, -2, 3};
+    body->angularDrag = 0.35f;
+    body->mass = 8;
+    body->canBePushed = false;
+    body->useGravity = false;
+    PlayModeSession session;
+    PlayModeContext context{};
+    context.scene = &scene;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        EXPECT_TRUE(session.EnterPlayMode(context));
+        ball = scene.GetEntityByPersistentID(persistentID);
+        const auto previousHandle = ball->GetHandle();
+        collider = ball->GetComponent<BoxCollider>();
+        body = ball->GetComponent<RigidBody>();
+        collider->shape = BoxCollider::Shape::Box;
+        collider->radius = 5;
+        body->angularVelocity = {9, 8, 7};
+        body->angularDrag = 4;
+        body->canBePushed = true;
+        body->useGravity = true;
+        body->mass = 20;
+        EXPECT_TRUE(session.ExitPlayMode(context));
+        EXPECT_FALSE(scene.IsAlive(previousHandle));
+        ball = scene.GetEntityByPersistentID(persistentID);
+        EXPECT_TRUE(ball != nullptr);
+        if (!ball) return;
+        collider = ball->GetComponent<BoxCollider>();
+        body = ball->GetComponent<RigidBody>();
+        EXPECT_TRUE(collider && collider->shape == BoxCollider::Shape::Sphere && Near(collider->radius, 0.8f));
+        EXPECT_TRUE(body && NearVec3(body->angularVelocity, {1, -2, 3}) && Near(body->angularDrag, 0.35f) &&
+                    Near(body->mass, 8) && !body->canBePushed && !body->useGravity);
+    }
+}
+
 void TestRejectedSnapshotsAndWrongSceneStop() {
     struct Unhandled final : Component { int authored = 71; };
     Scene scene("guarded authoring");
@@ -613,6 +655,7 @@ extern "C" int SDLCALL SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
 extern "C" int SDLCALL SDL_ShowCursor(int) { return 0; }
 
 int main() {
+    TestBallSettingsRestoreAcrossPlayStop();
     TestRejectedSnapshotsAndWrongSceneStop();
     TestSnapshotLifetimeAndShutdownRelease();
     TestEditorModeFailureAndReentrancy();

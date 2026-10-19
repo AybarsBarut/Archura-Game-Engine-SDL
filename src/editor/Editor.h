@@ -240,6 +240,13 @@ private:
         glm::vec3   bcSize    = {1,1,1}, bcCenter = {};
         bool        bcTrigger = false;
         int         bcShape   = 0;
+        float       bcRadius  = 0.5f;
+        bool        hasBody   = false;
+        glm::vec3   bodyVelocity = {}, bodyForce = {}, bodyAngularVelocity = {};
+        float       bodyMass = 1.0f, bodyDrag = 0.1f, bodyBounce = 0.0f;
+        float       bodyFriction = 0.6f, bodyAngularDrag = 0.1f;
+        bool        bodyGravity = true, bodyKinematic = false;
+        bool        bodyContinuous = false, bodyPushable = true;
         bool        hasScript = false;
         std::string scriptClass;
     };

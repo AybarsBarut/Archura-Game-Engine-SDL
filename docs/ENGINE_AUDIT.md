@@ -251,3 +251,36 @@ RAMP-01 final gate: all-target VS2022 x64 Debug/Release builds and staging PASS;
 full CTest33/33 each (17.96s/15.36s). Physics.Core1.61s/0.07s. Existing real OpenGL,
 network two-client, standalone package, Play/Stop and serialization checks remain
 passed. Independent read-only physics review found no actionable regression.
+
+## PHYS-BALL — Sphere shapes and player-driven dynamic objects
+
+The Inspector previously offered only Box/Ramp, and the kinematic player query
+removed contact velocity without transferring momentum to scene bodies. Existing
+RigidBody mass/gravity/material fields were not exposed in the Inspector. A sphere
+mesh therefore used a box collider and could not behave as a pushable rolling ball.
+
+Sphere(2) adds a local radius with largest-world-axis scale policy. Broadphase uses
+its bounding cube; narrowphase uses sphere/sphere distance, sphere/box closest point
+and sphere/ramp closest triangles, including inside depenetration. Ray/sphere casts,
+character rounded sweeps/probes, editor picking and debug rendering honor the shape.
+Sphere friction uses solid-sphere inertia and contact angular velocity; integration
+updates world spin and visible orientation while preserving an offset collider center.
+Material bounce now combines using max, so a bouncy sphere rebounds from a static
+floor with no body component. Linear mass weighting and gravity remain intact.
+
+FPSController explicitly enables finite-mass contact pushing; pure movement queries
+retain a default without pushing. Dynamic objects can opt out; statics/kinematics
+remain obstacles. The80kg player transfers a reduced-mass impulse and never teleports
+bodies. The Inspector exposes motion/mass/gravity/push/material controls, matching
+Sphere defaults, an explicit Ball preset and primitive collider fitting. Scene/
+project/clipboard/PlayStop paths retain the new shape, radius, spin and push fields.
+
+Supported geometry is Box/Ramp/Sphere; this is not arbitrary mesh/capsule/stair
+collision, general rotating polyhedra or replicated network ball simulation.
+
+PHYS-BALL final VS2022 x64 gate: all-target Debug/Release compile/link/staging
+PASS; full33/33 CTest each17.32s/15.45s, Physics.Core1.42s/0.07s. Native startup,
+PlayStop, standalone OpenGL/Mono and two-OpenGL-network tests remain green. Final
+independent physics/editor review found no actionable defect. Initial all-target
+build exposed a stale GameplayScroll physics stub signature; updated the stub and
+repeated both complete builds/tests successfully.

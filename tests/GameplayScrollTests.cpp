@@ -109,7 +109,7 @@ bool PhysicsSystem::Raycast(const glm::vec3 &, const glm::vec3 &, float,
 
 PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
     const glm::vec3 &position, const glm::vec3 &, const glm::vec3 &velocity,
-    float, EntityHandle) const {
+    float, EntityHandle, bool, float) const {
   return CharacterMoveResult{position, velocity, false, false};
 }
 

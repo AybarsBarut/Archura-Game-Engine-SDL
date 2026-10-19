@@ -272,3 +272,38 @@ For manual verification, add a Ramp on a flat floor, enter Play and walk onto it
 low end at slow and normal speed. Repeat after yaw rotation, walk down, and check
 that its side/back still block. Use the newly built engine under
 `build/windows-x64/bin/Debug` or `Release`. No scene migration is required.
+
+## Sphere colliders and movable objects
+
+Use **Top (Dynamic Ball)** in Game Builder, or **Ball** in the editor's primitive
+menu, for a sphere with gravity,1kg mass, bounce0.6, friction0.5 and player pushing.
+Normal Sphere primitives receive a matching sphere collider but remain static.
+Enter Play to simulate. Stop restores the authored pose and body settings.
+
+For an existing object, select it and configure the Inspector:
+
+| Control | Behavior |
+|---|---|
+| Collider / Shape | Box, Ramp or Sphere; Sphere exposes Radius instead of Size. |
+| Fit Primitive Collider | Match an unchanged Cube/Sphere/Ramp mesh recipe and center. |
+| Physics / Motion | Static removes RigidBody; Dynamic uses finite mass; Kinematic is moved by gameplay. |
+| Mass (kg), Use Gravity | Set inertia for linear response and enable falling on dynamic bodies. |
+| Pushable by Player | Allow player contact impulses; heavier objects respond less. |
+| Bounce, Friction | Control rebound and surface sliding/rolling. |
+| Linear Drag, Angular Drag | Dampen movement; angular drag is available for spheres. |
+| Apply Ball Physics | Apply the explicit ball preset to a sphere collider. |
+
+Player movement transfers a finite80kg-character contact impulse. It does not move
+the object directly; regular physics resolves subsequent movement against walls.
+Sphere contacts use round geometry against spheres, box bounds and ramp triangles;
+contact friction produces angular spin and visible rotation. Sphere radius uses the
+largest transformed scale axis, preserving a sphere under nonuniform scaling.
+Both collider-debug views and editor sphere picking use that same radius policy.
+
+Projects, scenes and copy/paste retain all new settings. Older files receive the
+new-field defaults. Supported shapes remain Box/Ramp/Sphere: arbitrary imported
+triangle meshes, capsules and stairs do not yet gain matching native collider types.
+Box contacts remain world AABBs. Sphere rotation is supported; general rigid-body
+box rotation/constraints and network replication of these objects are separate work.
+The Continuous Collision toggle enables bounded adaptive substeps, not an
+unlimited-speed collision guarantee.

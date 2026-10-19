@@ -55,6 +55,8 @@ private:
     Camera* m_Camera;
     std::unique_ptr<Shader> m_DefaultShader;
     std::shared_ptr<class Mesh> m_DebugMesh;
+    std::shared_ptr<class Mesh> m_DebugSphere;
+    std::shared_ptr<class Mesh> m_DebugRamp;
 
     // Editor camera view override (set per-frame when EditorCamera is active)
     glm::mat4 m_ViewOverride     = glm::mat4(1.0f);

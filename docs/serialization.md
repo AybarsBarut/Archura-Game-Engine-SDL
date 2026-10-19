@@ -15,6 +15,22 @@ Runtime script instance IDs and audio playback handles/state are reset. Asset
 paths retain existing working-directory-relative semantics; packaging/relocation
 is not implemented. Texture cache keys use the canonical complete path.
 
+Collider records support Box (0), Ramp (1) and Sphere (2). Sphere `radius` is a
+positive local-space value, defaulting to 0.5 when absent; the physics system
+uses the largest world basis length to keep the scaled collider spherical.
+The shared `components.collider` record retains radius, center, size and trigger
+settings. Scene files also retain top-level `collider_radius` alongside legacy
+collider fields. Old box/ramp saves retain their original shape.
+
+Rigid bodies preserve mass, gravity, linear velocity/force, friction, restitution,
+drag, kinematic/continuous settings and `can_be_pushed`, `angular_velocity`
+(world-space radians/second), `angular_drag`. Absent new fields default to player
+push enabled, zero angular velocity and angular damping 0.1. Mass zero remains
+readable as static; negative mass/damping/friction, restitution outside [0,1],
+nonpositive collider radius and nonfinite values reject before scene replacement.
+Saving invalid physics settings preserves the preceding file. Play/Stop copies
+these components directly and restores authored sphere/angular/push settings.
+
 Every entity has a separate persistent identity: 32 lowercase hexadecimal digits
 encoding a nonzero random 128-bit value. Version-2 records use `persistent_id`
 and `parent_persistent_id` (empty for roots); runtime numeric handles are not

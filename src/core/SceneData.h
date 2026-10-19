@@ -29,6 +29,19 @@ struct EntityData {
     std::optional<Weapon> weapon;
 };
 inline void Vec(std::ostream& out, const glm::vec3& v) { out << '[' << v.x << ',' << v.y << ',' << v.z << ']'; }
+inline bool ValidCollider(const BoxCollider& collider) {
+    const int shape = static_cast<int>(collider.shape);
+    return shape >= 0 && shape <= 2 && std::isfinite(collider.radius) && collider.radius > 0;
+}
+inline bool ValidRigidBody(const RigidBody& body) {
+    return std::isfinite(body.mass) && body.mass >= 0 &&
+        std::isfinite(body.drag) && body.drag >= 0 &&
+        std::isfinite(body.angularDrag) && body.angularDrag >= 0 &&
+        std::isfinite(body.restitution) && body.restitution >= 0 && body.restitution <= 1 &&
+        std::isfinite(body.friction) && body.friction >= 0 &&
+        std::isfinite(body.angularVelocity.x) && std::isfinite(body.angularVelocity.y) &&
+        std::isfinite(body.angularVelocity.z);
+}
 inline bool HasOnlySupportedComponents(Entity* entity) {
     const size_t known = static_cast<size_t>(entity->HasComponent<Transform>()) +
         entity->HasComponent<MeshRenderer>() + entity->HasComponent<BoxCollider>() +
@@ -40,6 +53,8 @@ inline bool HasOnlySupportedComponents(Entity* entity) {
     return known == entity->GetComponentCount();
 }
 inline bool WriteComponents(std::ostream& out, Entity* entity) {
+    if (const auto* collider = entity->GetComponent<BoxCollider>(); collider && !ValidCollider(*collider)) return false;
+    if (const auto* body = entity->GetComponent<RigidBody>(); body && !ValidRigidBody(*body)) return false;
     out << ",\n      \"engine_owned\":" << (entity->IsEngineOwned() ? "true" : "false");
     out << ",\n      \"persistent_id\":\"" << entity->GetPersistentID()
         << "\",\"parent_persistent_id\":\""
@@ -52,9 +67,9 @@ inline bool WriteComponents(std::ostream& out, Entity* entity) {
         first = false;
     }
     auto key = [&](const char* name) { if (!first) out << ','; first = false; out << '"' << name << "\":{"; };
-    if (auto* c = entity->GetComponent<BoxCollider>()) { key("collider"); out << "\"size\":"; Vec(out,c->size);out << ",\"center\":";Vec(out,c->center);out << ",\"shape\":" << static_cast<int>(c->shape) << ",\"trigger\":" << (c->isTrigger?"true":"false") << '}'; }
+    if (auto* c = entity->GetComponent<BoxCollider>()) { key("collider"); out << "\"size\":"; Vec(out,c->size);out << ",\"center\":";Vec(out,c->center);out << ",\"shape\":" << static_cast<int>(c->shape) << ",\"radius\":" << c->radius << ",\"trigger\":" << (c->isTrigger?"true":"false") << '}'; }
     if (auto* c = entity->GetComponent<LightComponent>()) { key("light"); out << "\"type\":" << static_cast<int>(c->type) << ",\"color\":";Vec(out,c->color);out << ",\"intensity\":" << c->intensity << ",\"range\":" << c->range << '}'; }
-    if (auto* c = entity->GetComponent<RigidBody>()) { key("rigid_body"); out << "\"velocity\":";Vec(out,c->velocity);out << ",\"force\":";Vec(out,c->force);out << ",\"mass\":" << c->mass << ",\"drag\":" << c->drag << ",\"restitution\":" << c->restitution << ",\"friction\":" << c->friction << ",\"gravity\":" << (c->useGravity?"true":"false") << ",\"kinematic\":" << (c->isKinematic?"true":"false") << ",\"continuous\":" << (c->continuous?"true":"false") << '}'; }
+    if (auto* c = entity->GetComponent<RigidBody>()) { key("rigid_body"); out << "\"velocity\":";Vec(out,c->velocity);out << ",\"force\":";Vec(out,c->force);out << ",\"angular_velocity\":";Vec(out,c->angularVelocity);out << ",\"angular_drag\":" << c->angularDrag << ",\"can_be_pushed\":" << (c->canBePushed?"true":"false") << ",\"mass\":" << c->mass << ",\"drag\":" << c->drag << ",\"restitution\":" << c->restitution << ",\"friction\":" << c->friction << ",\"gravity\":" << (c->useGravity?"true":"false") << ",\"kinematic\":" << (c->isKinematic?"true":"false") << ",\"continuous\":" << (c->continuous?"true":"false") << '}'; }
     if (auto* c = entity->GetComponent<Health>()) { key("health");out << "\"current\":" << c->current << ",\"max\":" << c->max << ",\"dead\":" << (c->isDead?"true":"false") << '}'; }
     if (auto* c = entity->GetComponent<ScriptComponent>()) { key("script");out << "\"class_name\":\"" << Escape(c->className) << "\"}"; }
     if (auto* c = entity->GetComponent<SpawnPoint>()) { key("spawn");out << "\"team_id\":" << c->teamId << '}'; }
@@ -91,9 +106,9 @@ inline bool ReadComponents(const Json& data, EntityData& result) {
             result.weapon = std::move(weapon);
             continue;
         }
-        if(key=="collider") { BoxCollider v;int shape=0;if(!Vec3Field(c,"size",v.size)||!Vec3Field(c,"center",v.center)||!IntField(c,"shape",shape)||shape<0||shape>1||!BoolField(c,"trigger",v.isTrigger))return false;v.shape=static_cast<BoxCollider::Shape>(shape);result.collider=v; }
+        if(key=="collider") { BoxCollider v;int shape=0;if(!Vec3Field(c,"size",v.size)||!Vec3Field(c,"center",v.center)||!IntField(c,"shape",shape)||shape<0||shape>2||!FloatField(c,"radius",v.radius)||!BoolField(c,"trigger",v.isTrigger))return false;v.shape=static_cast<BoxCollider::Shape>(shape);if(!ValidCollider(v))return false;result.collider=v; }
         else if(key=="light") { LightComponent v;int type=1;if(!Vec3Field(c,"color",v.color)||!FloatField(c,"intensity",v.intensity)||!FloatField(c,"range",v.range)||!IntField(c,"type",type)||type<0||type>2||v.intensity<0||v.range<0)return false;v.type=static_cast<LightComponent::Type>(type);result.light=v; }
-        else if(key=="rigid_body") { RigidBody v;if(!Vec3Field(c,"velocity",v.velocity)||!Vec3Field(c,"force",v.force)||!FloatField(c,"mass",v.mass)||!FloatField(c,"drag",v.drag)||!FloatField(c,"restitution",v.restitution)||!FloatField(c,"friction",v.friction)||!BoolField(c,"gravity",v.useGravity)||!BoolField(c,"kinematic",v.isKinematic)||!BoolField(c,"continuous",v.continuous))return false;result.rigidBody=v; }
+        else if(key=="rigid_body") { RigidBody v;if(!Vec3Field(c,"velocity",v.velocity)||!Vec3Field(c,"force",v.force)||!Vec3Field(c,"angular_velocity",v.angularVelocity)||!FloatField(c,"angular_drag",v.angularDrag)||!BoolField(c,"can_be_pushed",v.canBePushed)||!FloatField(c,"mass",v.mass)||!FloatField(c,"drag",v.drag)||!FloatField(c,"restitution",v.restitution)||!FloatField(c,"friction",v.friction)||!BoolField(c,"gravity",v.useGravity)||!BoolField(c,"kinematic",v.isKinematic)||!BoolField(c,"continuous",v.continuous)||!ValidRigidBody(v))return false;result.rigidBody=v; }
         else if(key=="health") { Health v;if(!FloatField(c,"current",v.current)||!FloatField(c,"max",v.max)||!BoolField(c,"dead",v.isDead))return false;result.health=v; }
         else if(key=="script") { ScriptComponent v;if(!StringField(c,"class_name",v.className,true))return false;result.script=std::move(v); }
         else if(key=="spawn") { SpawnPoint v;if(!IntField(c,"team_id",v.teamId))return false;result.spawn=v; }

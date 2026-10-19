@@ -410,7 +410,7 @@ void FPSController::HandleMovement(Input* input, float deltaTime,
     if (physicsSystem) {
         const auto move = physicsSystem->MoveKinematicAABB(
             center, glm::vec3(playerRadius, playerHeight * 0.5f, playerRadius),
-            m_Velocity, deltaTime);
+            m_Velocity, deltaTime, {}, true);
         m_Velocity = move.velocity;
         m_IsGrounded = move.grounded;
         m_Camera->SetPosition(move.position + glm::vec3(0.0f, playerHeight * 0.5f, 0.0f));

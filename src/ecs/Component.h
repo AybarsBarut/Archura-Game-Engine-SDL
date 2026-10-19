@@ -75,13 +75,15 @@ struct MeshRenderer : public Component {
 struct BoxCollider : public Component {
     enum class Shape : std::uint8_t {
         Box = 0,
-        Ramp = 1
+        Ramp = 1,
+        Sphere = 2
     };
 
     glm::vec3 size = glm::vec3(1.0f); // Boyutlar (Genislik, Yukseklik, Derinlik)
     glm::vec3 center = glm::vec3(0.0f); // Merkez ofseti
     bool isTrigger = false;
     Shape shape = Shape::Box;
+    float radius = 0.5f; // Sphere local radius; largest world scale keeps a sphere.
 };
 
 /**
@@ -111,6 +113,9 @@ struct RigidBody : public Component {
     // Enables adaptive motion substeps. This is bounded CCD mitigation for
     // linear AABB motion, not a general-purpose continuous convex solver.
     bool continuous = false;
+    bool canBePushed = true;
+    glm::vec3 angularVelocity{0.0f}; // world-space radians/second (sphere inertia)
+    float angularDrag = 0.1f;
 };
 
 /**

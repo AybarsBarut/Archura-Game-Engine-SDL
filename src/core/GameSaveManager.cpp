@@ -302,6 +302,7 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
             file << "      \"collider\": [" << bc->size.x << "," << bc->size.y << "," << bc->size.z << "],\n";
             file << "      \"collider_center\": [" << bc->center.x << "," << bc->center.y << "," << bc->center.z << "],\n";
             file << "      \"collider_shape\": " << static_cast<int>(bc->shape) << ",\n";
+            file << "      \"collider_radius\": " << bc->radius << ",\n";
             file << "      \"collider_trigger\": " << (bc->isTrigger ? "true" : "false") << ",\n";
         }
 
@@ -404,6 +405,7 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
         glm::vec3 color{1.0f};
         glm::vec3 colliderSize{1.0f};
         glm::vec3 colliderCenter{0.0f};
+        float colliderRadius = 0.5f;
         glm::vec3 lightColor{1.0f};
         int colliderShape = 0;
         int lightType = 0;
@@ -437,6 +439,7 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
             !Serialization::BoolField(data, "collider_trigger", current.colliderTrigger) ||
             !Serialization::IntField(data, "light_type", current.lightType) ||
             !Serialization::IntField(data, "collider_shape", current.colliderShape) ||
+            !Serialization::FloatField(data, "collider_radius", current.colliderRadius) ||
             !Serialization::FloatField(data, "light_intensity", current.lightIntensity) ||
             !Serialization::FloatField(data, "light_range", current.lightRange) ||
             !Serialization::Vec3Field(data, "position", current.position) ||
@@ -535,7 +538,7 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
         current.hasCollider = data.Find("collider") != nullptr;
         current.hasColliderShape = data.Find("collider_shape") != nullptr;
         current.hasLight = data.Find("light_type") != nullptr;
-        if (current.colliderShape < 0 || current.colliderShape > 1 || current.lightType < 0 || current.lightType > 2 ||
+        if (current.colliderShape < 0 || current.colliderShape > 2 || current.colliderRadius <= 0 || current.lightType < 0 || current.lightType > 2 ||
             current.lightIntensity < 0 || current.lightRange < 0) return false;
         if (!Serialization::ReadComponents(data, current.extra)) return false;
         if (current.extra.skybox) {
@@ -625,8 +628,9 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
                 auto* col = e->AddComponent<BoxCollider>();
                 col->size = data.colliderSize;
                 col->center = data.colliderCenter;
+                col->radius = data.colliderRadius;
                 col->shape = data.hasColliderShape
-                                 ? static_cast<BoxCollider::Shape>(data.colliderShape == 1 ? 1 : 0)
+                                 ? static_cast<BoxCollider::Shape>(data.colliderShape)
                                  : (data.meshType == "ramp" ? BoxCollider::Shape::Ramp
                                                                : BoxCollider::Shape::Box);
                 col->isTrigger = data.colliderTrigger;

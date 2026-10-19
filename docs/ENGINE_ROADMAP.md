@@ -97,3 +97,11 @@ an upward normal at coincident entry edges. Forty previously failing sustained
 walk cases, tangent/jump/descent, side/back and ceiling checks pass. Continue the
 planned local presentation work after this correctness gate; arbitrary mesh
 collision and stair stepping remain separate capabilities.
+
+PHYS-BALL adds native Sphere collider queries/contacts, editable finite-mass/gravity/
+material behavior, sphere rolling and finite-mass player push. Inspector motion and
+explicit Ball presets are backed by actual runtime components; save/load/copy/Stop
+retain the settings. Supported native shapes are now Box/Ramp/Sphere. Remaining
+geometry work includes capsule/stair/mesh colliders, rotating convex rigid bodies
+and broader continuous collision; network dynamic-object replication is also open.
+Continue local render-pose work as planned after this user-requested physics gate.

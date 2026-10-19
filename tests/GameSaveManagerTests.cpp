@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -112,6 +113,36 @@ int main() {
         f << text;
     };
     {
+        Archura::Scene compatibility;
+        write(R"({"entities":[{"name":"old box","has_mesh_renderer":false,"collider":[1,1,1],"components":{"rigid_body":{"mass":2}}}]})");
+        Check(saves.LoadProject("input.scene", &compatibility), "legacy body and box load with absent new fields");
+        const auto* oldBody = compatibility.GetEntities()[0]->GetComponent<Archura::RigidBody>();
+        const auto* oldCollider = compatibility.GetEntities()[0]->GetComponent<Archura::BoxCollider>();
+        Check(oldBody && oldBody->canBePushed && oldBody->angularDrag == 0.1f &&
+                  oldBody->angularVelocity == glm::vec3(0) && oldBody->mass == 2 &&
+                  oldCollider && oldCollider->shape == Archura::BoxCollider::Shape::Box && oldCollider->radius == 0.5f,
+              "legacy files keep existing shape and default push/angular settings");
+        write(R"({"entities":[{"name":"explicit sphere","has_mesh_renderer":false,"collider":[1,1,1],"collider_shape":2}]})");
+        Check(saves.LoadProject("input.scene", &compatibility), "top-level collider sphere shape remains readable");
+        const auto* explicitSphere = compatibility.GetEntities()[0]->GetComponent<Archura::BoxCollider>();
+        Check(explicitSphere && explicitSphere->shape == Archura::BoxCollider::Shape::Sphere && explicitSphere->radius == 0.5f,
+              "explicit sphere with absent radius uses local radius 0.5");
+        const auto protectedHandle = compatibility.GetEntities()[0]->GetHandle();
+        const std::string invalidPhysics[] = {
+            R"("collider_shape":3)", R"("collider_radius":0)",
+            R"("components":{"collider":{"shape":2,"radius":1e90}})",
+            R"("components":{"rigid_body":{"angular_drag":-1}})",
+            R"("components":{"rigid_body":{"angular_velocity":[1,2]}})",
+            R"("components":{"rigid_body":{"can_be_pushed":"true"}})"
+        };
+        for (const auto& fields : invalidPhysics) {
+            write("{\"entities\":[{\"name\":\"invalid physics\",\"has_mesh_renderer\":false," + fields + "}]}");
+            Check(!saves.LoadProject("input.scene", &compatibility) && compatibility.IsAlive(protectedHandle) &&
+                      compatibility.GetEntities().size() == 1,
+                  "malformed sphere/body scene rejects transactionally");
+        }
+    }
+    {
         std::ofstream broken("broken.obj");
         broken << "not an OBJ model";
     }
@@ -127,6 +158,15 @@ int main() {
           "legacy sphere retains source type");
     auto* mesh = scene.GetEntities()[0]->GetComponent<Archura::MeshRenderer>();
     mesh->SetMeshAsset(Archura::Mesh::CreateSphereShared(2.5f, 12));
+    auto* ballCollider = scene.GetEntities()[0]->AddComponent<Archura::BoxCollider>();
+    ballCollider->shape = Archura::BoxCollider::Shape::Sphere;
+    ballCollider->radius = 2.5f;
+    auto* ballBody = scene.GetEntities()[0]->AddComponent<Archura::RigidBody>();
+    ballBody->mass = 4.5f;
+    ballBody->angularVelocity = {2.0f, 3.0f, -4.0f};
+    ballBody->angularDrag = 0.25f;
+    ballBody->canBePushed = false;
+    ballBody->restitution = 0.6f;
     auto* child = scene.CreateEntity("child");
     child->TrySetParent(scene.GetEntities()[0].get());
     child->AddComponent<Archura::ScriptComponent>()->className = "Example.Script";
@@ -143,6 +183,15 @@ int main() {
     Check(source.type == Archura::MeshSourceType::Sphere && source.radius == 2.5f &&
               source.segments == 12,
           "mesh type and dimensions survive roundtrip");
+    const auto* reloadedCollider = restored.GetEntities()[1]->GetComponent<Archura::BoxCollider>();
+    const auto* reloadedBody = restored.GetEntities()[1]->GetComponent<Archura::RigidBody>();
+    Check(reloadedCollider && reloadedCollider->shape == Archura::BoxCollider::Shape::Sphere &&
+              reloadedCollider->radius == 2.5f,
+          "scene content preserves sphere collider independently from the mesh recipe");
+    Check(reloadedBody && reloadedBody->mass == 4.5f && reloadedBody->angularVelocity == ballBody->angularVelocity &&
+              reloadedBody->angularDrag == 0.25f && !reloadedBody->canBePushed &&
+              reloadedBody->useGravity && reloadedBody->restitution == 0.6f,
+          "scene content preserves dynamic ball settings and angular state");
     Check(restored.GetEntities()[2]->GetParent() == restored.GetEntities()[1].get(),
           "hierarchy survives roundtrip");
     Check(restored.GetEntities()[2]->GetComponent<Archura::ScriptComponent>()->className ==
@@ -185,6 +234,18 @@ int main() {
         text << f.rdbuf();
         return text.str() == expected.str();
     };
+    ballCollider->radius = -1.0f;
+    Check(!saves.SaveProject("roundtrip", &scene) && verifyPrevious(),
+          "negative collider radius rejects save without replacing previous content");
+    ballCollider->radius = 2.5f;
+    ballBody->angularDrag = -1.0f;
+    Check(!saves.SaveProject("roundtrip", &scene) && verifyPrevious(),
+          "negative angular damping rejects save without replacing previous content");
+    ballBody->angularDrag = 0.25f;
+    ballBody->angularVelocity.y = std::numeric_limits<float>::infinity();
+    Check(!saves.SaveProject("roundtrip", &scene) && verifyPrevious(),
+          "nonfinite angular velocity rejects save without replacing previous content");
+    ballBody->angularVelocity.y = 3.0f;
     auto* invalidLight = scene.GetEntities()[0]->AddComponent<Archura::LightComponent>();
     invalidLight->intensity = -1.0f;
     Check(!saves.SaveProject("roundtrip", &scene) && verifyPrevious(),
