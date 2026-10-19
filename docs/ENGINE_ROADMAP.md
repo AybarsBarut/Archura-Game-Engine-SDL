@@ -30,8 +30,8 @@ pass 23/23 (Debug 2.02 s, Release 1.65 s). Execution gates: `.gauntlet/LOOP_PLAN
 | Done, Loop 3 | Authored Play/Stop boundary in `Application`/`Editor`/`PlayModeSession`/`ScriptSystem`, generation-checked `EditorSelectionState`, rebinding runtime references through persistent IDs, and transient audio/physics/script/projectile/particle cleanup. | Edit does not simulate; 20-cycle Play/Stop restores authored values and removes runtime-only entities; Debug/Release 23/23 pass. |
 | Done, Loops 4 & 5 | Configurable aggregate `SceneReconstructionBudget`, project-root asset resolution (`ResourceManager`), canonical texture keys (`ASSET-01`), `GameBuilderPanel` `assets/models` fallback, `AudioSystem::ResolveAudioPath` & runtime alias opening (`AUD-01`, `AUD-02`), world-space render culling (`REND-01`), and `Terrain` heightmap leak/rectangular/scale/bounds repairs (`TERR-01`). | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation, duplicate texture stems, `assets/models` fallback, audio paths, and rectangular scaled terrain pass in Debug/Release 23/23. |
 | Done, Loop 7 CLI | Manifest-selected runtime startup, portable package builder and sample (`PKG-01`). | External-CWD OpenGL/Mono launch loads the exact authored scene with no Editor; broader dependency/clean-OS/export-UI work remains. |
-| Partial, Loop9 slice done | Dedicated authoritative movement, graphical camera/remote meshes and shared static arena collision (`NET-01`). | Real two-OpenGL-client pause/Stop/rejoin/server-loss and collision checks PASS; custom levels, vertical/player collision, combat/auth/prediction remain. Next bounded work: snapshot/render interpolation. |
-| P1 | Previous/current transform render interpolation (`TIME-01`) and retained runtime UI backend (`UI-01`). | Cross-FPS gameplay assertions and retained UI interaction tests pass. |
+| Partial, Loop9 slice done | Dedicated authoritative movement, graphical camera/remote meshes and shared static arena collision (`NET-01`). | Real two-OpenGL-client pause/Stop/rejoin/server-loss and collision checks PASS; custom levels, vertical/player collision, combat/auth/prediction remain. Loop10 adds bounded snapshot/render interpolation; local simulation presentation remains next. |
+| Partial, Loop10 network done | Previous/current local transform render interpolation (`TIME-01`) and retained runtime UI backend (`UI-01`). | Cross-FPS gameplay assertions and retained UI interaction tests pass. |
 
 Keep these as sequential acceptance gates. Performance, renderer and UI expansion
 follow the measured/reproducible work units below; no FPS improvement is inferred
@@ -76,3 +76,16 @@ server-loss cleanup have real two-OpenGL-client acceptance. NET-01 remains parti
 for arbitrary shared levels, vertical/player collision, combat, authentication and
 prediction. Next measured work unit: TIME-01 snapshot/render interpolation while
 keeping authoritative128Hz state and authored transforms unchanged.
+
+Loop10 completes bounded network presentation: separate latest authority and
+per-frame interpolated camera/remote transforms, four-tick delay,32-snapshot cap,
+starvation clamping and discontinuity/reconnect handling. One fixed128Hz trajectory
+passes30/60/120/144/240FPS sampling; two real OpenGL clients retain pause/Stop/rejoin,
+collision, authored safety and server-loss acceptance. Both configurations pass33/33.
+
+Next gauntlet unit: inspect the local fixed-step/render boundary, reproduce visible
+stepping with a deterministic moving body, and add previous/current render poses
+without writing presentation back into simulation or serialized authored transforms.
+Explicitly test parent/child transforms, spawn/despawn, teleport and Play/Stop reset;
+then compare local movement/cooldown/jump across render rates and stalls. Keep128Hz
+and current physics cadence until evidence justifies a separate timing change.
