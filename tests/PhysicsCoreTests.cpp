@@ -268,6 +268,91 @@ void TestDynamicBodyResolvesAgainstRampSurface() {
     CHECK(body->velocity.y > -1.0f);
 }
 
+void TestRepeatedWalkIntoRampEntrance() {
+    Archura::Scene scene("ramp-entrance-walk");
+    AddRamp(scene, "ramp", glm::vec3(0), {4, 2, 4});
+    AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30});
+    Archura::PhysicsSystem physics;
+    physics.Init(&scene);
+    glm::vec3 position(0, .901f, 3);
+    float vertical = 0;
+    for (int tick = 0; tick < 256; ++tick) {
+        vertical -= 9.81f/128;
+        const auto move = physics.MoveKinematicAABB(position, {.3f, .9f, .3f}, {0, vertical, -4}, 1.f/128);
+        position = move.position; vertical = move.velocity.y;
+    }
+    CHECK(position.z < -2.5f);
+}
+
+void TestRampEntranceAcrossSpeedsAndRotations() {
+    for (float yaw : {0.f, 30.f, 90.f, 180.f, 270.f})
+    for (float speed : {.5f, 2.f, 4.f, 8.f})
+    for (float height : {.9f, .901f}) {
+        Archura::Scene scene("ramp-entrance-variants");
+        auto* ramp = AddRamp(scene, "ramp", glm::vec3(0), {4, 2, 4});
+        ramp->GetComponent<Archura::Transform>()->rotation.y = yaw;
+        AddBox(scene, "floor", {0, -.5f, 0}, {30, 1, 30});
+        Archura::PhysicsSystem physics; physics.Init(&scene);
+        const float angle = yaw*3.14159265f/180;
+        const glm::vec3 outward(std::sin(angle), 0, std::cos(angle));
+        glm::vec3 position = outward*3.f + glm::vec3(0,height,0);
+        float vertical = 0;
+        bool grounded = false;
+        for (int tick = 0; tick < static_cast<int>(1280/speed); ++tick) {
+            if (!grounded) vertical -= 9.81f/128;
+            const auto move = physics.MoveKinematicAABB(position, {.3f,.9f,.3f},
+                -outward*speed+glm::vec3(0,vertical,0), 1.f/128);
+            position = move.position; vertical = move.velocity.y; grounded = move.grounded;
+        }
+        if (glm::dot(position,outward) >= -2.5f)
+            std::cerr << "Stuck yaw=" << yaw << " speed=" << speed << " height=" << height
+                      << " final=" << position.x << ',' << position.y << ',' << position.z << '\n';
+        CHECK(glm::dot(position,outward) < -2.5f);
+    }
+}
+
+void TestRampDepartureWallsAndCeiling() {
+    Archura::Scene scene("ramp-boundaries");
+    AddRamp(scene, "ramp", glm::vec3(0), {4, 2, 4});
+    AddBox(scene, "floor", {0,-.5f,0}, {30,1,30});
+    Archura::PhysicsSystem physics; physics.Init(&scene);
+    const glm::vec3 extent(.3f,.9f,.3f);
+    const auto back = physics.MoveKinematicAABB({0,.901f,-3}, extent, {0,0,4}, 1);
+    CHECK(back.position.z <= -2.299f);
+    const auto side = physics.MoveKinematicAABB({3,.901f,-1}, extent, {-4,0,0}, 1);
+    CHECK(side.position.x >= 2.299f);
+    // Start exactly on the expanded slope: tangent and separating motions must
+    // not report the low-end face behind the character as a zero-time wall.
+    const auto tangent = physics.MoveKinematicAABB({0,2.05f,0}, extent, {0,1,-2}, .1f);
+    CHECK(tangent.position.z < -.15f);
+    const auto jump = physics.MoveKinematicAABB({0,2.05f,0}, extent, {0,4,0}, .1f);
+    CHECK(jump.position.y > 2.4f);
+
+    glm::vec3 position(0,2.801f,-1.5f);
+    float vertical = 0;
+    bool grounded = false;
+    for (int i = 0; i < 192; ++i) {
+        if (!grounded) vertical -= 9.81f/128;
+        const auto move = physics.MoveKinematicAABB(position, extent, {0,vertical,4}, 1.f/128);
+        position = move.position; vertical = move.velocity.y; grounded = move.grounded;
+    }
+    CHECK(position.z > 3.5f);
+    CHECK(position.y >= .899f && position.y < 1.2f);
+
+    AddBox(scene, "ceiling", {0,2.6f,0}, {6,1,6});
+    position = {0,.901f,3}; vertical = 0; grounded = false;
+    bool hitCeiling = false;
+    for (int i = 0; i < 128; ++i) {
+        if (!grounded) vertical -= 9.81f/128;
+        const auto move = physics.MoveKinematicAABB(position, extent, {0,vertical,-4}, 1.f/128);
+        position = move.position; vertical = move.velocity.y; grounded = move.grounded;
+        hitCeiling |= move.hitCeiling;
+        CHECK(position.y <= 1.202f);
+    }
+    CHECK(hitCeiling);
+    CHECK(position.z > 1.65f);
+}
+
 void TestCharacterInitialPenetrationAndSurfaceDeparture() {
     Archura::Scene scene("character-overlap");
     AddBox(scene, "wall", {0.0f, 0.0f, 0.0f}, {2.0f, 4.0f, 4.0f});
@@ -437,6 +522,9 @@ int main() {
     TestAuthoritativeCharacterSweep();
     TestRampShapeQueriesAndCharacterClimb();
     TestDynamicBodyResolvesAgainstRampSurface();
+    TestRepeatedWalkIntoRampEntrance();
+    TestRampEntranceAcrossSpeedsAndRotations();
+    TestRampDepartureWallsAndCeiling();
     TestCharacterInitialPenetrationAndSurfaceDeparture();
     TestStaticBodyVelocityDoesNotInjectImpulse();
     TestDestroyDuringCollisionCallback();

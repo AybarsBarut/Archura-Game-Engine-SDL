@@ -260,3 +260,15 @@ ctest --test-dir build/windows-x64 -C Debug -R GraphicalIntegration --output-on-
 The diagnostic GFXSNAP line separates latest PLAYER authority from PLAYER positions
 after the VIEW marker; CAM must match the local VIEW player. Native validation also
 checks actual remote transforms/assets. These are correctness tests, not FPS benchmarks.
+
+RAMP-01 fixes repeated walking onto the editor's Ramp collider. Focused verification:
+
+```powershell
+cmake --build build/windows-x64 --config Debug --target ArchuraPhysicsCoreTests --parallel 4
+ctest --test-dir build/windows-x64 -C Debug -R Physics.Core --output-on-failure
+```
+
+For manual verification, add a Ramp on a flat floor, enter Play and walk onto its
+low end at slow and normal speed. Repeat after yaw rotation, walk down, and check
+that its side/back still block. Use the newly built engine under
+`build/windows-x64/bin/Debug` or `Release`. No scene migration is required.
