@@ -107,6 +107,11 @@ bool PhysicsSystem::Raycast(const glm::vec3 &, const glm::vec3 &, float,
   return false;
 }
 
+bool PhysicsSystem::GetPullableBodyCenter(EntityHandle, glm::vec3&) const { return false; }
+bool PhysicsSystem::PullBodyToward(EntityHandle, const glm::vec3&, float) { return false; }
+bool PhysicsSystem::SweepSphere(const glm::vec3&, const glm::vec3&, float,
+    ShapeCastHit&, const QueryFilter&) const { return false; }
+
 PhysicsSystem::CharacterMoveResult PhysicsSystem::MoveKinematicAABB(
     const glm::vec3 &position, const glm::vec3 &, const glm::vec3 &velocity,
     float, EntityHandle, bool, float) const {

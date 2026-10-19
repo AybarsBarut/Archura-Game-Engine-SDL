@@ -419,6 +419,50 @@ bool PhysicsSystem::ApplyImpulse(EntityHandle target, const glm::vec3& impulse, 
     return true;
 }
 
+bool PhysicsSystem::GetPullableBodyCenter(EntityHandle target, glm::vec3& center) const {
+    const auto lifetime=m_SceneLifetime.lock();
+    if (!lifetime || !*lifetime) return false;
+    const auto* entity=m_Scene->GetEntity(target);
+    const auto* body=entity ? entity->GetComponent<RigidBody>() : nullptr;
+    const auto* collider=entity ? entity->GetComponent<BoxCollider>() : nullptr;
+    if (InverseMass(body)<=0 || !body->canBePushed || !collider || collider->isTrigger ||
+        !IsFinite(body->velocity)) return false;
+    glm::vec3 result;
+    if (collider->shape==BoxCollider::Shape::Sphere) {
+        float radius;
+        if (!WorldSphere(*entity,*collider,result,radius)) return false;
+    } else {
+        const auto bounds=WorldAABB(*entity,*collider);
+        if (!IsFinite(bounds.min) || !IsFinite(bounds.max)) return false;
+        result=(bounds.min+bounds.max)*.5f;
+    }
+    if (!IsFinite(result)) return false;
+    center=result;
+    return true;
+}
+
+bool PhysicsSystem::PullBodyToward(EntityHandle target, const glm::vec3& worldTarget, float deltaTime) {
+    glm::vec3 center;
+    if (!m_Simulating || !IsFinite(worldTarget) || !std::isfinite(deltaTime) ||
+        deltaTime<=0 || deltaTime>.05f || !GetPullableBodyCenter(target,center)) return false;
+    const auto* body=m_Scene->GetEntity(target)->GetComponent<RigidBody>();
+    glm::vec3 desired=(worldTarget-center)*6.f;
+    const float desiredSpeed=glm::length(desired);
+    if (!std::isfinite(desiredSpeed)) return false;
+    if (desiredSpeed>8) desired*=8/desiredSpeed;
+    glm::vec3 acceleration=(desired-body->velocity)*12.f;
+    const float accelerationLength=glm::length(acceleration);
+    if (!std::isfinite(accelerationLength)) return false;
+    if (accelerationLength>80) acceleration*=80/accelerationLength;
+    glm::vec3 force=(acceleration-(body->useGravity ? m_Gravity : glm::vec3(0)))*body->mass;
+    const float forceLength=glm::length(force);
+    if (!std::isfinite(forceLength)) return false;
+    if (forceLength>500) force*=500/forceLength;
+    // Contact solver owns positions. Releasing simply stops these impulses;
+    // velocity, angular velocity and authored body settings remain intact.
+    return ApplyImpulse(target,force*deltaTime,center);
+}
+
 void PhysicsSystem::Integrate(float deltaTime) {
     for (const auto& entityPtr : m_Scene->GetEntities()) {
         auto* body = entityPtr->GetComponent<RigidBody>();

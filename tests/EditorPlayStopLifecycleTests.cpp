@@ -47,6 +47,204 @@ bool NearVec3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f) {
     return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
 }
 
+struct GrabFixture {
+    Scene scene{"physics hold input"};
+    Camera camera{glm::vec3(0, 5, 0)};
+    Input input{nullptr};
+    FPSController controller{&camera};
+    PhysicsSystem physics;
+
+    GrabFixture() {
+        physics.Init(&scene);
+        controller.SetGravityEnabled(false);
+        input.SetCursorMode(2);
+    }
+    Entity* Ball(Scene* destination = nullptr) {
+        auto* entity = (destination ? destination : &scene)->CreateEntity("custom authored sphere");
+        entity->GetComponent<Transform>()->position = camera.GetPosition() + camera.GetFront() * 3.0f;
+        auto* collider = entity->AddComponent<BoxCollider>();
+        collider->shape = BoxCollider::Shape::Sphere;
+        collider->radius = .5f;
+        auto* body = entity->AddComponent<RigidBody>();
+        body->mass = 2;
+        body->useGravity = false;
+        body->drag = body->angularDrag = 0;
+        return entity;
+    }
+    void Hold(bool down, bool mouse = false) {
+        SDL_Event event{};
+        event.type = mouse ? (down ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP)
+                           : (down ? SDL_KEYDOWN : SDL_KEYUP);
+        if (mouse) event.button.button = SDL_BUTTON_RIGHT;
+        else event.key.keysym.scancode = SDL_SCANCODE_E;
+        input.OnEvent(event);
+    }
+    void Tick(Scene* source = nullptr) {
+        controller.SetVelocity({});
+        controller.Update(&input, source ? source : &scene, 1.0f / 128.0f, nullptr, &physics);
+    }
+};
+
+void TestHoldUsesPhysicsAndPreservesReleaseMomentum() {
+    for (bool mouse : {false, true}) {
+        GrabFixture fixture;
+        auto* ball = fixture.Ball();
+        auto* body = ball->GetComponent<RigidBody>();
+        auto* transform = ball->GetComponent<Transform>();
+        body->angularVelocity = {0, 1, 0};
+        body->restitution = .7f;
+        body->friction = .25f;
+        fixture.Hold(true, mouse);
+        fixture.Tick();
+        EXPECT_TRUE(fixture.controller.IsGrabbing());
+        EXPECT_TRUE(fixture.controller.GetGrabbedEntity() == ball->GetHandle());
+
+        // Controller pulls through velocity; only a physics step may move the body.
+        const auto initialPosition = transform->position;
+        fixture.camera.SetPosition(fixture.camera.GetPosition() + glm::vec3(.5f, 0, 0));
+        fixture.Tick();
+        EXPECT_TRUE(NearVec3(transform->position, initialPosition));
+        EXPECT_TRUE(body->velocity.x > .01f && glm::length(body->velocity) < 2.0f);
+        EXPECT_TRUE(NearVec3(body->angularVelocity, {0, 1, 0}));
+        fixture.physics.Update(1.0f / 60.0f);
+        EXPECT_TRUE(transform->position.x > initialPosition.x);
+
+        const auto velocity = body->velocity;
+        const auto angularVelocity = body->angularVelocity;
+        fixture.Hold(false, mouse);
+        fixture.Tick();
+        EXPECT_FALSE(fixture.controller.IsGrabbing());
+        EXPECT_FALSE(fixture.controller.GetGrabbedEntity());
+        EXPECT_TRUE(NearVec3(body->velocity, velocity));
+        EXPECT_TRUE(NearVec3(body->angularVelocity, angularVelocity));
+        EXPECT_TRUE(Near(body->mass, 2) && !body->useGravity && !body->isKinematic && body->canBePushed);
+        EXPECT_TRUE(Near(body->restitution, .7f) && Near(body->friction, .25f));
+        const auto releasedPosition = transform->position;
+        fixture.physics.Update(1.0f / 60.0f);
+        EXPECT_TRUE(transform->position.x > releasedPosition.x);
+    }
+}
+
+void TestHoldRequiresEligibleNearestSolidBody() {
+    // Display names never confer permission to move static authored geometry.
+    for (int kind = 0; kind < 7; ++kind) {
+        GrabFixture fixture;
+        auto* ball = fixture.Ball();
+        auto* body = ball->GetComponent<RigidBody>();
+        if (kind == 0) ball->RemoveComponent<RigidBody>();
+        if (kind == 1) body->isKinematic = true;
+        if (kind == 2) body->mass = 0;
+        if (kind == 3) body->canBePushed = false;
+        if (kind == 4) ball->GetComponent<BoxCollider>()->isTrigger = true;
+        if (kind == 5) ball->RemoveComponent<BoxCollider>();
+        if (kind == 6) ball->GetComponent<Transform>()->position = fixture.camera.GetPosition() + fixture.camera.GetFront() * 17.0f;
+        const auto position = ball->GetComponent<Transform>()->position;
+        fixture.Hold(true);
+        fixture.Tick();
+        fixture.camera.SetPosition(fixture.camera.GetPosition() + glm::vec3(.5f, 0, 0));
+        fixture.Tick();
+        EXPECT_FALSE(fixture.controller.IsGrabbing());
+        EXPECT_TRUE(NearVec3(ball->GetComponent<Transform>()->position, position));
+    }
+    GrabFixture fixture;
+    auto* ball = fixture.Ball();
+    auto* wall = fixture.scene.CreateEntity("custom wall blocks acquisition");
+    wall->GetComponent<Transform>()->position = fixture.camera.GetPosition() + fixture.camera.GetFront() * 1.5f;
+    wall->AddComponent<BoxCollider>();
+    fixture.Hold(true);
+    fixture.Tick();
+    EXPECT_FALSE(fixture.controller.IsGrabbing());
+    EXPECT_TRUE(NearVec3(ball->GetComponent<RigidBody>()->velocity, {}));
+    // Sensor volumes do not obstruct a solid-object hold.
+    wall->GetComponent<BoxCollider>()->isTrigger = true;
+    fixture.Tick();
+    EXPECT_TRUE(fixture.controller.IsGrabbing());
+    fixture.Tick();
+    EXPECT_TRUE(fixture.controller.IsGrabbing());
+    wall->GetComponent<BoxCollider>()->isTrigger = false;
+    fixture.Tick();
+    EXPECT_FALSE(fixture.controller.IsGrabbing());
+
+    Scene other("mismatched physics binding");
+    fixture.Ball(&other);
+    fixture.Tick(&other);
+    EXPECT_FALSE(fixture.controller.IsGrabbing());
+    fixture.physics.Init(&other);
+    fixture.Tick(&other);
+    EXPECT_TRUE(fixture.controller.IsGrabbing());
+}
+
+void TestHoldReleasesForInputLifetimeAndObstruction() {
+    for (int reason = 0; reason < 8; ++reason) {
+        GrabFixture fixture;
+        auto* ball = fixture.Ball();
+        fixture.Hold(true);
+        fixture.Tick();
+        EXPECT_TRUE(fixture.controller.IsGrabbing());
+        auto* body = ball->GetComponent<RigidBody>();
+        body->velocity = {.3f, .2f, -.1f};
+        body->angularVelocity = {.1f, .2f, .3f};
+        const auto velocity = body->velocity;
+        const auto angularVelocity = body->angularVelocity;
+        if (reason == 0) fixture.input.SetCursorMode(0);
+        if (reason == 1) {
+            SDL_Event lost{};
+            lost.type = SDL_WINDOWEVENT;
+            lost.window.event = SDL_WINDOWEVENT_FOCUS_LOST;
+            fixture.input.OnEvent(lost);
+        }
+        if (reason == 2) body->canBePushed = false;
+        if (reason == 3) body->isKinematic = true;
+        if (reason == 4) ball->GetComponent<BoxCollider>()->isTrigger = true;
+        if (reason == 5) {
+            auto* wall = fixture.scene.CreateEntity("new line of sight blocker");
+            wall->GetComponent<Transform>()->position = fixture.camera.GetPosition() + fixture.camera.GetFront() * 1.5f;
+            wall->AddComponent<BoxCollider>();
+        }
+        if (reason == 6) {
+            fixture.controller.ResetRuntimeState();
+            // Stop releases immediately even while the physical key is held.
+            EXPECT_FALSE(fixture.controller.IsGrabbing());
+            EXPECT_FALSE(fixture.controller.GetGrabbedEntity());
+            fixture.Hold(false);
+        }
+        if (reason == 7) fixture.camera.SetPosition({30, 5, 0});
+        fixture.Tick();
+        EXPECT_FALSE(fixture.controller.IsGrabbing());
+        EXPECT_FALSE(fixture.controller.GetGrabbedEntity());
+        EXPECT_TRUE(NearVec3(body->velocity, velocity));
+        EXPECT_TRUE(NearVec3(body->angularVelocity, angularVelocity));
+    }
+    {
+        GrabFixture fixture;
+        auto* ball = fixture.Ball();
+        const auto oldHandle = ball->GetHandle();
+        fixture.Hold(true);
+        fixture.Tick();
+        EXPECT_TRUE(fixture.controller.IsGrabbing());
+        fixture.scene.DestroyEntity(oldHandle);
+        auto* replacement = fixture.Ball();
+        EXPECT_TRUE(replacement->GetHandle() != oldHandle);
+        fixture.Tick();
+        EXPECT_FALSE(fixture.controller.IsGrabbing());
+        EXPECT_TRUE(NearVec3(replacement->GetComponent<RigidBody>()->velocity, {}));
+    }
+    {
+        GrabFixture fixture;
+        auto* ball = fixture.Ball();
+        fixture.Hold(true);
+        fixture.Tick();
+        EXPECT_TRUE(fixture.controller.IsGrabbing());
+        Scene replacementScene("same handle, different owning scene");
+        auto* replacement = fixture.Ball(&replacementScene);
+        EXPECT_TRUE(replacement->GetHandle() == ball->GetHandle());
+        fixture.physics.Init(&replacementScene);
+        fixture.Tick(&replacementScene);
+        EXPECT_FALSE(fixture.controller.IsGrabbing());
+        EXPECT_TRUE(NearVec3(replacement->GetComponent<RigidBody>()->velocity, {}));
+    }
+}
+
 void TestShootingBallTransfersImpulseAndAttachesDecal() {
     for (bool kinematic : {false, true}) {
         Scene scene("projectile vs ball");
@@ -703,6 +901,9 @@ extern "C" int SDLCALL SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
 extern "C" int SDLCALL SDL_ShowCursor(int) { return 0; }
 
 int main() {
+    TestHoldUsesPhysicsAndPreservesReleaseMomentum();
+    TestHoldRequiresEligibleNearestSolidBody();
+    TestHoldReleasesForInputLifetimeAndObstruction();
     TestShootingBallTransfersImpulseAndAttachesDecal();
     TestBallSettingsRestoreAcrossPlayStop();
     TestRejectedSnapshotsAndWrongSceneStop();

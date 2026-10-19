@@ -148,15 +148,18 @@ public:
         m_TargetRecoil = glm::vec3(0.0f);
         m_CurrentTilt = 0.0f;
         m_MouseDeltaX = 0.0f;
-        m_GrabbedEntity = {};
-        m_GrabDistance = 0.0f;
-        m_IsGrabbing = false;
+        ReleaseGrab();
         if (m_Camera) {
             m_Camera->SetRoll(0.0f);
         }
     }
 
 private:
+    void ReleaseGrab() noexcept {
+        m_GrabbedEntity = {}; m_GrabDistance = 0; m_IsGrabbing = false;
+        m_GrabSceneLifetime.reset();
+    }
+    std::weak_ptr<Scene*> m_GrabSceneLifetime;
     EntityHandle m_GrabbedEntity{};
     float m_GrabDistance = 0.0f;
     bool m_IsGrabbing = false;

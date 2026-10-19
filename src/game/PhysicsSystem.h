@@ -64,6 +64,12 @@ public:
     void SetOnCollisionExit(CollisionCallback cb) { m_OnExit = std::move(cb); }
 
     bool ApplyImpulse(EntityHandle target, const glm::vec3& impulse, const glm::vec3& worldPoint);
+    bool GetPullableBodyCenter(EntityHandle target, glm::vec3& center) const;
+    bool PullBodyToward(EntityHandle target, const glm::vec3& worldTarget, float deltaTime);
+    bool IsBoundTo(const Scene* scene) const noexcept {
+        const auto source=m_SceneLifetime.lock();
+        return source && *source==scene && m_Scene==scene;
+    }
     // Presentation only; never writes interpolated poses into scene transforms.
     glm::mat4 GetRenderWorldTransform(const Entity& entity, float additionalSeconds = 0) const;
 

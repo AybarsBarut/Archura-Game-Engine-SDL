@@ -724,6 +724,10 @@ if(BUILD_TESTING AND ARCHURA_BUILD_PHYSICS_TESTS)
         src/ecs/Component.cpp src/ecs/Entity.cpp src/game/PhysicsSystem.cpp)
     target_include_directories(ArchuraPhysicsPresentationTests PRIVATE src external/glm)
     add_test(NAME Archura.Physics.Presentation COMMAND ArchuraPhysicsPresentationTests)
+    add_executable(ArchuraPhysicsGrabTests tests/PhysicsGrabTests.cpp
+        src/ecs/Component.cpp src/ecs/Entity.cpp src/game/PhysicsSystem.cpp)
+    target_include_directories(ArchuraPhysicsGrabTests PRIVATE src external/glm)
+    add_test(NAME Archura.Physics.Grab COMMAND ArchuraPhysicsGrabTests)
     add_executable(ArchuraSurfaceAttachmentTests tests/SurfaceAttachmentTests.cpp
         src/ecs/Component.cpp src/ecs/Entity.cpp)
     target_include_directories(ArchuraSurfaceAttachmentTests PRIVATE src external/glm)

@@ -176,3 +176,16 @@ a2kg ball receives1.25m/s fromdamage25, its mark follows translation/rotation,
 deleting the ball removes the mark, and kinematic targets receive no impulse.
 These tests verify mechanics and interpolation; they do not measure monitor
 ghosting, subjective visual quality or FPS gains.
+
+GRAB-01 adds `Archura.Physics.Grab`: eligibility rejection for static/kinematic/
+zero-mass/opt-out/trigger bodies, invalid input, no pose/config writes,500N force
+and80m/s² response bounds, mass differences, gravity holding/release, momentum,
+wall contact, parent collider center and stale/reused scene/entity lifetimes.
+
+PlayStopLifecycle exercises actual Input/FPSController/Physics with injected E and
+right-mouse events: acquire, moving-camera impulse, release momentum and settings,
+seven ineligible cases, occluders, cursor/focus loss, body changes, reset, range,
+destroyed targets and identical handles in a different scene. OS pointer/keyboard
+delivery itself is outside the fixture. The GameplayScroll test retains lightweight
+stubs for the new holding API and continues checking scroll timing independently.
+GRAB-01 final edge cases also verify trigger volumes do not occlude acquisition/holding and mismatched Physics/Scene bindings cannot acquire an identically numbered entity.

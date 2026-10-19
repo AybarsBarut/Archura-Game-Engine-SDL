@@ -112,3 +112,15 @@ hierarchical decal attachment and safe pause/Stop/external-edit boundaries. Bull
 impulses now affect dynamic objects, and marks follow the struck surface instead
 of remaining in world space. General kinematic/script/camera interpolation and
 cross-FPS jump/cooldown cadence remain separate work; no physics rate was changed.
+
+GRAB-01 repairs the legacy direct-position object hold after the new ball workflow:
+finite-mass dynamic eligibility, bounded physics impulses, world-space centers,
+contact/visibility boundaries and release momentum now replace Transform lerping.
+Controller tests cover real E/right-mouse events and scene/handle resets. Further
+interaction work can build explicit joints/throw controls on this path; capsule/
+stair/mesh colliders and general camera/kinematic interpolation remain open.
+
+Next bounded physics unit: inspect Capsule mesh dimensions/origin, implement a
+native capsule collider and matching queries/contacts instead of its box fallback,
+then integrate Inspector/persistence and run shape-boundary plus full build gates.
+This is planned work; capsules still use the documented fallback in this revision.

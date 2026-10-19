@@ -27,7 +27,10 @@ FPSController::FPSController(Camera* camera)
 }
 
 void FPSController::Update(Input* input, Scene* scene, float deltaTime, ProjectileSystem* projectileSystem, PhysicsSystem* physicsSystem) {
-    if (!m_Camera) return;
+    if (!m_Camera || !std::isfinite(deltaTime) || deltaTime <= 0) {
+        ReleaseGrab();
+        return;
+    }
     // Mouse Look is now handled externally in Application::ProcessInput()
         
     HandleMovement(input, deltaTime, physicsSystem);
@@ -99,57 +102,45 @@ void FPSController::Update(Input* input, Scene* scene, float deltaTime, Projecti
         }
     }
 
-    // --- OBJECT GRABBING LOGIC ---
-    if (physicsSystem && scene && input && input->IsCursorLocked()) {
-        // We will use Right Mouse Button (SDL_BUTTON_RIGHT is usually 3) or E key for grabbing
-        bool grabInput = input->IsMouseButtonDown(3) || input->IsKeyDown(SDL_SCANCODE_E);
-        
-        if (grabInput) {
-            if (!m_IsGrabbing) {
-                // Try to grab
-                Entity* hitEntity = nullptr;
-                glm::vec3 hitPoint;
-                if (physicsSystem->Raycast(m_Camera->GetPosition(), m_Camera->GetFront(), 15.0f, &hitEntity, &hitPoint)) {
-                    // Check if entity is valid and has a transform
-                    if (hitEntity && hitEntity->HasComponent<Transform>() && hitEntity->GetName() != "Player" && hitEntity->GetName() != "Floor") {
-                        m_GrabbedEntity = hitEntity->GetHandle();
-                        m_GrabDistance = glm::distance(m_Camera->GetPosition(), hitPoint);
-                        // Make it slightly closer than the actual hit point to avoid clipping
-                        if (m_GrabDistance < 2.0f) m_GrabDistance = 2.0f;
-                        m_IsGrabbing = true;
-                    }
-                }
-            } else {
-                // Currently grabbing, update position
-                Entity* grabbedEntity = scene->GetEntity(m_GrabbedEntity);
-                if (grabbedEntity && grabbedEntity->HasComponent<Transform>()) {
-                    auto* transform = grabbedEntity->GetComponent<Transform>();
-                    
-                    // Calculate target position
-                    glm::vec3 targetPos = m_Camera->GetPosition() + m_Camera->GetFront() * m_GrabDistance;
-                    
-                    // If it has a rigidbody, zero out its velocity so it doesn't fall while grabbed
-                    if (grabbedEntity->HasComponent<RigidBody>()) {
-                        auto* rb = grabbedEntity->GetComponent<RigidBody>();
-                        rb->velocity = glm::vec3(0.0f); // Hold still
-                    }
-
-                    // Lerp position for smooth movement
-                    float grabSpeed = 15.0f;
-                    transform->position = transform->position + (targetPos - transform->position) * grabSpeed * deltaTime;
-                } else {
-                    // Entity might have been destroyed
-                    m_IsGrabbing = false;
-                    m_GrabbedEntity = {};
-                }
-            }
-        } else {
-            // Released button
-            if (m_IsGrabbing) {
-                m_IsGrabbing = false;
-                m_GrabbedEntity = {};
-            }
+    // Holding applies bounded impulses; physics owns collision and position.
+    const bool grabInput = input && input->IsCursorLocked() &&
+        (input->IsMouseButtonDown(3) || input->IsKeyDown(SDL_SCANCODE_E));
+    if (!physicsSystem || !scene || !grabInput || !physicsSystem->IsBoundTo(scene)) {
+        ReleaseGrab();
+        return;
+    }
+    if (m_IsGrabbing) {
+        const auto source = m_GrabSceneLifetime.lock();
+        if (!source || *source != scene) {
+            ReleaseGrab();
+            return;
         }
+        glm::vec3 center;
+        if (!physicsSystem->GetPullableBodyCenter(m_GrabbedEntity, center)) {
+            ReleaseGrab();
+            return;
+        }
+        const auto offset = center - m_Camera->GetPosition();
+        const float distance = glm::length(offset);
+        PhysicsSystem::ShapeCastHit visible;
+        if (!std::isfinite(distance) || distance > 20.0f || distance < 0.001f ||
+            !physicsSystem->SweepSphere(m_Camera->GetPosition(), offset / distance * (distance + 0.001f),
+                                        0, visible) ||
+            visible.entity != m_GrabbedEntity ||
+            !physicsSystem->PullBodyToward(m_GrabbedEntity,
+                m_Camera->GetPosition() + m_Camera->GetFront() * m_GrabDistance, deltaTime))
+            ReleaseGrab();
+        return;
+    }
+    PhysicsSystem::ShapeCastHit hit;
+    glm::vec3 center;
+    if (physicsSystem->SweepSphere(m_Camera->GetPosition(), m_Camera->GetFront()*15.0f, 0, hit) &&
+        scene->GetEntity(hit.entity) && hit.distance > 0.001f &&
+        physicsSystem->GetPullableBodyCenter(hit.entity, center)) {
+        m_GrabbedEntity = hit.entity;
+        m_GrabDistance = std::clamp(glm::distance(m_Camera->GetPosition(), center), 2.0f, 15.0f);
+        m_GrabSceneLifetime = scene->GetLifetimeToken();
+        m_IsGrabbing = true;
     }
 }
 
