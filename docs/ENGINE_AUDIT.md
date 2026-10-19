@@ -227,3 +227,27 @@ despawn/reuse, teleport and reconnect. Authority bytes remain unchanged. Actual
 native camera/mesh checks use presentation separately from common-tick authority.
 TIME-01 remains partial: singleplayer transforms, physics cadence, jump/cooldown
 cross-FPS acceptance and hierarchical render interpolation are separate work.
+
+## Ramp entrance sticking — RAMP-01 (2026-10-19)
+
+User reported sticking while walking onto a ramp from its low end. Reproduced in
+the actual MoveKinematicAABB query with repeated128Hz movement and the controller's
+grounded/gravity policy: all40 combinations of five yaw angles, four walking speeds
+and two starting heights stalled near the toe. The older one-shot climb test and
+continuous-gravity walk both passed, hiding the sustained-contact defect.
+
+RayConvex clamped a negative entry time to zero but retained the historical entry
+normal from a side plane behind the character. Near-tangent slope contact could
+therefore become a phantom wall. It now selects the nearest current face for
+inside/surface origins; coincident entry planes prefer the upward face, preserving
+the maximum entry time. Existing tangent/separating-motion filtering then works.
+
+All40 sustained walks now pass, along with direct tangent departure, jump, descent,
+side/back blocking and low-ceiling constraints. Simulation rate, collider data,
+scene formats and networking are unchanged. This fixes the existing convex ramp
+query; it does not introduce arbitrary triangle-mesh collision.
+
+RAMP-01 final gate: all-target VS2022 x64 Debug/Release builds and staging PASS;
+full CTest33/33 each (17.96s/15.36s). Physics.Core1.61s/0.07s. Existing real OpenGL,
+network two-client, standalone package, Play/Stop and serialization checks remain
+passed. Independent read-only physics review found no actionable regression.

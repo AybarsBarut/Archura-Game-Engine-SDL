@@ -135,3 +135,12 @@ validated natively against the sampled view. Full all-target Debug/Release build
 plus33/33 CTest each passed21.59s/15.26s (graphical10.40s/5.43s), SDL_net ON/OpenAL OFF.
 This does not certify singleplayer interpolation, jump/cooldown cross-FPS behavior,
 adaptive Internet buffering, prediction, GPU performance or subjective visual quality.
+
+RAMP-01 adds sustained character walking to `Archura.Physics.Core`: the editor's
+4x2x4 ramp, flat floor, AABB half-extents0.3/0.9/0.3 and repeated128Hz movement.
+Gravity is applied only while airborne, matching FPSController's policy. Five yaw
+angles (0/30/90/180/270), four speeds (0.5/2/4/8) and two starting heights produce
+40 cases. All40 failed before the fix and pass afterward. Separate checks cover
+tangent surface motion, jumping away, descending to flat floor, side/back faces
+and a low ceiling. Tests call the same physics query used by FPSController; they
+do not automate OS keyboard input or certify arbitrary mesh collision.

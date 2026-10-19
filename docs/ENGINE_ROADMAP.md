@@ -89,3 +89,11 @@ without writing presentation back into simulation or serialized authored transfo
 Explicitly test parent/child transforms, spawn/despawn, teleport and Play/Stop reset;
 then compare local movement/cooldown/jump across render rates and stalls. Keep128Hz
 and current physics cadence until evidence justifies a separate timing change.
+
+User-reported RAMP-01 took priority over local presentation work: repeated walking
+from the low end of a ramp exposed a zero-time historical side-normal collision.
+The convex query now uses the current nearest face for inside/surface starts and
+an upward normal at coincident entry edges. Forty previously failing sustained
+walk cases, tangent/jump/descent, side/back and ceiling checks pass. Continue the
+planned local presentation work after this correctness gate; arbitrary mesh
+collision and stair stepping remain separate capabilities.

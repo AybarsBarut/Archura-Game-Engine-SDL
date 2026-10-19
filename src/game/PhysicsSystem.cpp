@@ -84,9 +84,15 @@ bool RayConvex(const glm::vec3& origin, const glm::vec3& direction,
     float enter = -std::numeric_limits<float>::infinity();
     float exit = maxDistance;
     glm::vec3 enterNormal(0.0f);
+    float nearestSignedDistance = -std::numeric_limits<float>::infinity();
+    glm::vec3 nearestNormal(0.0f);
     bool hasEnteringPlane = false;
     for (const ConvexPlane& plane : planes) {
         const float signedDistance = glm::dot(plane.normal, origin) - plane.distance;
+        if (signedDistance > nearestSignedDistance) {
+            nearestSignedDistance = signedDistance;
+            nearestNormal = plane.normal;
+        }
         const float denominator = glm::dot(plane.normal, direction);
         if (std::abs(denominator) <= kEpsilon) {
             if (signedDistance > 0.0f) return false;
@@ -94,8 +100,8 @@ bool RayConvex(const glm::vec3& origin, const glm::vec3& direction,
         }
         const float time = -signedDistance / denominator;
         if (denominator < 0.0f) {
-            if (time > enter) {
-                enter = time;
+            if (time > enter || (std::abs(time-enter) <= kEpsilon && plane.normal.y > enterNormal.y)) {
+                enter = std::max(enter, time);
                 enterNormal = plane.normal;
             }
             hasEnteringPlane = true;
@@ -107,7 +113,10 @@ bool RayConvex(const glm::vec3& origin, const glm::vec3& direction,
     if (!hasEnteringPlane || exit < 0.0f || enter > maxDistance)
         return false;
     hitTime = std::max(0.0f, enter);
-    hitNormal = enterNormal;
+    // At a surface (or inside), the historical entry plane can be a distant
+    // side wall behind the origin. Use the nearest current face so tangent
+    // character motion does not acquire a phantom zero-time wall collision.
+    hitNormal = enter < 0.0f ? nearestNormal : enterNormal;
     return true;
 }
 
