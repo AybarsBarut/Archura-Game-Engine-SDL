@@ -216,6 +216,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/game/PauseMenu.cpp"
     "src/game/ScriptSystem.cpp"
     "src/game/GameModeManager.cpp"
+    "src/game/GraphicalNetworkSession.cpp"
     "src/rendering/Terrain.cpp"
     "src/rendering/PostProcess.cpp"
     "src/editor/PlayModeSession.cpp"
@@ -744,6 +745,13 @@ if(BUILD_TESTING)
             LABELS "network;integration" TIMEOUT 40 RUN_SERIAL TRUE)
     endif()
     if(ARCHURA_BUILD_STARTUP_TESTS)
+        if(Python3_Interpreter_FOUND AND ARCHURA_SDL_NET_TARGET)
+            add_test(NAME Archura.Network.GraphicalIntegration
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/GraphicalNetworkProcessTests.py"
+                    --server "$<TARGET_FILE:ArchuraServer>" --engine "$<TARGET_FILE:ArchuraEngine>")
+            set_tests_properties(Archura.Network.GraphicalIntegration PROPERTIES
+                LABELS "startup;integration;network" TIMEOUT 60 RUN_SERIAL TRUE)
+        endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME Archura.Startup.StandalonePackage
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/StandalonePackageSmoke.py"

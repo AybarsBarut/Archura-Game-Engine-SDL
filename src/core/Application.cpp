@@ -40,6 +40,7 @@
 #include "game/FPSConsoleCommands.h"
 #include "game/FPSController.h"
 #include "game/GameModeManager.h"
+#include "game/GraphicalNetworkSession.h"
 #include "game/ParticleSystem.h"
 #include "game/PauseMenu.h"
 #include "game/PhysicsSystem.h"
@@ -96,6 +97,7 @@ Application::Application(GraphicsLaunchOptions graphicsOptions)
 }
 
 Application::~Application() {
+  LeaveNetworkGame(); // Drop callbacks/GPU network owners before context teardown.
   // A Play snapshot can own the last references to GL assets deleted in Play.
   // Release those owners before Engine::Shutdown destroys the graphics context.
   m_PlaySession.DiscardSnapshot();
@@ -156,6 +158,92 @@ void Application::SetFPSLimit(float limit) {
 }
 
 void Application::SetDevMode(bool enabled) { m_DevModeActive = !m_Standalone && enabled; }
+
+bool Application::IsNetworkViewActive() const {
+  return m_NetworkGame && GameModeManager::Get().GetMode() == GameMode::MultiplayerClient &&
+      (!m_Editor || m_Editor->GetMode() == EditorMode::Play);
+}
+RenderSystem* Application::GetRenderSystem() {
+  return IsNetworkViewActive() ? &m_NetworkGame->GetRenderer() : m_RenderSystem.get();
+}
+Camera* Application::GetCamera() {
+  return IsNetworkViewActive() ? &m_NetworkGame->GetCamera() : m_Camera.get();
+}
+bool Application::JoinNetworkGame(const std::string& host, int port) {
+  if (port < 1 || port > 65535 || host.empty()) return false;
+  const bool enteredPlay = m_Editor && m_Editor->GetMode() == EditorMode::Edit;
+  if (m_Editor && !m_Editor->SetMode(EditorMode::Play)) return false;
+  LeaveNetworkGame();
+  if (GameModeManager::Get().ConnectToHost(host, static_cast<std::uint16_t>(port))) return true;
+  if (enteredPlay) m_Editor->SetMode(EditorMode::Edit);
+  m_IsPaused = true;
+  if (m_Input) m_Input->SetCursorMode(0);
+  return false;
+}
+void Application::LeaveNetworkGame() {
+  if (m_NetworkGame) {
+    NetworkManager::Get().SetOnWorldState({});
+    m_NetworkGame.reset();
+  }
+  m_NetworkSnapshotFailed = false;
+  if (GameModeManager::Get().GetMode() == GameMode::MultiplayerClient)
+    GameModeManager::Get().Disconnect();
+}
+
+bool Application::PumpNetworkGame() {
+  auto& network = NetworkManager::Get();
+  auto state = network.GetState();
+  const bool client = GameModeManager::Get().GetMode() == GameMode::MultiplayerClient;
+  if (!client || (state != ConnectionState::Handshaking && state != ConnectionState::Connected)) {
+    if (m_NetworkGame) LeaveNetworkGame();
+    if (network.IsServer()) network.UpdateServer(); // Legacy engine-host transport.
+    else if (!client && (state == ConnectionState::Handshaking || state == ConnectionState::Connected)) network.UpdateClient();
+    return false;
+  }
+  if (!m_NetworkGame) {
+    m_NetworkGame = std::make_unique<GraphicalNetworkSession>();
+    m_LastNetworkLoggedTick = 0;
+    m_NetworkStartedAt = SDL_GetTicks();
+    network.SetOnWorldState([this](const auto& bytes) {
+      if (!m_NetworkGame || !m_NetworkGame->Apply(bytes, NetworkManager::Get().GetLocalPeerId()))
+        m_NetworkSnapshotFailed = true;
+    });
+  }
+  if (state == ConnectionState::Handshaking) {
+    m_NetworkGame->ResetConnection(); // Includes server restart with reused peer IDs/ticks.
+    m_NetworkStartedAt = SDL_GetTicks();
+  }
+  network.UpdateClient();
+  if (!m_NetworkGame->Snapshot().tick && SDL_GetTicks()-m_NetworkStartedAt > 5000)
+    m_NetworkSnapshotFailed = true;
+  if (m_NetworkSnapshotFailed || network.GetState() == ConnectionState::Failed) {
+    const auto error = network.GetLastError();
+    LeaveNetworkGame();
+    m_IsPaused = true;
+    m_Input->SetCursorMode(0);
+    if (m_NetworkLaunch && m_NetworkLaunch->smoke) throw std::runtime_error("Graphical network failed: " + error);
+    std::cerr << "[Network] Session ended: invalid/missing arena snapshot or " << error << '\n';
+    return true; // Resume local simulation only on a subsequent tick.
+  }
+  if (network.IsConnected()) {
+    const bool active = IsNetworkViewActive() && !m_IsPaused &&
+        (m_Input->IsCursorLocked() || (m_NetworkLaunch && m_NetworkLaunch->smoke)) &&
+        !DevConsole::Get().IsOpen();
+    glm::vec2 axes{};
+    if (m_NetworkLaunch && m_NetworkLaunch->smoke) axes = {m_NetworkLaunch->moveX, m_NetworkLaunch->moveZ};
+    else {
+      const auto& bindings = m_FPSController->GetKeyBindings();
+      axes = GraphicalNetworkSession::Movement(m_NetworkGame->GetCamera(),
+          float(m_Input->IsKeyDown(bindings.forward))-float(m_Input->IsKeyDown(bindings.backward)),
+          float(m_Input->IsKeyDown(bindings.right))-float(m_Input->IsKeyDown(bindings.left)));
+    }
+    if (!network.SendPlayerInput(m_NetworkGame->Input(axes.x, axes.y, active))) {
+      LeaveNetworkGame();
+      if (m_NetworkLaunch && m_NetworkLaunch->smoke) throw std::runtime_error("Network input queue failed");
+    }
+  }
+  return true; // Authored scene scripts/physics/weapons are suspended throughout the network session.
+}
 
 bool Application::Init() {
   LogStartup("Init: Started");
@@ -367,6 +455,7 @@ bool Application::Init() {
         }
         auto &gmm = GameModeManager::Get();
         if (args[0] == "sp" || args[0] == "singleplayer") {
+          Application::Get().LeaveNetworkGame();
           gmm.Disconnect();
         } else if (args[0] == "host") {
           uint16_t port = args.size() > 1 ? (uint16_t)std::stoi(args[1]) : 7777;
@@ -374,7 +463,7 @@ bool Application::Init() {
         } else if (args[0] == "join") {
           std::string ip = args.size() > 1 ? args[1] : "127.0.0.1";
           uint16_t port = args.size() > 2 ? (uint16_t)std::stoi(args[2]) : 7777;
-          gmm.ConnectToHost(ip, port);
+          Application::Get().JoinNetworkGame(ip, port);
         } else {
           std::cout << "game_mode <sp|host [port]|join [ip] [port]>"
                     << std::endl;
@@ -445,7 +534,8 @@ void Application::InitializeGame(const GameManifest& game) {
             << "; editor=off\n";
 }
 
-void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game) {
+void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network) {
+  m_NetworkLaunch = network;
   m_Standalone = game != nullptr;
   if (m_Standalone) {
     if (playStopSmokeTest) throw std::runtime_error("Editor smoke cannot run in standalone mode");
@@ -580,6 +670,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
       std::cerr << "[Editor] Stop failed; Play snapshot retained for retry\n";
       return false;
     }
+    LeaveNetworkGame();
     if (m_Editor) {
       m_Editor->SanitizeSelection(m_Scene.get());
     }
@@ -734,8 +825,49 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
       throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
     smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
   }
+  std::string networkProbeID;
+  const auto authoredCameraPosition = m_Camera->GetPosition();
+  if (network && network->smoke) {
+    auto* probe = m_Scene->CreateEntity("Network smoke authored probe");
+    probe->GetComponent<Transform>()->position = {17, 20, 23};
+    probe->AddComponent<RigidBody>();
+    networkProbeID = probe->GetPersistentID();
+  }
+  if (network && !JoinNetworkGame(network->host, network->port)) throw std::runtime_error("Network connection failed");
+  const auto networkSmokeStart = std::chrono::steady_clock::now();
+  int networkPhase = 0;
+  std::uint32_t firstNetworkID = 0;
+  bool sawRemote = false, sawReconnected = false;
   try {
     while (!m_EngineWindow->ShouldClose() && m_Running) {
+      if (network && network->smoke) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now()-networkSmokeStart).count();
+        auto* probe = m_Scene->GetEntityByPersistentID(networkProbeID);
+        if (!probe || probe->GetComponent<Transform>()->position != glm::vec3(17,20,23) ||
+            m_Camera->GetPosition() != authoredCameraPosition)
+          throw std::runtime_error("Network session mutated authored scene/camera");
+        if (m_NetworkGame && m_NetworkGame->LocalID()) {
+          sawRemote |= m_NetworkGame->RemoteCount() > 0;
+          if (!firstNetworkID) firstNetworkID = m_NetworkGame->LocalID();
+          if (networkPhase == 4) sawReconnected |= m_NetworkGame->LocalID() != firstNetworkID;
+        }
+        if (networkPhase == 0 && elapsed >= 800) { m_IsPaused = true; networkPhase = 1; }
+        else if (networkPhase == 1 && elapsed >= 1150) { m_IsPaused = false; networkPhase = 2; }
+        else if (networkPhase == 2 && elapsed >= 1600) {
+          if (!firstNetworkID || !m_Editor || !m_Editor->SetMode(EditorMode::Edit) || m_NetworkGame)
+            throw std::runtime_error("Network Stop failed to release session");
+          networkPhase = 3;
+        } else if (networkPhase == 3 && elapsed >= 2000) {
+          if (!JoinNetworkGame(network->host, network->port)) throw std::runtime_error("Network rejoin failed");
+          networkPhase = 4;
+        }
+        if (elapsed >= network->durationMs) {
+          if (!sawRemote || !sawReconnected || networkPhase != 4 || !m_NetworkGame || !m_NetworkGame->ValidateView())
+            throw std::runtime_error("Graphical network smoke did not observe remote/reconnected view");
+          m_Running = false;
+        }
+      }
       if (playStopSmokeTest) {
         if (renderedFrames == 2 || renderedFrames == 8) {
           auto* probe = m_Scene->GetEntityByPersistentID(smokeProbeID);
@@ -911,7 +1043,14 @@ void Application::ProcessInput() {
 
     // --- Keyboard Shortcuts (Undo, Copy/Paste, Focus) ---
     m_Editor->ProcessEditorShortcuts(m_Input, m_Scene.get());
-  } else if (!m_IsPaused && m_FPSController) {
+  } else if (IsNetworkViewActive() && !m_IsPaused && m_Input->IsCursorLocked()) {
+    if (!m_NetworkLaunch || !m_NetworkLaunch->smoke) {
+      auto delta = m_Input->GetMouseDelta();
+      m_NetworkGame->GetCamera().ProcessMouseMovement(delta.x*m_FPSController->GetMouseSensitivity(),
+                                                     -delta.y*m_FPSController->GetMouseSensitivity());
+      m_NetworkGame->GetCamera().ProcessMouseScroll(m_Input->GetMouseScrollDelta());
+    }
+  } else if (!m_IsPaused && m_FPSController && GameModeManager::Get().GetMode() != GameMode::MultiplayerClient) {
     m_FPSController->HandleMouseLook(m_Input, 0.0f);
   }
 }
@@ -920,13 +1059,7 @@ void Application::UpdateGameLogic(float dt) {
   // Socket I/O is deliberately performed on the main/owner thread. Pump the
   // active transport every fixed tick so client handshakes, heartbeats and
   // queued frames can progress while the game is running.
-  auto &network = NetworkManager::Get();
-  if (network.IsServer()) {
-    network.UpdateServer();
-  } else if (network.GetState() == ConnectionState::Handshaking ||
-             network.GetState() == ConnectionState::Connected) {
-    network.UpdateClient();
-  }
+  if (PumpNetworkGame()) return;
 
   const bool inEditMode =
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
@@ -979,9 +1112,13 @@ void Application::RenderFrame(float /*alpha*/) {
   // so the 3D viewport shows the fly-cam perspective, not the game camera.
   const bool editorEditMode =
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
-  glm::mat4 activeView = m_Camera->GetViewMatrix();
+  const bool networkView = IsNetworkViewActive();
+  auto* sceneRenderer = GetRenderSystem();
+  auto* renderCamera = GetCamera();
+  if (networkView && m_NetworkLaunch && m_NetworkLaunch->smoke) m_NetworkGame->AimAtRemote();
+  glm::mat4 activeView = renderCamera->GetViewMatrix();
   glm::mat4 activeProjection =
-      m_Camera->GetProjectionMatrix(m_Window->GetAspectRatio());
+      renderCamera->GetProjectionMatrix(m_Window->GetAspectRatio());
   if (editorEditMode) {
     EditorCamera *ec = m_Editor->GetEditorCamera();
     const float aspect = (m_Window && m_Window->GetHeight() > 0)
@@ -989,12 +1126,26 @@ void Application::RenderFrame(float /*alpha*/) {
                              : 1.777f;
     activeView = ec->GetViewMatrix();
     activeProjection = ec->GetProjectionMatrix(aspect);
-    m_RenderSystem->SetViewOverride(activeView, activeProjection);
+    sceneRenderer->SetViewOverride(activeView, activeProjection);
   } else {
-    m_RenderSystem->ClearViewOverride();
+    sceneRenderer->ClearViewOverride();
   }
 
-  m_RenderSystem->Update(TICK_INTERVAL);
+  sceneRenderer->Update(TICK_INTERVAL);
+  if (networkView && m_NetworkLaunch && m_NetworkLaunch->smoke && m_NetworkGame->Snapshot().tick &&
+      m_NetworkGame->Snapshot().tick != m_LastNetworkLoggedTick) {
+    if (!m_NetworkGame->ValidateView()) throw std::runtime_error("Network camera/model binding diverged");
+    const auto counters = sceneRenderer->GetLastFrameCounters();
+    if (!counters.available || !counters.mainBatchSubmissions) throw std::runtime_error("Network arena did not draw");
+    m_LastNetworkLoggedTick = m_NetworkGame->Snapshot().tick;
+    const auto& pos = renderCamera->GetPosition();
+    std::printf("GFXSNAP %llu SELF %u CAM %.6f %.6f %.6f REMOTES %zu VISIBLE %llu PAUSED %d",
+        static_cast<unsigned long long>(m_LastNetworkLoggedTick), m_NetworkGame->LocalID(), pos.x,pos.y,pos.z,
+        m_NetworkGame->RemoteCount(), static_cast<unsigned long long>(counters.visibleInstances), int(m_IsPaused));
+    for (const auto& player : m_NetworkGame->Snapshot().players)
+      std::printf(" PLAYER %u %.6f %.6f", player.id, player.x, player.z);
+    std::printf("\n"); std::fflush(stdout);
+  }
 
   // Draw the gameplay HUD after the 3-D pass and before ImGui overlays.
   if (m_HUDRenderer && !editorEditMode && m_Window) {
@@ -1003,7 +1154,7 @@ void Application::RenderFrame(float /*alpha*/) {
     m_HUDRenderer->DrawCrosshair();
     const Entity* player = m_Scene->GetEntity(
         EntityHandle::FromValue(m_PlayerHandleValue));
-    if (player) {
+    if (player && !networkView) {
       if (const auto* health = player->GetComponent<Health>()) {
         m_HUDRenderer->DrawHealthBar(health->current, health->max, 32.0f,
                                      32.0f, 220.0f, 18.0f);
@@ -1017,7 +1168,7 @@ void Application::RenderFrame(float /*alpha*/) {
     m_HUDRenderer->EndHUD();
   }
 #ifdef ARCHURA_DEBUG_PHYSICS
-  if (m_DebugPhysicsSystem) {
+  if (m_DebugPhysicsSystem && !networkView) {
     m_DebugPhysicsSystem->Render(activeView, activeProjection);
   }
 #endif
@@ -1026,7 +1177,7 @@ void Application::RenderFrame(float /*alpha*/) {
     m_Editor->BeginDockSpace();
     m_Editor->DrawMenuBar(m_Scene.get());
     m_Editor->DrawEditorUI(m_Scene.get());
-    m_Editor->DrawOverlay(m_Scene.get(), m_Camera.get());
+    m_Editor->DrawOverlay(m_Scene.get(), GetCamera());
 
     // Draw 3-D transform gizmo when an entity is selected in Edit mode
     if (editorEditMode && m_Window) {
@@ -1036,12 +1187,19 @@ void Application::RenderFrame(float /*alpha*/) {
   }
 
 #ifdef ARCHURA_DEBUG_PHYSICS
-  if (m_DebugPhysicsSystem) {
+  if (m_DebugPhysicsSystem && !networkView) {
     m_DebugPhysicsSystem->DrawOverlay();
   }
 #endif
 
   if (!m_Standalone) DevConsole::Get().Render();
+  if (IsNetworkViewActive()) {
+    ImGui::Begin("Multiplayer arena", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("%zu players", m_NetworkGame->Snapshot().players.size());
+    if (!m_NetworkGame->LocalID()) ImGui::TextUnformatted("Waiting for arena...");
+    if (ImGui::Button("Disconnect")) LeaveNetworkGame();
+    ImGui::End();
+  }
   if (m_PauseMenu) m_PauseMenu->Render(m_IsPaused, *m_FPSController, *m_EngineWindow,
                                      m_Scene.get());
   if (m_Standalone && m_IsPaused) {

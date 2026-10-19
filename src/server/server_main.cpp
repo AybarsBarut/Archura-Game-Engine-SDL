@@ -145,11 +145,14 @@ int main(int argc, char** argv) {
         std::cerr << "Authoritative movement currently requires 128 Hz; password/RCON are not implemented\n";
         return 1;
     }
+    if (g_Config.map != "dm_arena") {
+        std::cerr << "Only the built-in shared dm_arena map is supported\n"; return 1;
+    }
     
     PrintServerInfo();
     
     std::cout << "Initializing server systems...\n";
-    std::cout << "World: bounded XZ movement arena (map collision/combat not implemented)\n";
+    std::cout << "World: shared dm_arena obstacles with swept XZ player collision (no combat/vertical physics)\n";
     
     std::cout << "Starting network listener on port " << g_Config.port << "...\n";
     NetworkLimits limits;

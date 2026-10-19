@@ -1,11 +1,12 @@
 #pragma once
 #include "NetworkProtocol.h"
+#include "NetworkArena.h"
 #include <map>
 
 namespace Archura::Net {
 constexpr std::size_t kMaxWorldPlayers = 64;
 constexpr float kWorldSpeed = 6.0F;
-constexpr float kWorldExtent = 256.0F;
+constexpr float kWorldExtent = kArenaExtent;
 constexpr float kWorldTickInterval = 1.0F / 128.0F;
 
 struct WorldPlayer {

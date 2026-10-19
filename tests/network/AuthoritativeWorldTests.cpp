@@ -1,4 +1,5 @@
 #include "network/NetworkSceneReplica.h"
+#include "network/NetworkInputState.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -20,6 +21,20 @@ int main() {
         std::uint64_t token = 0; std::uint32_t id = 0;
         Check(DeserializeWelcome(SerializeWelcome(123, 9), token, id) && token == 123 && id == 9, "welcome identity");
         Check(!DeserializeWelcome(SerializeSessionToken(123), token, id), "v1 acknowledgement rejected");
+        NetworkInputState keyboard;
+        const auto diagonal = keyboard.Next(1, 1, true);
+        Check(ValidPlayerInput(diagonal) && std::abs(std::hypot(diagonal.moveX, diagonal.moveZ)-1) < 0.001F, "bounded graphical input");
+        const auto paused = keyboard.Next(1, 1, false);
+        Check(paused.sequence == 2 && paused.moveX == 0 && paused.moveZ == 0, "pause/Edit emits sequenced zero input");
+        keyboard.Reset();
+        Check(keyboard.Next(0, 0, true).sequence == 1, "reconnect resets command sequence");
+        const auto forward = PlanarMovement(0, -1, 1, 0), right = PlanarMovement(0, -1, 0, 1);
+        Check(forward[1] == -1 && right[0] == 1, "camera-relative movement basis");
+        float sweptX = 0, sweptZ = 0;
+        MoveArenaPlayer(sweptX, sweptZ, 100, 0);
+        Check(sweptX == kArenaObstacles[0].minX-kArenaPlayerRadius, "swept footprint blocks tunneling");
+        MoveArenaPlayer(sweptX, sweptZ, 0, 5);
+        Check(sweptZ == 5, "footprint slides along obstacle");
 
         AuthoritativeWorld world;
         Check(world.SynchronizePeers({3, 2}), "spawn peers");
@@ -38,10 +53,17 @@ int main() {
         state = world.Snapshot();
         world.Tick();
         Check(state.players[0].x == world.Snapshot().players[0].x, "stale input expires after32ticks");
-        for (std::uint32_t tick = 0; tick < 6000; ++tick) {
-            Check(world.AcceptInput(2, {1001 + tick, 1, 0}), "fresh input"); world.Tick();
+        for (std::uint32_t tick = 0; tick < 128; ++tick) {
+            world.AcceptInput(2, {1001+tick, 1, 0}); world.Tick();
         }
-        Check(world.Snapshot().players[0].x == kWorldExtent, "world boundary");
+        Check(world.Snapshot().players[0].x == kArenaObstacles[0].minX-kArenaPlayerRadius, "server stops at shared obstacle");
+        for (std::uint32_t tick = 0; tick < 128; ++tick) {
+            world.AcceptInput(2, {1129+tick, 0, 1}); world.Tick();
+        }
+        for (std::uint32_t tick = 0; tick < 6000; ++tick) {
+            Check(world.AcceptInput(2, {1257 + tick, 1, 0}), "fresh input"); world.Tick();
+        }
+        Check(world.Snapshot().players[0].x == kWorldExtent-kArenaPlayerRadius, "footprint remains inside world boundary");
         Check(world.AcceptInput(2, {0x7fffffffU, 0, 0}) &&
               world.AcceptInput(2, {0xfffffffdU, 0, 0}) && world.AcceptInput(2, {1, 0, 0}), "sequence wrap");
         Check(!world.AcceptInput(2, {0xfffffffcU, 0, 0}), "old command across wrap");
@@ -85,6 +107,7 @@ int main() {
         world.SynchronizePeers({}); world.Tick();
         Check(replica.Apply(scene, EncodeWorldSnapshot(world.Snapshot())) && scene.GetEntities().size() == 2 &&
               scene.IsAlive(authoredHandle) && scene.IsAlive(recycledSlot), "last disconnect only removes replicas");
+        Check(replica.Clear() && scene.IsAlive(authoredHandle) && scene.IsAlive(recycledSlot), "disconnect cleanup preserves authored scene");
         NetworkSceneReplica expired;
         { Scene old; Check(expired.Apply(old, snapshotBytes), "temporary source replica"); }
         Scene fresh;

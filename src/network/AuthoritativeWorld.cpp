@@ -95,8 +95,7 @@ void AuthoritativeWorld::Tick() {
         float x = player.input.moveX, z = player.input.moveZ;
         const auto length = std::sqrt(x*x + z*z);
         if (length > 1) { x /= length; z /= length; }
-        player.state.x = std::clamp(player.state.x + x*kWorldSpeed*kWorldTickInterval, -kWorldExtent, kWorldExtent);
-        player.state.z = std::clamp(player.state.z + z*kWorldSpeed*kWorldTickInterval, -kWorldExtent, kWorldExtent);
+        MoveArenaPlayer(player.state.x, player.state.z, x*kWorldSpeed*kWorldTickInterval, z*kWorldSpeed*kWorldTickInterval);
     }
 }
 

@@ -192,3 +192,46 @@ graphical Application integration, authentication, prediction/reconciliation,
 interpolation and a separate unreliable state channel remain open. SDL_net TCP
 connect/send are synchronous; bounded queues do not certify nonblocking service
 against slow receivers or Internet-scale performance.
+
+## Loop9 — Graphical authoritative arena
+
+The normal OpenGL Application can join the dedicated server:
+
+```powershell
+.\build\windows-x64\bin\Release\ArchuraServer.exe --port 27015
+.\build\windows-x64\bin\Release\ArchuraEngine.exe --connect 127.0.0.1 --port 27015
+```
+
+Run the commands in separate terminals; launch another engine process to see the
+other player. In the editor, `game_mode join 127.0.0.1 27015` also enters Play and
+joins. Existing Pause menu Join works while playing. WASD follows camera direction,
+mouse looks, Escape pauses your input, Tab toggles editor UI. Stop disconnects and
+restores the authored scene. The arena overlay has a Disconnect button. Legacy
+in-process Host still only provides transport; use the dedicated server for this
+arena. Connections without an authoritative snapshot are dropped after5 seconds.
+
+`GraphicalNetworkSession` owns a separate Scene, Camera and RenderSystem. Server
+positions drive the first-person eye and cube avatars for remote players; the own
+avatar is hidden. Local scripts, physics, weapons and particles are suspended for
+the entire connection, and zero movement is sent while paused/Edit/console. Mouse
+look and scroll are routed to the network camera. Disconnect clears callbacks and
+releases network GPU owners while the context is current. Connection loss pauses
+local play; failed Join attempts return to Edit when that attempt entered Play.
+Reconnect clears replica tick history and input sequence, including server restarts
+which reuse connection IDs. No network entities are inserted into the authored scene.
+
+The built-in `dm_arena` uses shared `NetworkArena.h` obstacle/boundary definitions
+for rendering and server movement. The server sweeps an axis-aligned0.7-unit-wide
+player footprint in XZ, slides along obstacles, and keeps it inside256-unit arena
+bounds at128Hz. Unknown map names fail rather than claiming to load an absent map.
+This is static flat-arena collision: arbitrary authored levels, vertical movement,
+player-vs-player collision and combat remain separate work. Wire version2 and the
+full snapshot layout are unchanged; use client and server from the same build.
+There is no client prediction or render interpolation yet.
+
+`Archura.Network.GraphicalIntegration` is opt-in with startup tests. It opens two
+actual OpenGL applications against a real dedicated server and checks rendering,
+authoritative camera/remote transforms, pause, Stop/Edit, rejoin and live server-loss
+cleanup. It also verifies a gravity-bearing authored probe and local camera remain
+unchanged. `--network-smoke-test` is the diagnostic entry used by this test;
+`--network-move-x`/`--network-move-z` supply test-only motion with that flag.
