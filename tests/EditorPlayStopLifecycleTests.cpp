@@ -10,6 +10,7 @@
 #include "game/ParticleSystem.h"
 #include "game/PhysicsSystem.h"
 #include "game/ProjectileSystem.h"
+#include "game/SurfaceAttachment.h"
 #include "game/Weapon.h"
 #include "input/Input.h"
 #include "rendering/Camera.h"
@@ -44,6 +45,53 @@ bool Near(float a, float b, float eps = 1e-4f) {
 
 bool NearVec3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f) {
     return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
+}
+
+void TestShootingBallTransfersImpulseAndAttachesDecal() {
+    for (bool kinematic : {false, true}) {
+        Scene scene("projectile vs ball");
+        auto* ball = scene.CreateEntity("ball");
+        auto* collider = ball->AddComponent<BoxCollider>();
+        collider->shape = BoxCollider::Shape::Sphere;
+        collider->radius = 0.5f;
+        auto* body = ball->AddComponent<RigidBody>();
+        body->mass = 2.0f;
+        body->isKinematic = kinematic;
+        body->useGravity = false;
+        body->drag = body->angularDrag = 0;
+        PhysicsSystem physics;
+        physics.Init(&scene);
+        ProjectileSystem projectiles;
+        projectiles.Init(&scene, &physics);
+        auto* bullet = projectiles.SpawnProjectile(&scene, {-2, .25f, 0}, {1,0,0},
+            100.0f, 25.0f, nullptr, Projectile::ProjectileType::Bullet);
+        const auto bulletHandle = bullet->GetHandle();
+        projectiles.Update(.02f);
+        EXPECT_FALSE(scene.IsAlive(bulletHandle));
+        EXPECT_TRUE(NearVec3(body->velocity, kinematic ? glm::vec3(0) : glm::vec3(1.25f,0,0)));
+        EXPECT_TRUE(kinematic ? NearVec3(body->angularVelocity, {}) : glm::length(body->angularVelocity) > .1f);
+        Entity* decal = nullptr;
+        scene.ForEachEntity([&](Entity& entity) {
+            if (entity.GetComponent<DecalAttachment>()) decal = &entity;
+        });
+        EXPECT_TRUE(decal && decal->GetParent() == ball && decal->IsEngineOwned());
+        if (!decal) continue;
+        auto world = decal->GetWorldTransform();
+        const glm::vec3 position(world[3]);
+        EXPECT_TRUE(Near(glm::length(position), .501f));
+        const glm::vec3 normal = glm::normalize(glm::transpose(glm::inverse(glm::mat3(world))) * glm::vec3(0,1,0));
+        EXPECT_TRUE(NearVec3(normal, glm::normalize(position)));
+        const auto local = decal->GetComponent<Transform>()->position;
+        physics.Update(1.0f / 60.0f);
+        world = decal->GetWorldTransform();
+        EXPECT_TRUE(NearVec3(glm::vec3(world[3]),
+            glm::vec3(ball->GetWorldTransform() * glm::vec4(local,1))));
+        if (!kinematic) EXPECT_FALSE(NearVec3(glm::vec3(world[3]), position));
+        const auto decalHandle = decal->GetHandle();
+        scene.DestroyEntity(ball->GetHandle());
+        projectiles.Update(.01f);
+        EXPECT_FALSE(scene.IsAlive(decalHandle));
+    }
 }
 
 void TestBallSettingsRestoreAcrossPlayStop() {
@@ -655,6 +703,7 @@ extern "C" int SDLCALL SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
 extern "C" int SDLCALL SDL_ShowCursor(int) { return 0; }
 
 int main() {
+    TestShootingBallTransfersImpulseAndAttachesDecal();
     TestBallSettingsRestoreAcrossPlayStop();
     TestRejectedSnapshotsAndWrongSceneStop();
     TestSnapshotLifetimeAndShutdownRelease();

@@ -307,3 +307,15 @@ Box contacts remain world AABBs. Sphere rotation is supported; general rigid-bod
 box rotation/constraints and network replication of these objects are separate work.
 The Continuous Collision toggle enables bounded adaptive substeps, not an
 unlimited-speed collision guarantee.
+
+Bullet hits now move Dynamic objects according to mass and produce angular response
+on off-center sphere hits. The impulse is a bounded gameplay response (damage*0.1,
+maximum20N.s), not a calibrated bullet-mass model. Static and Kinematic objects
+remain fixed. Existing player-push opt-out controls player contact only.
+
+Bullet marks follow the struck object's translation/rotation and expire with it.
+Sphere marks are smaller to stay close to the curved surface; they are tangent
+planes, not projected/wrapping mesh decals. Play-mode dynamic bodies now render
+between60Hz physics poses without changing simulation state. Pause/Stop and editor
+transitions discard presentation history. Network snapshots retain their separate
+presentation path. No new settings or scene migration are required.

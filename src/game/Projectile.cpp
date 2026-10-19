@@ -8,6 +8,7 @@
 #include "Lifetime.h"
 #include "SurfaceProperty.h"
 #include "Particle.h"
+#include "SurfaceAttachment.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <iostream>
@@ -21,6 +22,7 @@ void ProjectileSystem::Update(float deltaTime) {
     if (!m_Scene || !m_PhysicsSystem || !std::isfinite(deltaTime) || deltaTime <= 0.0f)
         return;
 
+    RemoveOrphanedSurfaceDecals(*m_Scene);
     m_ProjectilesToDestroy.clear();
     m_ProjectilesToDestroy.reserve(10); // Pre-allocate for common case
 
@@ -120,7 +122,7 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
     SurfaceType surfaceType = SurfaceType::Concrete;
     if (auto* surface = target->GetComponent<SurfaceProperty>())
         surfaceType = surface->type;
-    SpawnDecal(m_Scene, hit.point, hit.normal, surfaceType);
+    SpawnDecal(m_Scene, hit.point, hit.normal, surfaceType, hit.entity);
 
     if (proj->type == Projectile::ProjectileType::Grenade) {
         const float incomingNormalSpeed = glm::dot(proj->velocity, hit.normal);
@@ -132,6 +134,12 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
         return;
     }
 
+    // A gameplay impulse in N.s; the solver applies inverse mass and inertia.
+    // Projectile speed controls travel/CCD, not a fictitious projectile mass.
+    const float impulse = std::clamp(proj->damage * 0.1f, 0.0f, 20.0f);
+    m_PhysicsSystem->ApplyImpulse(hit.entity,
+        glm::normalize(displacement) * impulse, hit.point);
+
     if (auto* health = target->GetComponent<Health>()) {
         health->current = std::max(0.0f, health->current - proj->damage);
         health->isDead = health->current <= 0.0f;
@@ -140,34 +148,28 @@ void ProjectileSystem::UpdateProjectile(Entity* entity, Projectile* proj, float 
     m_ProjectilesToDestroy.push_back(entity->GetHandle());
 }
 
-void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position, const glm::vec3& normal, SurfaceType surfaceType) {
+void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position,
+                                  const glm::vec3& normal, SurfaceType surfaceType,
+                                  EntityHandle targetHandle) {
     if (!scene) return;
-
-    Entity* decal = scene->CreateEntity("Decal");
-    
-    // Add Lifetime
-    decal->AddComponent<Lifetime>(10.0f); // 10 seconds lifetime
-
-    // Transform
-    auto* transform = decal->GetComponent<Transform>();
-    transform->position = position + normal * 0.02f; // Slight offset to prevent Z-fighting
-    transform->scale = glm::vec3(0.2f); // 20cm decal
-
-    // Orientation logic (Align Quad +Y to Normal)
-    // Simple axis aligned handling for Euler angles
-    if (glm::abs(normal.y) > 0.9f) {
-        // Ceiling or Floor
-        if (normal.y > 0) transform->rotation = glm::vec3(0.0f, 0.0f, 0.0f); // Up
-        else transform->rotation = glm::vec3(180.0f, 0.0f, 0.0f); // Down
-    } else if (glm::abs(normal.x) > 0.9f) {
-        // Walls X
-        if (normal.x > 0) transform->rotation = glm::vec3(0.0f, 0.0f, -90.0f);
-        else transform->rotation = glm::vec3(0.0f, 0.0f, 90.0f); 
-    } else {
-        // Walls Z
-        if (normal.z > 0) transform->rotation = glm::vec3(90.0f, 0.0f, 0.0f);
-        else transform->rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+    Entity* target = scene->GetEntity(targetHandle);
+    if (!target) return;
+    float width = 0.12f;
+    if (const auto* collider = target->GetComponent<BoxCollider>();
+        collider && collider->shape == BoxCollider::Shape::Sphere) {
+        const glm::mat3 basis(target->GetWorldTransform());
+        const float radius = collider->radius * std::max({glm::length(basis[0]),
+            glm::length(basis[1]), glm::length(basis[2])});
+        // A tangent plane cannot wrap a sphere. Keep its footprint small enough
+        // that the corners do not visibly hang off the curved surface.
+        width = std::clamp(radius * 0.08f, 0.002f, 0.06f);
     }
+    Entity* decal = scene->CreateEntity("Decal");
+    if (!AttachSurfaceDecal(*decal, *target, position, normal, width)) {
+        scene->DestroyEntity(decal->GetHandle());
+        return;
+    }
+    decal->AddComponent<Lifetime>(10.0f);
 
     // Mesh Renderer
     auto* meshRenderer = decal->AddComponent<MeshRenderer>();
@@ -233,6 +235,7 @@ void ProjectileSystem::SpawnDecal(Scene* scene, const glm::vec3& position, const
 
     for(int i=0; i<particleCount; ++i) {
         Entity* p = scene->CreateEntity("Particle");
+        p->SetOwnership(EntityOwnership::Engine);
         auto* pt = p->AddComponent<Transform>();
         pt->position = position + normal * 0.1f;
         pt->scale = glm::vec3(particleSize);
@@ -273,6 +276,7 @@ Entity* ProjectileSystem::SpawnProjectile(
 
     // Mermi varligi olustur
     Entity* projectile = scene->CreateEntity("Projectile");
+    projectile->SetOwnership(EntityOwnership::Engine);
     
     // Donusum
     auto* transform = projectile->GetComponent<Transform>();

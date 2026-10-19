@@ -105,3 +105,10 @@ retain the settings. Supported native shapes are now Box/Ramp/Sphere. Remaining
 geometry work includes capsule/stair/mesh colliders, rotating convex rigid bodies
 and broader continuous collision; network dynamic-object replication is also open.
 Continue local render-pose work as planned after this user-requested physics gate.
+
+HIT-MOTION completes the first local dynamic-body presentation slice of TIME-01:
+previous/current60Hz physics poses, quaternion rotation,128Hz remainder composition,
+hierarchical decal attachment and safe pause/Stop/external-edit boundaries. Bullet
+impulses now affect dynamic objects, and marks follow the struck surface instead
+of remaining in world space. General kinematic/script/camera interpolation and
+cross-FPS jump/cooldown cadence remain separate work; no physics rate was changed.

@@ -284,3 +284,34 @@ PlayStop, standalone OpenGL/Mono and two-OpenGL-network tests remain green. Fina
 independent physics/editor review found no actionable defect. Initial all-target
 build exposed a stale GameplayScroll physics stub signature; updated the stub and
 repeated both complete builds/tests successfully.
+
+## HIT-MOTION — Projectile interaction and dynamic presentation
+
+User reported floating bullet marks, no ball reaction to shots and stepped rolling.
+The projectile hit path did not apply impulses; decals were unparented world-space
+planes with cardinal-only orientation. RenderFrame discarded interpolation alpha
+and RenderSystem drew the latest60Hz physics pose inside the128Hz application.
+Source inspection found no TAA/history/motion-blur accumulation: postprocess is
+same-frame HDR/bloom. A screenshot alone cannot certify subjective motion quality.
+
+Non-grenade hits now apply a bounded damage-derived gameplay impulse at the actual
+surface point through a validated mass/inertia API. Sphere off-center hits can spin
+the body; static/kinematic bodies stay fixed. Decals use the true tangent normal,
+small curved-surface footprints and local poses parented to generation-checked hit
+entities. Orphans are hidden immediately and removed during projectile maintenance.
+
+Physics captures previous/current dynamic local poses around whole simulation steps,
+including collision resolution. Render sampling composes the physics accumulator
+with the remaining application time, clamps without extrapolation, slerps rotation
+and recursively composes parents. Culling, batches/shadows, lights and collider draw
+use the same presented transforms; attached decals follow that pose. Physics and
+serialized transforms remain unchanged. External edits, reparenting, scene lifetime,
+mode/pause transitions and Stop reset or reject stale history. The presentation
+delay is up to one60Hz step; no simulation-rate or performance improvement is claimed.
+
+HIT-MOTION final gate: all-target VS2022 x64 Debug/Release builds/staging PASS;
+full35/35 CTest each25.98s/15.75s. Presentation0.11s/0.04s; SurfaceAttachment0.02s/
+0.04s; actual projectile integration passes in PlayStopLifecycle. Native OpenGL,
+standalone package, two-client networking and old ball/ramp checks remain green.
+Independent review caught a pause/resume history rewind; presentation-only reset
+on local-view transitions and a regression corrected it before the final gate.

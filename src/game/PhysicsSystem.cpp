@@ -246,11 +246,15 @@ std::size_t PhysicsSystem::PairHash::operator()(const Pair& pair) const noexcept
 
 void PhysicsSystem::Init(Scene* scene) {
     m_Scene = scene;
+    m_SceneLifetime = scene ? scene->GetLifetimeToken() : std::weak_ptr<Scene*>{};
+    m_RenderPoses.clear();
     m_Accumulator = 0.0;
     m_PreviousContacts.clear();
 }
 
 void PhysicsSystem::Shutdown() {
+    m_RenderPoses.clear();
+    m_SceneLifetime.reset();
     m_PreviousContacts.clear();
     m_Accumulator = 0.0;
     m_Scene = nullptr;
@@ -263,6 +267,7 @@ void PhysicsSystem::SetGravity(const glm::vec3& gravity) noexcept {
 void PhysicsSystem::SetFixedTimeStep(float seconds) noexcept {
     if (std::isfinite(seconds) && seconds >= 1.0e-4f && seconds <= 0.1f) {
         m_FixedTimeStep = seconds;
+        m_RenderPoses.clear();
         m_Accumulator = std::min(m_Accumulator, static_cast<double>(seconds));
     }
 }
@@ -308,6 +313,7 @@ void PhysicsSystem::Update(float deltaTime) {
 }
 
 void PhysicsSystem::Step(float deltaTime) {
+    CaptureRenderPoses(true);
     std::uint32_t motionSubsteps = 1;
     for (const auto& entityPtr : m_Scene->GetEntities()) {
         const auto* body = entityPtr->GetComponent<RigidBody>();
@@ -338,7 +344,79 @@ void PhysicsSystem::Step(float deltaTime) {
         if (auto* body = entityPtr->GetComponent<RigidBody>())
             body->force = glm::vec3(0.0f);
     }
+    CaptureRenderPoses(false);
     DispatchEvents(std::move(stepContacts));
+}
+
+void PhysicsSystem::CaptureRenderPoses(bool beforeStep) {
+    if (beforeStep) {
+        for (auto it=m_RenderPoses.begin();it!=m_RenderPoses.end();) {
+            const auto* entity=m_Scene->GetEntity(EntityHandle::FromValue(it->first));
+            if (!entity || InverseMass(entity->GetComponent<RigidBody>())<=0)
+                it=m_RenderPoses.erase(it);
+            else ++it;
+        }
+    }
+    for (const auto& entity : m_Scene->GetEntities()) {
+        const auto* transform=entity->GetComponent<Transform>();
+        if (!transform || InverseMass(entity->GetComponent<RigidBody>())<=0) continue;
+        const RenderPose pose{transform->position,transform->rotation,transform->scale};
+        auto& pair=m_RenderPoses[entity->GetHandle().Value()];
+        if (beforeStep) pair.previous=pose;
+        pair.current=pose;
+        const auto* parent=entity->GetParent();
+        pair.parent=parent ? parent->GetHandle() : EntityHandle{};
+        pair.parentWorld=parent ? parent->GetWorldTransform() : glm::mat4(1);
+    }
+}
+
+glm::mat4 PhysicsSystem::GetRenderWorldTransform(const Entity& entity, float additionalSeconds) const {
+    const auto lifetime=m_SceneLifetime.lock();
+    if (!m_Simulating || !lifetime || !*lifetime || entity.GetScene()!=m_Scene)
+        return entity.GetWorldTransform();
+    const auto* transform=entity.GetComponent<Transform>();
+    if (!transform) return entity.GetWorldTransform();
+    glm::mat4 local=transform->GetModelMatrix();
+    const auto* parent=entity.GetParent();
+    const auto found=m_RenderPoses.find(entity.GetHandle().Value());
+    if (found!=m_RenderPoses.end() && InverseMass(entity.GetComponent<RigidBody>())>0) {
+        const auto& pair=found->second;
+        const auto parentHandle=parent ? parent->GetHandle() : EntityHandle{};
+        const auto parentWorld=parent ? parent->GetWorldTransform() : glm::mat4(1);
+        if (transform->position==pair.current.position && transform->rotation==pair.current.rotation &&
+            transform->scale==pair.current.scale && parentHandle==pair.parent && parentWorld==pair.parentWorld &&
+            IsFinite(pair.previous.position) && IsFinite(pair.previous.rotation) && IsFinite(pair.previous.scale)) {
+            const double extra=std::isfinite(additionalSeconds) ? std::max(0.f,additionalSeconds) : 0;
+            const float alpha=static_cast<float>(std::clamp((m_Accumulator+extra)/m_FixedTimeStep,0.0,1.0));
+            const auto position=glm::mix(pair.previous.position,pair.current.position,alpha);
+            const auto rotation=glm::slerp(glm::quat(glm::radians(pair.previous.rotation)),
+                glm::quat(glm::radians(pair.current.rotation)),alpha);
+            const auto scale=glm::mix(pair.previous.scale,pair.current.scale,alpha);
+            local=glm::translate(glm::mat4(1),position)*glm::mat4_cast(rotation)*glm::scale(glm::mat4(1),scale);
+        }
+    }
+    return parent ? GetRenderWorldTransform(*parent,additionalSeconds)*local : local;
+}
+
+bool PhysicsSystem::ApplyImpulse(EntityHandle target, const glm::vec3& impulse, const glm::vec3& worldPoint) {
+    const auto lifetime=m_SceneLifetime.lock();
+    if (!lifetime || !*lifetime || !IsFinite(impulse) || !IsFinite(worldPoint)) return false;
+    auto* entity=m_Scene->GetEntity(target);
+    auto* body=entity ? entity->GetComponent<RigidBody>() : nullptr;
+    const float inverse=InverseMass(body);
+    if (inverse<=0 || !IsFinite(body->velocity)) return false;
+    const auto velocity=body->velocity+impulse*inverse;
+    if (!IsFinite(velocity)) return false;
+    glm::vec3 angular=IsFinite(body->angularVelocity) ? body->angularVelocity : glm::vec3(0);
+    const auto* collider=entity->GetComponent<BoxCollider>();
+    if (collider && collider->shape==BoxCollider::Shape::Sphere) {
+        glm::vec3 center; float radius;
+        if (!WorldSphere(*entity,*collider,center,radius)) return false;
+        angular+=glm::cross(worldPoint-center,impulse)*(2.5f*inverse/(radius*radius));
+        if (!IsFinite(angular)) return false;
+    }
+    body->velocity=velocity; body->angularVelocity=angular;
+    return true;
 }
 
 void PhysicsSystem::Integrate(float deltaTime) {
