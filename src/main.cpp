@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include "core/Application.h"
 #include "core/GameManifest.h"
+#include "game/GraphicalNetworkSession.h"
 #include "rendering/GraphicsAPI.h"
 #include <iostream>
 #include <cstdio>
@@ -65,8 +66,25 @@ void LoadingWorker() {
 int main(int argc, char** argv) {
     bool smokeTest = false;
     bool playStopSmokeTest = false;
+    Archura::NetworkLaunchOptions network;
     std::filesystem::path gamePath;
+    try {
     for (int i = 1; i < argc; ++i) {
+        const std::string_view option = argv[i] ? argv[i] : "";
+        auto next = [&]() -> std::string {
+            if (++i >= argc || !argv[i] || !argv[i][0]) throw std::invalid_argument("missing argument value");
+            return argv[i];
+        };
+        if (option == "--connect") { network.host = next(); continue; }
+        if (option == "--port") {
+            const auto value = next(); std::size_t end = 0;
+            network.port = std::stoi(value, &end);
+            if (end != value.size() || network.port < 1 || network.port > 65535) throw std::invalid_argument("invalid port");
+            continue;
+        }
+        if (option == "--network-smoke-test") { network.smoke = true; continue; }
+        if (option == "--network-move-x") { network.moveX = std::stof(next()); continue; }
+        if (option == "--network-move-z") { network.moveZ = std::stof(next()); continue; }
         if (argv[i] && std::string_view(argv[i]) == "--game") {
             if (++i == argc || !argv[i] || std::string_view(argv[i]).empty()) {
                 std::cerr << "--game requires a manifest path\n"; return 1;
@@ -77,6 +95,10 @@ int main(int argc, char** argv) {
         if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
             smokeTest = playStopSmokeTest = true;
     }
+    if (network.smoke && (network.host.empty() || smokeTest || playStopSmokeTest || !gamePath.empty() ||
+        !Archura::Net::ValidPlayerInput({1, network.moveX, network.moveZ})))
+        throw std::invalid_argument("network smoke requires --connect, valid axes, and no other smoke/game mode");
+    } catch (const std::exception& error) { std::cerr << "LAUNCH ERROR: " << error.what() << '\n'; return 1; }
     wchar_t executableName[32768];
     const DWORD executableLength = GetModuleFileNameW(nullptr, executableName, 32768);
     if (!executableLength || executableLength >= 32768) return 1;
@@ -107,7 +129,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    if (!smokeTest && !standalone) {
+    if (!smokeTest && !standalone && network.host.empty()) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SPLASH ERROR: SDL_Init Failed: " << SDL_GetError() << "\n";
         return -1;
@@ -251,7 +273,14 @@ int main(int argc, char** argv) {
 
     try {
         auto app = std::make_unique<Archura::Application>(graphicsOptions);
-        app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr);
+        app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr,
+                 network.host.empty() ? nullptr : &network);
+        if (network.smoke) {
+            const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
+            app.reset();
+            if (frames < 16) throw std::runtime_error("Graphical network smoke rendered too few frames");
+            std::cout << "Graphical network smoke completed and shutdown\n";
+        }
         if (smokeTest) {
             const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
             app.reset(); // Include orderly shutdown in the smoke-test result.

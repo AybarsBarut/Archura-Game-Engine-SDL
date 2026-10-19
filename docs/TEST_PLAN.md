@@ -102,3 +102,19 @@ headless network/ECS clients; graphical multiplayer, map physics and combat are
 not certified. The no-backend target remains compiled without ARCHURA_HAS_SDL_NET
 and must still pass. Full final gates: Debug31/31 (17.58s), Release31/31 (12.21s),
 with OpenAL OFF and the real SDL_net backend enabled.
+
+Loop9 expands the world contract with shared swept-AABB obstacle/boundary tests,
+sliding, normalized camera-relative keyboard axes, sequenced zero input during
+pause/Edit and command reset on reconnect. Replica Clear preserves unrelated ECS
+entities and generation/lifetime rules.
+
+`Archura.Network.GraphicalIntegration` uses a dedicated server and two real
+OpenGL Application processes, not the headless client target. Diagnostic movement
+uses the same input normalization/transport path and validates the actual camera,
+remote MeshRenderer transforms/assets and render submission counters. At common
+server ticks the applications agree on player state. It exercises pause, Stop/Edit,
+new connection identity, authored rigid-body/camera preservation, obstacle stopping,
+normal shutdown and server loss with live GPU owners. Actual OS keyboard/mouse
+interaction, custom levels, vertical physics, combat and Internet performance remain
+outside this automated fixture. The test requires a desktop/OpenGL session and
+Python3.9+; it is registered only with startup tests and SDL_net enabled.

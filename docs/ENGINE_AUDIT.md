@@ -69,7 +69,7 @@ ASSET-01, AUD-01/02, REND-01 and TERR-01 have the bounded repairs above.
 | SER-03 / P0 | Both loaders parse selected lines rather than complete JSON. Project loader destroys old entities before allocating replacements; rollback removes only new objects. Both writers truncate the destination directly. | Invalid/truncated/compact JSON, unknown types/versions, failed resource construction and failed disk writes must preserve live scene, config and prior file; test backup recovery. | Repaired (bounded JSON preflight, transactional commit, atomic save + .bak, configurable `SceneReconstructionBudget`) |
 | EDIT-01 / P0 | `src/editor/Editor.cpp:1974-2007`: undo stores `Entity*`, ignores supplied Scene and dereferences pointer after destruction. Inspector/gizmo/selection also retain raw pointers. | Gizmo-move selected entity, delete, Ctrl+Z; repeat with script deletion and scene reload. Run address diagnostics where available; resolve handles before any access. | Repaired (`TransformUndoHistory` + `EditorSelectionState` + isolation handle validation; covered by CTest) |
 | EDIT-02 / P0 | `src/core/Application.cpp:415-425`: Play/Stop callbacks only change cursor/pause. `UpdateGameLogic:726` gates on pause alone, so physics/scripts also run in Edit; authored scene has no snapshot/restore. | Record authored transforms/components, Play, move/spawn/destroy, Stop; compare to original. Repeat 20 cycles, including pause and selected-object deletion. | Repaired (`PlayModeSession` snapshot/restore + Edit simulation gating; 20-cycle CTest passes) |
-| NET-01 / P0 | `src/server/server_main.cpp:45-54` pumps transport only; gameplay, world state, collision and snapshots are TODOs. No authoritative multiplayer simulation exists. | One real SDL_net server plus two processes: identities, spawn/despawn, validated movement, snapshots, disconnect cleanup and invalid input rejection. | Headless authoritative XZ movement +native two-client ECS replication implemented (Loop8); graphical gameplay/map collision/combat remain |
+| NET-01 / P0 | `src/server/server_main.cpp:45-54` pumps transport only; gameplay, world state, collision and snapshots are TODOs. No authoritative multiplayer simulation exists. | One real SDL_net server plus two processes: identities, spawn/despawn, validated movement, snapshots, disconnect cleanup and invalid input rejection. | Graphical camera/remote meshes +shared static dm_arena collision implemented (Loop9); custom levels/vertical physics/combat/auth/prediction remain |
 | PKG-01 / P0-P1 | CMake builds Engine/editor, Server and Launcher; no game-only target/startup-scene flow. `GameBuilderPanel` adds scene content; it does not package a game. `Build.bat` archives an executable and a few DLLs. | Build sample game into clean directory; launch from unrelated CWD with source/build folders unavailable; verify script/assets/runtime dependencies and startup scene. | CLI standalone startup/package workflow implemented (Loop 7); editor export UI and clean-OS deployment remain |
 | AUD-01 / P1 | `src/scripting/ScriptGlue.cpp:297` sets legacy `AudioSource::isPlaying` only. MCI `AudioSystem::Update` sends volume to an alias but does not open it. OpenAL uses a separate `AudioSourceComponent`, so this managed call does not start that backend either. | Attach configured audio source, invoke C# Play, confirm actual sound/error and native state. Exercise both backends and missing clips. | Repaired in source/CTest (`AudioSystem::Update` opens `sound_<id>`, `ScriptGlue::AudioSource_Play` triggers both `AudioSource` and `AudioSourceComponent`); live audio hardware untested |
 | AUD-02 / P1 | `GameBuilderPanel.cpp:277-280` passes `assets/audio/name` to `AudioSystem::PlayOneShot`, which prefixes `assets/audio/` again. MCI volume/status commands run in fixed ticks. | Preview existing clip; rapid one-shots, stop/reload/delete source, category changes; measure MCI work before optimizing. | Path normalization repaired (`AudioSystem::ResolveAudioPath`, covered by CTest); MCI tick cost unmeasured |
@@ -174,3 +174,31 @@ Play/Stop and existing shadow/console tests. SDL_net enabled, OpenAL OFF. This i
 not a physics/combat/graphical multiplayer acceptance or performance benchmark.
 NET-01 remains partial: graphical Application integration, map collision/physics,
 authentication and prediction/reconciliation still require separate work.
+
+## Loop9 — Graphical network binding and shared static collision
+
+Application now routes authoritative client input and snapshots through a disposable
+GraphicalNetworkSession. Its separate scene/camera/renderer prevents remote actors
+from modifying authored state or Play snapshots. Local gameplay simulation is gated
+for the entire network session; inactive input is a sequenced zero command. Stop,
+disconnect and destructor remove callbacks/resources on the render-owner thread;
+failed connections pause or return to Edit. Handshakes reset input/replica history.
+
+NetworkArena defines the single built-in dm_arena geometry for both rendered cubes
+and server-side swept XZ footprint collision, with sliding and boundary constraints.
+There is no custom scene/map loading or vertical/player/combat collision in this
+slice. Version2 packet shapes are unchanged; same-build client/server is required.
+
+The new opt-in test runs two actual OpenGL Applications, compares authoritative
+camera/player state at common server ticks, verifies remote mesh binding/render
+submission, pause, Stop/rejoin, authored state preservation and server-loss cleanup.
+Focused Debug contracts +headless/native graphical integration passed3/3(12.43s).
+Full configuration gates are recorded after final build validation below.
+
+Loop9 final gate (VS2022 x64 build/windows-x64,2026-10-19): all-target Debug/
+Release builds and staging PASS; full CTest32/32 each (22.15s/17.34s). The actual
+two-OpenGL-client network fixture passed5.76s/5.48s, including pause, Stop/rejoin,
+authored scene/camera preservation, shared obstacle stopping and server loss.
+SDL_net ON, OpenAL OFF. Existing headless hostile-peer, standalone package,
+Play/Stop, shadow and console contracts remain green. No visual-quality/FPS,
+Internet, custom-level, vertical-physics or combat certification is implied.

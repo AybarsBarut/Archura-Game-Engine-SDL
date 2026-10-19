@@ -30,7 +30,7 @@ pass 23/23 (Debug 2.02 s, Release 1.65 s). Execution gates: `.gauntlet/LOOP_PLAN
 | Done, Loop 3 | Authored Play/Stop boundary in `Application`/`Editor`/`PlayModeSession`/`ScriptSystem`, generation-checked `EditorSelectionState`, rebinding runtime references through persistent IDs, and transient audio/physics/script/projectile/particle cleanup. | Edit does not simulate; 20-cycle Play/Stop restores authored values and removes runtime-only entities; Debug/Release 23/23 pass. |
 | Done, Loops 4 & 5 | Configurable aggregate `SceneReconstructionBudget`, project-root asset resolution (`ResourceManager`), canonical texture keys (`ASSET-01`), `GameBuilderPanel` `assets/models` fallback, `AudioSystem::ResolveAudioPath` & runtime alias opening (`AUD-01`, `AUD-02`), world-space render culling (`REND-01`), and `Terrain` heightmap leak/rectangular/scale/bounds repairs (`TERR-01`). | Excessive scenes fail before unbounded allocation; missing/unsafe assets retain old state; relocation, duplicate texture stems, `assets/models` fallback, audio paths, and rectangular scaled terrain pass in Debug/Release 23/23. |
 | Done, Loop 7 CLI | Manifest-selected runtime startup, portable package builder and sample (`PKG-01`). | External-CWD OpenGL/Mono launch loads the exact authored scene with no Editor; broader dependency/clean-OS/export-UI work remains. |
-| P0, partial Loop8 | Real SDL_net/headless authoritative movement+ECS replicas implemented (`NET-01`); next bind graphical input/camera/remote meshes and shared map collision. | Two graphical clients consume server state through reconnect and Edit/Play boundaries; map collisions agree with server authority. Headless two-client movement/spawn/despawn/hostile-input checks already pass. |
+| Partial, Loop9 slice done | Dedicated authoritative movement, graphical camera/remote meshes and shared static arena collision (`NET-01`). | Real two-OpenGL-client pause/Stop/rejoin/server-loss and collision checks PASS; custom levels, vertical/player collision, combat/auth/prediction remain. Next bounded work: snapshot/render interpolation. |
 | P1 | Previous/current transform render interpolation (`TIME-01`) and retained runtime UI backend (`UI-01`). | Cross-FPS gameplay assertions and retained UI interaction tests pass. |
 
 Keep these as sequential acceptance gates. Performance, renderer and UI expansion
@@ -67,3 +67,12 @@ traffic. NET-01 remains partial. Next: integrate snapshots/input with graphical
 Application/camera/remote meshes and local-mode boundaries, then load shared map
 collision into authoritative simulation. Keep TCP limitations explicit. TIME-01
 render interpolation follows a measured network/gameplay integration gate.
+
+Loop9 binds dedicated-server movement to the normal graphical Application's own
+network scene/camera/renderer and cube avatars, preserving authored scene and
+Edit/Play snapshot boundaries. Static dm_arena obstacles and outer limits are now
+shared with the authoritative swept XZ player footprint. Pause/Stop/reconnect and
+server-loss cleanup have real two-OpenGL-client acceptance. NET-01 remains partial
+for arbitrary shared levels, vertical/player collision, combat, authentication and
+prediction. Next measured work unit: TIME-01 snapshot/render interpolation while
+keeping authoritative128Hz state and authored transforms unchanged.

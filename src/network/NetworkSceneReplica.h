@@ -34,6 +34,23 @@ public:
         return true;
     }
     const WorldSnapshot& Snapshot() const noexcept { return m_World.Snapshot(); }
+    const Entity* Resolve(const Scene& scene, std::uint32_t id) const noexcept {
+        const auto source = m_Scene.lock();
+        const auto it = m_Entities.find(id);
+        return source && *source == &scene && it != m_Entities.end() ? scene.GetEntity(it->second) : nullptr;
+    }
+    Entity* Resolve(Scene& scene, std::uint32_t id) const noexcept {
+        return const_cast<Entity*>(Resolve(static_cast<const Scene&>(scene), id));
+    }
+    bool Clear() {
+        const auto source = m_Scene.lock();
+        if (source && *source) {
+            if ((*source)->IsIterating()) return false;
+            for (const auto& entry : m_Entities) (*source)->DestroyEntity(entry.second);
+        }
+        m_Entities.clear(); m_World.Reset(); m_Scene.reset();
+        return true;
+    }
 private:
     ClientWorld m_World;
     std::weak_ptr<Scene*> m_Scene;

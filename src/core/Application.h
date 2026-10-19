@@ -18,7 +18,9 @@ namespace Archura {
         static Application* TryGet() noexcept { return s_Instance; }
 
         void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false,
-                 const struct GameManifest* game = nullptr);
+                 const struct GameManifest* game = nullptr, const struct NetworkLaunchOptions* network = nullptr);
+        bool JoinNetworkGame(const std::string& host, int port);
+        void LeaveNetworkGame();
         void Quit() { m_Running = false; }
 
         Window& GetWindow() { return *m_Window; }
@@ -26,6 +28,8 @@ namespace Archura {
     private:
         bool Init();
         void InitializeGame(const GameManifest& game);
+        bool PumpNetworkGame();
+        bool IsNetworkViewActive() const;
         void OnEvent(); // Event polling placeholder if needed here
 
 
@@ -39,8 +43,8 @@ namespace Archura {
         
         class FPSController* GetFPSController() { return m_FPSController.get(); }
         class Scene* GetScene() const { return m_Scene.get(); } // Expose Scene
-        class RenderSystem* GetRenderSystem() { return m_RenderSystem.get(); }
-        class Camera* GetCamera() { return m_Camera.get(); } // Expose Camera
+        class RenderSystem* GetRenderSystem();
+        class Camera* GetCamera();
         const FrameTelemetry& GetFrameTelemetry() const { return m_FrameTelemetry; }
 
     private:
@@ -96,6 +100,11 @@ namespace Archura {
         uint64_t m_PlayerHandleValue = 0;
         std::string m_PlayerPersistentID;
         PlayModeSession m_PlaySession;
+        std::unique_ptr<class GraphicalNetworkSession> m_NetworkGame;
+        const NetworkLaunchOptions* m_NetworkLaunch = nullptr;
+        bool m_NetworkSnapshotFailed = false;
+        std::uint32_t m_NetworkStartedAt = 0;
+        std::uint64_t m_LastNetworkLoggedTick = 0;
         
         bool m_DevModeActive = true;
         bool m_Standalone = false;
