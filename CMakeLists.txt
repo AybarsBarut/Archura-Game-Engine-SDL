@@ -720,6 +720,14 @@ if(BUILD_TESTING AND ARCHURA_BUILD_PHYSICS_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/external/glm
     )
     add_test(NAME Archura.Physics.Core COMMAND ArchuraPhysicsCoreTests)
+    add_executable(ArchuraPhysicsPresentationTests tests/PhysicsPresentationTests.cpp
+        src/ecs/Component.cpp src/ecs/Entity.cpp src/game/PhysicsSystem.cpp)
+    target_include_directories(ArchuraPhysicsPresentationTests PRIVATE src external/glm)
+    add_test(NAME Archura.Physics.Presentation COMMAND ArchuraPhysicsPresentationTests)
+    add_executable(ArchuraSurfaceAttachmentTests tests/SurfaceAttachmentTests.cpp
+        src/ecs/Component.cpp src/ecs/Entity.cpp)
+    target_include_directories(ArchuraSurfaceAttachmentTests PRIVATE src external/glm)
+    add_test(NAME Archura.Projectile.SurfaceAttachment COMMAND ArchuraSurfaceAttachmentTests)
 endif()
 
 if(BUILD_TESTING)

@@ -39,13 +39,18 @@ public:
     void ResetRuntimeState() noexcept {
         m_Accumulator = 0.0;
         m_PreviousContacts.clear();
+        m_RenderPoses.clear();
     }
     double GetAccumulator() const noexcept { return m_Accumulator; }
+    void ResetRenderPoses() noexcept { m_RenderPoses.clear(); }
     std::size_t GetActiveContactCount() const noexcept { return m_PreviousContacts.size(); }
 
     void SetGravity(const glm::vec3& gravity) noexcept;
     const glm::vec3& GetGravity() const noexcept { return m_Gravity; }
-    void SetSimulating(bool enabled) noexcept { m_Simulating = enabled; }
+    void SetSimulating(bool enabled) noexcept {
+        if (m_Simulating != enabled) m_RenderPoses.clear();
+        m_Simulating = enabled;
+    }
     bool IsSimulating() const noexcept { return m_Simulating; }
     void SetDebugDraw(bool enabled) noexcept { m_DebugDraw = enabled; }
     bool GetDebugDraw() const noexcept { return m_DebugDraw; }
@@ -57,6 +62,10 @@ public:
     void SetOnCollisionEnter(CollisionCallback cb) { m_OnEnter = std::move(cb); }
     void SetOnCollisionStay(CollisionCallback cb) { m_OnStay = std::move(cb); }
     void SetOnCollisionExit(CollisionCallback cb) { m_OnExit = std::move(cb); }
+
+    bool ApplyImpulse(EntityHandle target, const glm::vec3& impulse, const glm::vec3& worldPoint);
+    // Presentation only; never writes interpolated poses into scene transforms.
+    glm::mat4 GetRenderWorldTransform(const Entity& entity, float additionalSeconds = 0) const;
 
     bool Raycast(const glm::vec3& origin, const glm::vec3& direction,
                  float maxDistance, Entity** outEntity = nullptr,
@@ -85,6 +94,15 @@ public:
                                           float characterMass = 80.0f) const;
 
 private:
+    struct RenderPose { glm::vec3 position{0}, rotation{0}, scale{1}; };
+    struct RenderPosePair {
+        RenderPose previous, current;
+        EntityHandle parent{};
+        glm::mat4 parentWorld{1};
+    };
+    std::unordered_map<std::uint64_t, RenderPosePair> m_RenderPoses;
+    std::weak_ptr<Scene*> m_SceneLifetime;
+    void CaptureRenderPoses(bool beforeStep);
     struct AABB { glm::vec3 min{0.0f}; glm::vec3 max{0.0f}; };
     struct Proxy {
         EntityHandle handle{};

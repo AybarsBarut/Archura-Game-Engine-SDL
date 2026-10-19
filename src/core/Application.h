@@ -76,6 +76,7 @@ namespace Archura {
         std::unique_ptr<class FPSController> m_FPSController;
         std::unique_ptr<class RenderSystem> m_RenderSystem;
         std::unique_ptr<class PhysicsSystem> m_PhysicsSystem;
+        bool m_LocalPresentationActive = false;
         std::unique_ptr<class ScriptSystem> m_ScriptSystem;
         std::unique_ptr<class ParticleSystem> m_ParticleSystem;
         std::unique_ptr<class ProjectileSystem> m_ProjectileSystem;

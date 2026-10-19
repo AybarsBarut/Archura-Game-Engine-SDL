@@ -1,4 +1,6 @@
 #include "RenderSystem.h"
+#include "PhysicsSystem.h"
+#include "SurfaceAttachment.h"
 #include "../core/Engine.h"
 #include "../core/Window.h"
 #include "../ecs/Entity.h"
@@ -23,6 +25,11 @@ RenderSystem::RenderSystem(Camera* camera)
 
 RenderSystem::~RenderSystem() {
     Shutdown();
+}
+
+glm::mat4 RenderSystem::RenderWorldTransform(const Entity& entity) const {
+    return m_PresentationPhysics ? m_PresentationPhysics->GetRenderWorldTransform(entity,m_PresentationRemainder) :
+        entity.GetWorldTransform();
 }
 
 void RenderSystem::Init(Scene* scene) {
@@ -210,9 +217,12 @@ void RenderSystem::Update(float deltaTime) {
         
         Mesh* renderMesh = meshRenderer ? meshRenderer->GetMesh() : nullptr;
         if (!meshRenderer || !transform || !renderMesh) continue;
+        const auto* attachment=entityPtr->GetComponent<DecalAttachment>();
+        if (attachment && (!entityPtr->GetParent() ||
+            m_Scene->GetEntity(attachment->target)!=entityPtr->GetParent())) continue;
 
         // Frustum Culling
-        glm::vec3 entityPos = glm::vec3(entityPtr->GetWorldTransform()[3]);
+        glm::vec3 entityPos = glm::vec3(RenderWorldTransform(*entityPtr)[3]);
         float distance = glm::length(entityPos - viewPos);
         if (distance > 1000.0f) {
             ++m_LastFrameCounters.culledEntities;
@@ -228,14 +238,14 @@ void RenderSystem::Update(float deltaTime) {
         const auto existing = batchLookup.find(key);
         if (existing != batchLookup.end()) {
             batches[existing->second].instanceMatrices.push_back(
-                entityPtr->GetWorldTransform());
+                RenderWorldTransform(*entityPtr));
         } else {
             RenderBatch newBatch;
             newBatch.mesh = renderMesh;
             newBatch.shader = targetShader;
             newBatch.texture = targetTexture;
             newBatch.color = meshRenderer->color;
-            newBatch.instanceMatrices.push_back(entityPtr->GetWorldTransform());
+            newBatch.instanceMatrices.push_back(RenderWorldTransform(*entityPtr));
             batches.push_back(newBatch);
             batchLookup.emplace(key, batches.size() - 1);
         }
@@ -265,7 +275,7 @@ void RenderSystem::Update(float deltaTime) {
         
         if (lightComp && transform) {
             LightData ld;
-            ld.position = glm::vec3(entityPtr->GetWorldTransform()[3]); // Point light world pos
+            ld.position = glm::vec3(RenderWorldTransform(*entityPtr)[3]); // Point light world pos
             
             // Rotation'dan direction cikarimi (Directional light icin)
             // Basitce Z ekseni rotasyonu varsayalim veya transform forward
@@ -276,7 +286,7 @@ void RenderSystem::Update(float deltaTime) {
             // Assuming default direction is DOWN (0, -1, 0) for Directional Light
             // or FORWARD (0, 0, -1) depending on convention. 
             // Let's use the Transform's orientation.
-            glm::mat4 model = entityPtr->GetWorldTransform();
+            glm::mat4 model = RenderWorldTransform(*entityPtr);
             // In OpenGL, Forward is usually -Z. But for a "Sun" pointing down, 
             // we often rotate a Forward(-Z) or Down(-Y) vector.
             // Let's assume the light shines in the direction of the object's local Forward (-Z).
@@ -511,7 +521,7 @@ void RenderSystem::DrawColliders() {
         m_DefaultShader->SetVec3("uDiffuse", color);
 
         // Calculate Transform: EntityModel * ColliderOffset * ColliderSize
-        glm::mat4 model = entityPtr->GetWorldTransform();
+        glm::mat4 model = RenderWorldTransform(*entityPtr);
         auto* mesh = m_DebugMesh.get();
         if (collider->shape == BoxCollider::Shape::Sphere) {
             const glm::vec3 center(model*glm::vec4(collider->center,1));
@@ -553,6 +563,7 @@ void RenderSystem::Shutdown() {
     m_Skybox.reset();
     m_DepthShader.reset();
     m_DefaultShader.reset();
+    m_PresentationPhysics = nullptr;
     m_DebugMesh.reset();
     m_DebugSphere.reset();
     m_DebugRamp.reset();

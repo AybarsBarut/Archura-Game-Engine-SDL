@@ -1104,7 +1104,7 @@ void Application::UpdateGameLogic(float dt) {
   }
 }
 
-void Application::RenderFrame(float /*alpha*/) {
+void Application::RenderFrame(float alpha) {
   m_Renderer->BeginFrame();
   m_ImGuiLayer->BeginFrame();
 
@@ -1114,6 +1114,11 @@ void Application::RenderFrame(float /*alpha*/) {
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
   const bool networkView = IsNetworkViewActive();
   auto* sceneRenderer = GetRenderSystem();
+  const bool localPresentation = !networkView && !editorEditMode && !m_IsPaused;
+  if (localPresentation != m_LocalPresentationActive && m_PhysicsSystem)
+    m_PhysicsSystem->ResetRenderPoses();
+  m_LocalPresentationActive = localPresentation;
+  sceneRenderer->SetPhysicsPresentation(localPresentation ? m_PhysicsSystem.get() : nullptr, alpha*TICK_INTERVAL);
   auto* renderCamera = GetCamera();
   if (networkView) m_NetworkGame->PrepareView();
   if (networkView && m_NetworkLaunch && m_NetworkLaunch->smoke) m_NetworkGame->AimAtRemote();

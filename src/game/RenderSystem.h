@@ -24,6 +24,9 @@ public:
     void Shutdown() override;
 
     void DrawColliders();
+    void SetPhysicsPresentation(const class PhysicsSystem* physics, float remainderSeconds) {
+        m_PresentationPhysics=physics; m_PresentationRemainder=remainderSeconds;
+    }
 
     void SetCamera(Camera* camera) { m_Camera = camera; }
     Camera* GetCamera() const { return m_Camera; }
@@ -50,6 +53,9 @@ public:
     Entity* GetIsolatedEntity() const noexcept { return m_IsolationTarget; }
 
 private:
+    const class PhysicsSystem* m_PresentationPhysics = nullptr;
+    float m_PresentationRemainder = 0;
+    glm::mat4 RenderWorldTransform(const Entity& entity) const;
     Entity* m_IsolationTarget = nullptr;
     uint64_t m_IsolationTargetHandleValue = 0;
     Camera* m_Camera;

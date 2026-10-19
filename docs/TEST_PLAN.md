@@ -160,3 +160,19 @@ over three cycles. The GameplayScroll physics stub follows the extended movement
 API; production FPSController opts into player pushing. Native startup/network/
 standalone checks exercise the updated renderer initialization and resource teardown.
 Inspector mouse interaction itself and subjective visual quality are not automated.
+
+HIT-MOTION adds `Archura.Physics.Presentation` and
+`Archura.Projectile.SurfaceAttachment`. Presentation tests run30/60/120/144/240FPS
+around128Hz application/60Hz physics, comparing analytic positions and quaternion
+rotation through Euler wrap; Transform/RigidBody bytes remain unchanged. Tests
+include hierarchy/decal poses, teleport/scale/reparent edits, scene/handle replacement,
+stalls, invalid render remainder, mode/timestep/reset and pause/resume without rewind.
+Impulse tests cover mass, off-center torque and invalid/static/kinematic/stale targets.
+
+SurfaceAttachment tests exercise oblique/downward normals, scaled/reflected parents,
+world footprint, rolling attachment and destroyed/recycled targets. The existing
+PlayStopLifecycle target now also invokes the actual ProjectileSystem shot path:
+a2kg ball receives1.25m/s fromdamage25, its mark follows translation/rotation,
+deleting the ball removes the mark, and kinematic targets receive no impulse.
+These tests verify mechanics and interpolation; they do not measure monitor
+ghosting, subjective visual quality or FPS gains.

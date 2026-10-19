@@ -22,7 +22,7 @@ public:
     void Update(float deltaTime) override;
 
     void UpdateProjectile(Entity* entity, Projectile* proj, float deltaTime);
-    void SpawnDecal(Scene* scene, const glm::vec3& position, const glm::vec3& normal, SurfaceType surfaceType);
+    void SpawnDecal(Scene* scene, const glm::vec3& position, const glm::vec3& normal, SurfaceType surfaceType, EntityHandle target);
     
     Entity* SpawnProjectile(Scene* scene, const glm::vec3& position, const glm::vec3& direction, 
                             float speed, float damage, Entity* owner, Projectile::ProjectileType type);
