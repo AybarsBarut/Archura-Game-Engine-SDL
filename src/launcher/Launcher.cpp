@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../rendering/GraphicsAPI.h"
+#include "RuntimeDiscovery.h"
 
 // Windows headers must come first with proper guards
 #define WIN32_LEAN_AND_MEAN
@@ -72,28 +73,22 @@ int main(int argc, char **argv) {
   std::cout << "=== Archura Engine Launcher (C++) ===" << std::endl;
   SetColor(7);
 
-  // Robust path discovery: Try to find project root by looking for
-  // "CMakeLists.txt"
-  fs::path rootPath = fs::current_path();
-  bool foundRoot = false;
-  for (int i = 0; i < 4; ++i) {
-    if (fs::exists(rootPath / "CMakeLists.txt")) {
-      foundRoot = true;
-      break;
-    }
-    rootPath = rootPath.parent_path();
+  // Resolve the checkout from either the invoking shell or launcher location.
+  std::vector<wchar_t> modulePath(32768);
+  const DWORD moduleLength = GetModuleFileNameW(nullptr, modulePath.data(),
+                                               static_cast<DWORD>(modulePath.size()));
+  if (moduleLength == 0 || moduleLength >= modulePath.size()) {
+    std::cerr << "Could not resolve launcher location." << std::endl;
+    return 1;
   }
-
-  if (foundRoot) {
-    fs::current_path(rootPath);
+  const fs::path launcherDirectory = fs::path(modulePath.data()).parent_path();
+  fs::path rootPath = Archura::Launcher::FindRepositoryRoot(launcherDirectory);
+  if (rootPath.empty())
+    rootPath = Archura::Launcher::FindRepositoryRoot(fs::current_path());
+  const bool foundRoot = !rootPath.empty();
+  fs::current_path(foundRoot ? rootPath : launcherDirectory);
+  if (foundRoot)
     std::cout << "Project Root: " << rootPath.string() << std::endl;
-  } else {
-    SetColor(12); // Red
-    std::cerr
-        << "Warning: Could not reliably determine project root. Using CWD."
-        << std::endl;
-    SetColor(7);
-  }
 
   Archura::GraphicsLaunchOptions graphicsOptions;
   std::string graphicsError;
@@ -118,20 +113,7 @@ int main(int argc, char **argv) {
     SetColor(7);
   }
 
-  // Try to find the engine executable in common locations
-  std::vector<std::string> searchPaths = {
-      "build/bin/Release/ArchuraEngine.exe",
-      "build/bin/Debug/ArchuraEngine.exe", "bin/Release/ArchuraEngine.exe",
-      "bin/Debug/ArchuraEngine.exe", "ArchuraEngine.exe"};
-
-  std::string exePath = "";
-  for (const auto &p : searchPaths) {
-    if (fs::exists(p)) {
-      exePath = p;
-      break;
-    }
-  }
-
+  fs::path exePath = Archura::Launcher::FindRuntime(rootPath, launcherDirectory);
   bool needsBuild = exePath.empty();
 
   // 1. Initial Check
@@ -159,17 +141,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  // 3. Build if needed or if build directory is missing
-  if (needsBuild || !fs::exists("build")) {
+  // 3. Build through the documented preset when needed.
+  if (needsBuild) {
+    if (!foundRoot) {
+      std::cerr << "Engine runtime missing beside launcher; no source checkout found." << std::endl;
+      return 1;
+    }
     SetColor(14); // Yellow
     std::cout << "Configuring/Building engine..." << std::endl;
     SetColor(7);
 
-    if (!fs::exists("build"))
-      fs::create_directory("build");
-
     // Prefer Release if no exe exists
-    if (RunCommand("cmake -S . -B build") != 0) {
+    if (RunCommand("cmake --preset windows-x64") != 0) {
       SetColor(12); // Red
       std::cerr << "CMake Configuration Failed!" << std::endl;
       system("pause");
@@ -178,7 +161,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Building (Release)..." << std::endl;
     if (RunCommand(
-            "cmake --build build --config Release --target ArchuraEngine") !=
+            "cmake --build --preset windows-release --target ArchuraEngine") !=
         0) {
       SetColor(12); // Red
       std::cerr << "Build Failed!" << std::endl;
@@ -186,7 +169,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    exePath = "build/bin/Release/ArchuraEngine.exe";
+    exePath = rootPath / "build/windows-x64/bin/Release/ArchuraEngine.exe";
   }
 
   // 4. Launch
@@ -195,18 +178,29 @@ int main(int argc, char **argv) {
     std::cout << "Launching Engine: " << exePath << std::endl;
     SetColor(7);
 
-    std::string startCmd = "start \"\" \"" + exePath +
-                           "\" --graphics=" +
-                           Archura::ToString(graphicsOptions.requestedAPI);
-    if (!graphicsOptions.allowFallback) {
-      startCmd += " --no-graphics-fallback";
+    std::wstring arguments = L"\"" + exePath.wstring() + L"\" --graphics=";
+    const std::string graphicsName = Archura::ToString(graphicsOptions.requestedAPI);
+    arguments.append(graphicsName.begin(), graphicsName.end());
+    if (!graphicsOptions.allowFallback)
+      arguments += L" --no-graphics-fallback";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    // Relative assets, Mono and editor settings belong to the selected runtime.
+    if (!CreateProcessW(exePath.c_str(), arguments.data(), nullptr, nullptr,
+                        FALSE, 0, nullptr, exePath.parent_path().c_str(),
+                        &startup, &process)) {
+      std::cerr << "Engine launch failed (Windows error " << GetLastError() << ")." << std::endl;
+      return 1;
     }
-    RunCommand(startCmd);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
   } else {
     SetColor(12); // Red
     std::cerr << "CRITICAL ERROR: Engine executable missing after build!"
               << std::endl;
     system("pause");
+    return 1;
   }
 
   return 0;

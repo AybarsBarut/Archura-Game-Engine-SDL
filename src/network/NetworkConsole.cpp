@@ -99,6 +99,7 @@ std::string_view ConnectionStateName(ConnectionState state) noexcept {
     case ConnectionState::Connected: return "Connected";
     case ConnectionState::ShuttingDown: return "ShuttingDown";
     case ConnectionState::Failed: return "Failed";
+    case ConnectionState::Connecting: return "Connecting";
     }
     return "Unknown";
 }
@@ -148,14 +149,14 @@ std::string FormatNetworkStats(const NetworkStats& stats) {
 }
 
 std::string FormatNetworkConnectResult(const NetworkEndpoint& endpoint,
-                                       bool transportOpened,
+                                       bool requestAccepted,
                                        const NetworkRuntimeSnapshot& snapshot) {
     std::ostringstream report;
-    if (transportOpened) {
-        report << "[Network] Transport opened to "
+    if (requestAccepted) {
+        report << "[Network] Connection request accepted for "
                << FormatNetworkEndpoint(endpoint) << '\n';
     } else {
-        report << "[Network] Transport open failed for "
+        report << "[Network] Connection request failed for "
                << FormatNetworkEndpoint(endpoint) << '\n';
     }
     report << "[Network] Connection state: "

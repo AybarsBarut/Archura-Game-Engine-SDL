@@ -1,6 +1,10 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "windows-x64",
@@ -14,14 +18,116 @@
         "ARCHURA_BUILD_PHYSICS_TESTS": "ON",
         "ARCHURA_BUILD_RENDERER_TESTS": "ON"
       }
+    },
+    {
+      "name": "loop-only",
+      "displayName": "SDK-free game loop contracts",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/loop-only",
+      "cacheVariables": {
+        "ARCHURA_LOOP_TESTS_ONLY": "ON",
+        "BUILD_TESTING": "ON",
+        "ARCHURA_BUILD_LOOP_BENCHMARK": "ON"
+      }
+    },
+    {
+      "name": "windows-validation",
+      "inherits": "windows-x64",
+      "binaryDir": "${sourceDir}/build/loop-validation",
+      "cacheVariables": {
+        "ARCHURA_BUILD_STARTUP_TESTS": "ON",
+        "ARCHURA_REQUIRE_SDL_NET": "ON",
+        "ARCHURA_BUILD_LOOP_BENCHMARK": "ON"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "windows-debug", "configurePreset": "windows-x64", "configuration": "Debug", "jobs": 4 },
-    { "name": "windows-release", "configurePreset": "windows-x64", "configuration": "Release", "jobs": 4 }
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-x64",
+      "configuration": "Debug",
+      "jobs": 4
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-x64",
+      "configuration": "Release",
+      "jobs": 4
+    },
+    {
+      "name": "loop-debug",
+      "configurePreset": "loop-only",
+      "configuration": "Debug",
+      "jobs": 4
+    },
+    {
+      "name": "loop-release",
+      "configurePreset": "loop-only",
+      "configuration": "Release",
+      "jobs": 4
+    },
+    {
+      "name": "validation-debug",
+      "configurePreset": "windows-validation",
+      "configuration": "Debug",
+      "jobs": 4
+    },
+    {
+      "name": "validation-release",
+      "configurePreset": "windows-validation",
+      "configuration": "Release",
+      "jobs": 4
+    }
   ],
   "testPresets": [
-    { "name": "windows-debug", "configurePreset": "windows-x64", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "windows-release", "configurePreset": "windows-x64", "configuration": "Release", "output": { "outputOnFailure": true } }
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-x64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "loop-debug",
+      "configurePreset": "loop-only",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "loop-release",
+      "configurePreset": "loop-only",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "validation-debug",
+      "configurePreset": "windows-validation",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "validation-release",
+      "configurePreset": "windows-validation",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }

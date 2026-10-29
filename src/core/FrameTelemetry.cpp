@@ -41,6 +41,7 @@ FrameTelemetrySummary FrameTelemetry::Snapshot() const {
 
     summary.available = true;
     summary.averageCpuWorkMs = average;
+    summary.p50CpuWorkMs = sorted[(m_SampleCount + 1) / 2 - 1];
     summary.p95CpuWorkMs = sorted[p95Rank - 1];
     summary.p99CpuWorkMs = sorted[p99Rank - 1];
     return summary;
@@ -64,6 +65,7 @@ std::string FormatFrameTelemetryReport(const FrameTelemetrySummary& summary,
                << FrameTelemetry::Capacity << '\n';
         report << std::fixed << std::setprecision(3);
         report << "CPU work average: " << summary.averageCpuWorkMs << " ms\n";
+        report << "CPU work P50 (nearest-rank): " << summary.p50CpuWorkMs << " ms\n";
         report << "CPU work P95 (nearest-rank): " << summary.p95CpuWorkMs
                << " ms\n";
         report << "CPU work P99 (nearest-rank): " << summary.p99CpuWorkMs

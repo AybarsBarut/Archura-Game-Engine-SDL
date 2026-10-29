@@ -43,6 +43,7 @@ void TestKnownPercentilesAndAverage() {
   CHECK(summary.observedFrames == 100);
   CHECK(summary.windowSamples == 100);
   CHECK(Near(summary.averageCpuWorkMs, 50.5));
+  CHECK(Near(summary.p50CpuWorkMs, 50.0));
   CHECK(Near(summary.p95CpuWorkMs, 95.0));
   CHECK(Near(summary.p99CpuWorkMs, 99.0));
 }

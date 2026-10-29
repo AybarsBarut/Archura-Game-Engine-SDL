@@ -203,6 +203,10 @@ bool Skybox::LoadCubemap(const std::vector<std::string>& faces) {
 }
 
 void Skybox::Draw(const Camera& camera, float aspectRatio) {
+    Draw(camera.GetViewMatrix(), camera.GetProjectionMatrix(aspectRatio));
+}
+
+void Skybox::Draw(const glm::mat4& view, const glm::mat4& projection) {
     if (!RenderThread::IsCurrent() || !m_Shader || !m_VAO) return;
     GLint previousDepthFunc = GL_LESS;
     GLint previousProgram = 0;
@@ -219,11 +223,9 @@ void Skybox::Draw(const Camera& camera, float aspectRatio) {
     glDepthFunc(GL_LEQUAL);
     m_Shader->Bind();
     
-    // Remove translation from the view matrix
-    glm::mat4 view = glm::mat4(glm::mat3(camera.GetViewMatrix())); 
-    glm::mat4 projection = camera.GetProjectionMatrix(aspectRatio);
-
-    m_Shader->SetMat4("view", view);
+    // Follow the selected render camera's rotation and projection; sky remains
+    // infinitely distant, independent of that camera's world translation.
+    m_Shader->SetMat4("view", glm::mat4(glm::mat3(view)));
     m_Shader->SetMat4("projection", projection);
     m_Shader->SetInt("uUseTexture", m_TextureLoaded ? 1 : 0);
 

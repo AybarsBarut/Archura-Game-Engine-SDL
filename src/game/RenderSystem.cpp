@@ -416,7 +416,7 @@ void RenderSystem::Update(float deltaTime) {
                     skyComp->shouldReload = false;
                 }
             }
-             m_Skybox->Draw(*m_Camera, Engine::Get().GetWindow()->GetAspectRatio());
+             m_Skybox->Draw(view, projection);
              break; // Only one skybox
         }
     }
@@ -496,8 +496,8 @@ void RenderSystem::DrawColliders() {
     m_DefaultShader->Bind();
     
     // Camera uniforms
-    glm::mat4 view = m_Camera->GetViewMatrix();
-    glm::mat4 projection = m_Camera->GetProjectionMatrix(Engine::Get().GetWindow()->GetAspectRatio());
+    glm::mat4 view = m_HasViewOverride ? m_ViewOverride : m_Camera->GetViewMatrix();
+    glm::mat4 projection = m_HasViewOverride ? m_ProjOverride : m_Camera->GetProjectionMatrix(Engine::Get().GetWindow()->GetAspectRatio());
 
     m_DefaultShader->SetMat4("uView", view);
     m_DefaultShader->SetMat4("uProjection", projection);

@@ -1,5 +1,61 @@
 # Windows x64 build and test guide
 
+## Game loop validation (2026-10-24)
+
+`Application` and the dedicated server now use the SDK-independent
+`GameLoopHarness`. The client runs at 128 Hz, clamps elapsed frames to 250 ms,
+runs at most five ticks, and discards excess whole ticks while retaining the
+fractional remainder. `DroppedSeconds` includes both frame-clamp loss and discarded
+tick debt; `DroppedTicks` counts only discarded debt. Render alpha stays in [0,1).
+The server explicitly preserves backlog after five ticks, retaining its prior
+authority policy. It still clamps incoming elapsed time to 250 ms. Physics keeps
+its independent 60 Hz step and existing presentation/reset behavior.
+
+Build the production scheduler and its deterministic tests without discovering
+SDL, OpenGL, or Mono:
+
+```powershell
+cmake --preset loop-only
+cmake --build --preset loop-debug
+ctest --preset loop-debug
+cmake --build --preset loop-release
+ctest --preset loop-release
+.\build\loop-only\Release\ArchuraGameLoopBenchmark.exe
+```
+
+The source also supports non-VS toolchains with
+`cmake -S . -B build/loop-native -DARCHURA_LOOP_TESTS_ONLY=ON`.
+`BUILD_TESTING=OFF` registers no tests. The optional synthetic benchmark measures
+callback scheduling only; it excludes scene work, GPU, socket I/O and frame
+pacing, and must not be interpreted as a runtime FPS improvement.
+
+Use a fresh native validation directory, with graphical startup and required
+SDL_net enabled:
+
+```powershell
+cmake --preset windows-validation
+cmake --build --preset validation-debug
+ctest --preset validation-debug
+cmake --build --preset validation-release
+ctest --preset validation-release
+```
+
+The startup suite includes a real-stage splash smoke, a forced OpenGL-backed
+splash framebuffer, cancellation after core initialization (zero rendered frames),
+and missing-shader failure propagation with/without splash. Tests use isolated
+temporary working directories rather than altering shipped assets. Normal
+`--smoke-test` still skips splash; `--startup-smoke-test` checks splash then renders
+16 frames. `LOOP_METRICS` reports observed CPU-work P50/P95/P99, loop ticks/time
+loss, network-pump P95, and separate frame-interval, swap and pacing P95 durations.
+These short startup samples are diagnostics, not a
+steady-state performance benchmark. CPU work excludes swap/vsync and pacing.
+Network-pump samples include session handling and can include disconnected-mode
+checks; synchronous TCP can still block. No transport-thread/backend change is
+part of this refactor.
+
+The following older cycle notes are historical; use the current presets and
+fresh build logs for acceptance rather than cached binaries or `.ai` summaries.
+
 Validated environment on 2026-10-18: Visual Studio 2022 Community, MSVC
 19.44, Windows SDK 10.0.26100.0, CMake 4.2.3, C++17. Presets require
 CMake 3.21 or later; manual configuration retains the CMake 3.15 minimum.
@@ -333,3 +389,19 @@ normal contact resolution. Releasing preserves momentum and gravity/material/bod
 settings; cursor/input/target/scene loss also releases. Stop clears holding state.
 The existing bounded collision substeps remain relevant for fast or tiny objects.
 Trigger sensor volumes do not block aiming at or holding a solid dynamic object.
+
+
+## Editor workspace (2026-10-29)
+
+Build `windows-validation` / `validation-debug` or `validation-release` as above.
+Launch `build/loop-validation/bin/Debug/ArchuraEngine.exe` with that output folder
+as the working directory. Dock panels by dragging their tabs; resize using splitters.
+View > Reset Workspace restores the initial hierarchy / Scene / Inspector /
+Project-Console layout. Docking placement persists in the runtime's `imgui.ini`.
+
+File > Save Scene As opens a `.gameproj` path-entry dialog; the parent directory
+must exist. File > Open Scene confirms scene replacement and preserves the current
+scene on validation errors. File operations are available in Edit mode. Existing
+`.scene` files remain available through the legacy `load_game` command. Save As is
+not a portable content export. See [editor readiness](EDITOR_READINESS.md) for
+verified flows, exact test results and remaining product work.

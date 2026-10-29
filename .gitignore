@@ -225,6 +225,8 @@ builds/release/*.dll
 !docs/BUILD_GUIDE.md
 !docs/TEST_PLAN.md
 !docs/serialization.md
+!docs/EDITOR_READINESS.md
+!external/imgui/ARCHURA_VENDOR.md
 build_latest/
 build_latest_release/
 /build-codex-graphics-api/

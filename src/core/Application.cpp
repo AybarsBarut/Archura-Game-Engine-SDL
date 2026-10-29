@@ -33,6 +33,7 @@
 #include "editor/Editor.h"
 
 #include "core/GameSaveManager.h"
+#include "core/ProjectSerializer.h"
 #include "core/GameManifest.h"
 #include "scripting/ScriptEngine.h"
 #include "game/CommandRegistry.h"
@@ -79,6 +80,20 @@
 
 namespace Archura {
 
+namespace {
+double MonotonicSeconds() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+struct ScopedNetworkPumpSample {
+  FrameTelemetry& telemetry;
+  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+  ~ScopedNetworkPumpSample() noexcept {
+    telemetry.RecordCpuWorkMilliseconds(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+  }
+};
+} // namespace
+
 static void LogStartup(const char *message) {
   const char *logPath = "logs/startup_detailed.txt";
   FILE *f = fopen(logPath, "a");
@@ -94,6 +109,28 @@ Application *Application::s_Instance = nullptr;
 Application::Application(GraphicsLaunchOptions graphicsOptions)
     : m_GraphicsOptions(graphicsOptions) {
   s_Instance = this;
+}
+
+bool Application::LoadEditorProject(const std::string& path) {
+  if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
+  ProjectConfig config;
+  if (!ProjectSerializer::LoadProject(path, config, m_Scene.get())) return false;
+  m_PlayerHandleValue = 0;
+  m_PlayerPersistentID.clear();
+  for (const auto& entity : m_Scene->GetEntities()) {
+    if (entity->GetName() == "Player") {
+      m_PlayerHandleValue = entity->GetHandle().Value();
+      m_PlayerPersistentID = entity->GetPersistentID();
+      break;
+    }
+  }
+  m_Editor->ClearSelection();
+  m_Editor->GetUndoHistory().Clear();
+  m_Editor->GetSelectionState().BindScene(m_Scene.get());
+  if (m_PhysicsSystem) m_PhysicsSystem->ResetRuntimeState();
+  if (m_ProjectileSystem) m_ProjectileSystem->ResetRuntimeState();
+  if (m_FPSController) m_FPSController->ResetRuntimeState();
+  return true;
 }
 
 Application::~Application() {
@@ -191,13 +228,17 @@ void Application::LeaveNetworkGame() {
 }
 
 bool Application::PumpNetworkGame() {
+  ScopedNetworkPumpSample pumpSample{m_NetworkPumpTelemetry};
   auto& network = NetworkManager::Get();
   auto state = network.GetState();
+  const auto isPending = [](ConnectionState value) {
+    return value == ConnectionState::Connecting || value == ConnectionState::Handshaking;
+  };
   const bool client = GameModeManager::Get().GetMode() == GameMode::MultiplayerClient;
-  if (!client || (state != ConnectionState::Handshaking && state != ConnectionState::Connected)) {
+  if (!client || (!isPending(state) && state != ConnectionState::Connected)) {
     if (m_NetworkGame) LeaveNetworkGame();
     if (network.IsServer()) network.UpdateServer(); // Legacy engine-host transport.
-    else if (!client && (state == ConnectionState::Handshaking || state == ConnectionState::Connected)) network.UpdateClient();
+    else if (!client && (isPending(state) || state == ConnectionState::Connected)) network.UpdateClient();
     return false;
   }
   if (!m_NetworkGame) {
@@ -209,7 +250,7 @@ bool Application::PumpNetworkGame() {
         m_NetworkSnapshotFailed = true;
     });
   }
-  if (state == ConnectionState::Handshaking) {
+  if (isPending(state)) {
     m_NetworkGame->ResetConnection(); // Includes server restart with reused peer IDs/ticks.
     m_NetworkStartedAt = SDL_GetTicks();
   }
@@ -249,7 +290,7 @@ bool Application::Init() {
   LogStartup("Init: Started");
 
   Engine::EngineConfig config;
-  config.windowTitle = "Archura FPS Engine - Build 0.2 (SDL2)";
+  config.windowTitle = "Archura | Scene Editor";
   if (m_Standalone) config.windowTitle = m_GameTitle;
   config.editorMode = !m_Standalone;
   config.windowWidth = 1920;
@@ -534,7 +575,11 @@ void Application::InitializeGame(const GameManifest& game) {
             << "; editor=off\n";
 }
 
-void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network) {
+void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network, const StartupProgressCallback& progress) {
+  const auto reportProgress = [&](StartupStage stage) {
+    if (progress && !progress(stage)) throw StartupCancelled{};
+  };
+  reportProgress(StartupStage::Starting);
   m_NetworkLaunch = network;
   m_Standalone = game != nullptr;
   if (m_Standalone) {
@@ -553,6 +598,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
   }
 
   LogStartup("Init() completed successfully");
+  reportProgress(StartupStage::CoreReady);
 
   if (game) {
     InitializeGame(*game);
@@ -587,8 +633,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
   m_RenderSystem->Init(m_Scene.get());
   if (!m_RenderSystem->IsInitialized()) {
     std::cerr << "[Render] RenderSystem initialization failed\n";
-    m_Running = false;
-    return;
+    throw std::runtime_error("RenderSystem initialization failed");
   }
 
   LogStartup("RenderSystem initialized");
@@ -639,7 +684,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
     if (m_Editor) {
       m_Editor->SanitizeSelection(m_Scene.get());
     }
-    m_Accumulator = 0.0f;
+    m_GameLoop.ResetAccumulator();
     m_Input->SetCursorMode(2);
     m_IsPaused = false;
     std::cout << "[Editor] Entered Play mode" << std::endl;
@@ -675,7 +720,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
       m_Editor->SanitizeSelection(m_Scene.get());
     }
     m_IsPaused = false;
-    m_Accumulator = 0.0f;
+    m_GameLoop.ResetAccumulator();
     m_Input->SetCursorMode(0);
     std::cout << "[Editor] Returned to Edit mode" << std::endl;
     return true;
@@ -809,10 +854,9 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
             << ", Running: " << m_Running << std::endl;
 
   // Initialize timing for fixed timestep
-  m_LastFrameTime = SDL_GetTicks() / 1000.0f;
-  m_LastFPSUpdateTime = m_LastFrameTime;
-  m_Accumulator = 0.0f;
-  m_TickCount = 0;
+  double lastFrameTime = MonotonicSeconds();
+  m_LastFPSUpdateTime = lastFrameTime;
+  m_GameLoop.Reset();
 
   std::cout << "Starting 128 tickrate main loop..." << std::endl;
 
@@ -834,10 +878,31 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
     networkProbeID = probe->GetPersistentID();
   }
   if (network && !JoinNetworkGame(network->host, network->port)) throw std::runtime_error("Network connection failed");
+  reportProgress(StartupStage::WorldReady);
+  reportProgress(StartupStage::Ready);
+  // Loading time does not become simulation catch-up on the first frame.
+  lastFrameTime = MonotonicSeconds();
+  m_LastFPSUpdateTime = lastFrameTime;
   const auto networkSmokeStart = std::chrono::steady_clock::now();
   int networkPhase = 0;
   std::uint32_t firstNetworkID = 0;
   bool sawRemote = false, sawReconnected = false;
+  auto cpuWorkStart = std::chrono::steady_clock::now();
+  GameLoopHarness::Callbacks callbacks;
+  callbacks.shouldContinue = [this] { return m_Running && !m_EngineWindow->ShouldClose(); };
+  callbacks.input = [this] { ProcessInput(); };
+  callbacks.fixedTick = [this](double dt) { UpdateGameLogic(static_cast<float>(dt)); };
+  callbacks.render = [this](double alpha) { RenderFrame(static_cast<float>(alpha)); };
+  callbacks.present = [this, &cpuWorkStart] {
+    m_FrameTelemetry.RecordCpuWorkMilliseconds(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cpuWorkStart).count());
+    // Present/vsync and frame pacing are outside CPU work telemetry.
+    const auto presentStart = std::chrono::steady_clock::now();
+    m_EngineWindow->Update();
+    m_PresentTelemetry.RecordCpuWorkMilliseconds(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - presentStart).count());
+  };
+  callbacks.endFrame = [this] { m_Input->EndFrame(); };
   try {
     while (!m_EngineWindow->ShouldClose() && m_Running) {
       if (network && network->smoke) {
@@ -887,65 +952,25 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
             throw std::runtime_error("Play/Stop smoke: authored restore failed");
         }
       }
-      // Calculate frame time
-      float frameStartTime = SDL_GetTicks() / 1000.0f;
-      float frameTime = frameStartTime - m_LastFrameTime;
-      m_LastFrameTime = frameStartTime;
-
-      // Cap frame time to prevent spiral of death
-      if (frameTime > 0.25f) {
-        frameTime = 0.25f; // Max 4 FPS minimum
-      }
-
-      m_Accumulator += frameTime;
-
-      const auto cpuWorkStart = std::chrono::steady_clock::now();
-
-      // Fixed timestep update loop (128 Hz)
-      // Process input and events (ONCE PER FRAME)
-      ProcessInput();
-
-      // Fixed timestep update loop (128 Hz)
-      int ticksThisFrame = 0;
-      while (m_Accumulator >= TICK_INTERVAL &&
-             ticksThisFrame < MAX_TICKS_PER_FRAME) {
-
-        // Update game logic with fixed timestep
-        UpdateGameLogic(TICK_INTERVAL);
-
-        m_Accumulator -= TICK_INTERVAL;
-        ticksThisFrame++;
-        m_TickCount++;
-      }
-
-      // Calculate interpolation alpha for smooth rendering
-      float alpha = static_cast<float>(m_Accumulator / TICK_INTERVAL);
-
-      // Render with interpolation
-      RenderFrame(alpha);
-
-      const auto cpuWorkEnd = std::chrono::steady_clock::now();
-      const std::chrono::duration<double, std::milli> cpuWorkDuration =
-          cpuWorkEnd - cpuWorkStart;
-      m_FrameTelemetry.RecordCpuWorkMilliseconds(cpuWorkDuration.count());
-
-      // Swap/vsync and the limiter are deliberately outside the CPU-work
-      // telemetry scope.
-      m_EngineWindow->Update();
-      m_Input->EndFrame();
-
-      if (frameLimit != 0 && ++renderedFrames >= frameLimit) m_Running = false;
-
+      const double frameStartTime = MonotonicSeconds();
+      const double frameTime = frameStartTime - lastFrameTime;
+      lastFrameTime = frameStartTime;
+      m_FrameIntervalTelemetry.RecordCpuWorkMilliseconds(frameTime * 1000.0);
+      cpuWorkStart = std::chrono::steady_clock::now();
+      const bool presented = m_GameLoop.RunFrame(frameTime, callbacks);
+      if (presented && frameLimit != 0 && ++renderedFrames >= frameLimit) m_Running = false;
+      if (!m_Running || m_EngineWindow->ShouldClose()) break;
+      const auto pacingStart = std::chrono::steady_clock::now();
       LimitFrameRate(frameStartTime);
+      m_PacingTelemetry.RecordCpuWorkMilliseconds(
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pacingStart).count());
 
       // FPS Counter (every second)
-      float currentTime = SDL_GetTicks() / 1000.0f;
+      const double currentTime = MonotonicSeconds();
       m_FrameCount++;
       if (currentTime - m_LastFPSUpdateTime >= 1.0f) {
         m_CurrentFPS = static_cast<float>(m_FrameCount /
                                           (currentTime - m_LastFPSUpdateTime));
-        // std::cout << "FPS: " << m_CurrentFPS << " | Ticks: " << m_TickCount
-        // << std::endl;
         m_FrameCount = 0;
         m_LastFPSUpdateTime = currentTime;
       }
@@ -1023,7 +1048,8 @@ void Application::ProcessInput() {
     float frameDt = ImGui::GetIO().DeltaTime;
     if (frameDt <= 0.0f)
       frameDt = 0.016f;
-    m_Editor->GetEditorCamera()->Update(m_Input, frameDt);
+    if (m_Editor->CanStartSceneInteraction(m_Input->GetMousePosition()) || m_Input->IsCursorLocked())
+      m_Editor->GetEditorCamera()->Update(m_Input, frameDt);
 
     // --- Gizmo input (runs BEFORE picking so handle drags take priority) ---
     int w = 0, h = 0;
@@ -1123,15 +1149,17 @@ void Application::RenderFrame(float alpha) {
   if (networkView) m_NetworkGame->PrepareView();
   if (networkView && m_NetworkLaunch && m_NetworkLaunch->smoke) m_NetworkGame->AimAtRemote();
   glm::mat4 activeView = renderCamera->GetViewMatrix();
+  const float viewAspect = m_DevModeActive && m_Editor
+      ? m_Editor->GetSceneAspect(m_Window->GetAspectRatio()) : m_Window->GetAspectRatio();
   glm::mat4 activeProjection =
-      renderCamera->GetProjectionMatrix(m_Window->GetAspectRatio());
+      renderCamera->GetProjectionMatrix(viewAspect);
   if (editorEditMode) {
     EditorCamera *ec = m_Editor->GetEditorCamera();
-    const float aspect = (m_Window && m_Window->GetHeight() > 0)
-                             ? m_Window->GetAspectRatio()
-                             : 1.777f;
+    const float aspect = viewAspect;
     activeView = ec->GetViewMatrix();
     activeProjection = ec->GetProjectionMatrix(aspect);
+    sceneRenderer->SetViewOverride(activeView, activeProjection);
+  } else if (m_DevModeActive && m_Editor) {
     sceneRenderer->SetViewOverride(activeView, activeProjection);
   } else {
     sceneRenderer->ClearViewOverride();
@@ -1183,8 +1211,9 @@ void Application::RenderFrame(float alpha) {
 #endif
 
   if (m_DevModeActive) {
-    m_Editor->BeginDockSpace();
+    m_Editor->CaptureSceneFrame();
     m_Editor->DrawMenuBar(m_Scene.get());
+    m_Editor->BeginDockSpace();
     m_Editor->DrawEditorUI(m_Scene.get());
     m_Editor->DrawOverlay(m_Scene.get(), GetCamera());
 
@@ -1222,17 +1251,17 @@ void Application::RenderFrame(float alpha) {
   m_Renderer->EndFrame();
 }
 
-void Application::LimitFrameRate(float frameStartTime) {
+void Application::LimitFrameRate(double frameStartTime) {
   if (m_FPSLimit <= 0.0f) {
     return;
   }
 
-  const float targetFrameTime = 1.0f / m_FPSLimit;
-  const float frameElapsed = SDL_GetTicks() / 1000.0f - frameStartTime;
-  const float remaining = targetFrameTime - frameElapsed;
+  const double targetFrameTime = 1.0 / static_cast<double>(m_FPSLimit);
+  const double frameElapsed = MonotonicSeconds() - frameStartTime;
+  const double remaining = targetFrameTime - frameElapsed;
 
   if (remaining > 0.001f) {
-    SDL_Delay(static_cast<Uint32>(remaining * 1000.0f));
+    SDL_Delay(static_cast<Uint32>(remaining * 1000.0));
   }
 }
 

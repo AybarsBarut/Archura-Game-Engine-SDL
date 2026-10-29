@@ -27,6 +27,9 @@ public:
     bool IsMouseButtonReleased(int button) const;
 
     glm::vec2 GetMousePosition() const { return m_MousePosition; }
+    // Logical window coordinates from the first accepted down event this frame.
+    // Retained while held and through the release frame; cleared on focus loss.
+    glm::vec2 GetMouseButtonPressPosition(int button) const;
     glm::vec2 GetMouseDelta() const { return m_MouseDelta; }
     float GetMouseScrollDelta() const { return m_ScrollDelta; }
 
@@ -53,6 +56,8 @@ private:
     bool m_MouseButtons[6];
     bool m_MouseButtonsPressed[6];
     bool m_MouseButtonsReleased[6];
+    glm::vec2 m_MouseButtonPressPositions[6]{};
+    bool m_MousePressPositionCaptured[6]{};
 };
 
 } // namespace Archura

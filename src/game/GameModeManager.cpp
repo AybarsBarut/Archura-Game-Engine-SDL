@@ -29,7 +29,7 @@ bool GameModeManager::ConnectToHost(const std::string& ip, uint16_t port) {
     m_Mode = GameMode::MultiplayerClient;
     auto& nm = NetworkManager::Get();
     if (nm.Connect(ip, port)) {
-        std::cout << "[GameMode] Taşıma bağlantısı açıldı; handshake bekleniyor: "
+        std::cout << "[GameMode] Bağlantı isteği başlatıldı: "
                   << ip << ":" << port << std::endl;
         return true;
     }

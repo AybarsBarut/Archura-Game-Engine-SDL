@@ -1,5 +1,6 @@
 #include "ecs/Entity.h"
 #include "game/PhysicsSystem.h"
+#include "core/GameLoopHarness.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -55,19 +56,21 @@ void TestVariableRenderRates() {
         physics.Init(&scene);
         const double physicsStep = physics.GetFixedTimeStep();
         double applicationTime = 0;
+        Archura::GameLoopHarness loop;
+        Archura::GameLoopHarness::Callbacks callbacks;
+        callbacks.fixedTick = [&](double dt) { physics.Update(static_cast<float>(dt)); };
         int interpolatedFrames = 0;
         for (int frame=1; frame<=fps*2; ++frame) {
             const double renderTime = double(frame)/fps;
-            while (applicationTime + appStep <= renderTime + 1.e-10) {
-                physics.Update(float(appStep));
-                applicationTime += appStep;
-            }
+            loop.RunFrame(1.0 / fps, callbacks);
+            applicationTime = loop.TotalTicks() * appStep;
+            CHECK(loop.DroppedTicks() == 0);
             std::array<unsigned char,sizeof(Archura::Transform)> transformBytes{};
             std::array<unsigned char,sizeof(Archura::RigidBody)> bodyBytes{};
             std::memcpy(transformBytes.data(),transform,sizeof(*transform));
             std::memcpy(bodyBytes.data(),body,sizeof(*body));
             const auto authority = ball->GetWorldTransform();
-            const auto view = physics.GetRenderWorldTransform(*ball,float(renderTime-applicationTime));
+            const auto view = physics.GetRenderWorldTransform(*ball,float(loop.AccumulatorSeconds()));
             CHECK(std::memcmp(transformBytes.data(),transform,sizeof(*transform))==0);
             CHECK(std::memcmp(bodyBytes.data(),body,sizeof(*body))==0);
             CHECK(Near(authority,ball->GetWorldTransform(),0));

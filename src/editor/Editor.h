@@ -12,6 +12,7 @@
 #endif
 
 #include <deque>
+#include <imgui.h>
 #include <filesystem>
 #include <functional>
 #include <glm/glm.hpp>
@@ -29,6 +30,7 @@ struct SDL_Window;
 #include "GameBuilderPanel.h"
 #include "TransformUndoHistory.h"
 #include "ProjectDirectoryCache.h"
+#include "InspectorTextState.h"
 
 namespace Archura {
 
@@ -55,6 +57,10 @@ public:
     void Shutdown();
 
     void BeginDockSpace();
+    void CaptureSceneFrame();
+    float GetSceneAspect(float fallback) const;
+    bool IsSceneHovered() const { return m_SceneHovered; }
+    bool CanStartSceneInteraction(glm::vec2 mouse) const;
     void DrawEditorUI(Scene* scene);
     void Update(Scene* scene, float deltaTime, float fps);
     void DrawMenuBar(Scene* scene);
@@ -74,7 +80,7 @@ public:
     void ProcessGizmoInput(Input* input, int screenW, int screenH);
 
     /** True while a gizmo handle is hovered or being dragged (suppresses entity picking). */
-    bool IsGizmoInteracting() const { return m_GizmoActive != GizmoOp::None || m_GizmoHovered != GizmoOp::None; }
+    bool IsGizmoInteracting() const { return m_GizmoConsumedClick || m_GizmoActive != GizmoOp::None || m_GizmoHovered != GizmoOp::None; }
 
     // ── Editor Keyboard Shortcuts (Ctrl+Z/C/V/D, F) ─────────────────────────
     /** Call every frame in Edit mode from ProcessInput (after gizmo). */
@@ -150,6 +156,10 @@ public: // ── Shared State (kept public for minimal refactor surface) ──
 private:
     // ── Layout / Theme ───────────────────────────────────────────────────────
     void ApplyDarkTheme();
+    void DrawSceneViewport();
+    void RequestSceneDialog(bool save);
+    void DrawSceneDialog(Scene* scene);
+    void SaveCurrentScene(Scene* scene);
 
     // ── Panel Draw ───────────────────────────────────────────────────────────
     void DrawToolbar(Scene* scene);
@@ -168,6 +178,23 @@ private:
 
 private:
     bool       m_Enabled = true;
+    bool m_ResetWorkspace = false;
+    bool m_SceneHovered = false;
+    bool m_SceneVisible = false;
+    glm::vec2 m_SceneOrigin = {}, m_SceneSize = {};
+    ImDrawList* m_SceneDrawList = nullptr;
+    unsigned int m_SceneTexture = 0;
+    int m_SceneTextureWidth = 0, m_SceneTextureHeight = 0;
+    std::string m_CurrentScenePath;
+    char m_ScenePathBuffer[1024] = {};
+    std::string m_SceneIOError;
+    bool m_SceneDialogSave = false;
+    bool m_RequestSceneDialog = false;
+    bool m_ConfirmSceneAction = false;
+    ImGuiTextFilter m_AssetFilter;
+    ImGuiTextFilter m_HierarchyFilter;
+    InspectorTextState m_InspectorText;
+    bool m_GizmoConsumedClick = false;
     EditorModeState m_ModeState;
 
     std::function<bool()> m_OnPlay;
@@ -186,13 +213,6 @@ private:
     bool m_ShowDemoWindow     = false;
     bool m_ShowGameBuilder    = false;
     bool m_ShowTutorial       = false;
-
-    // ── Panel locking states (fixed/Unity-style layout) ──────────────────────
-    bool m_HierarchyLocked    = true;
-    bool m_InspectorLocked    = true;
-    bool m_ProjectPanelLocked = true;
-    bool m_ConsoleLocked      = true;
-    bool m_PerformanceLocked  = true;
 
     // ── Asset cache (dirty-flagged, never scanned per frame) ─────────────────
     std::vector<std::string> m_CachedTextureFiles;

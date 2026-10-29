@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include "core/Application.h"
 #include "core/GameManifest.h"
+#include "core/StartupProgress.h"
 #include "game/GraphicalNetworkSession.h"
 #include "rendering/GraphicsAPI.h"
 #include <iostream>
@@ -9,10 +10,8 @@
 #include <memory>
 #include <SDL.h>
 #include <SDL_ttf.h>
-#include <thread>
-#include <atomic>
-#include <mutex>
 #include <string>
+#include <stdexcept>
 #include <filesystem>
 #include <string_view>
 
@@ -22,49 +21,175 @@ extern "C" {
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
 
-// Global thread-safe degiskenler
-std::atomic<bool> g_LoadingFinished(false);
-std::atomic<int> g_ProgressPercent(0);
-std::mutex g_LoadingMutex;
-std::string g_LoadingMessage = "Initializing Archura Engine...";
+namespace {
 
-void LoadingWorker() {
-    auto SetProgress = [](int percent, const std::string& msg) {
-        g_ProgressPercent = percent;
-        std::lock_guard<std::mutex> lock(g_LoadingMutex);
-        g_LoadingMessage = msg;
-    };
-
-    // --- YAPAY YUKLEME SIMULASYONU ---
-    
-    // 1. Core Systems
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
-    SetProgress(15, "Loading Core Systems...");
-    
-    // 2. Audio & Input
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    SetProgress(30, "Initializing Audio & Input...");
-    
-    // 3. Renderer & Shaders
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
-    SetProgress(50, "Compiling Shaders...");
-    
-    // 4. Physics Engine
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    SetProgress(75, "Loading Physics Engine...");
-    
-    // 5. Assets & UI
-    std::this_thread::sleep_for(std::chrono::milliseconds(700));
-    SetProgress(95, "Preloading Assets...");
-    
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    SetProgress(100, "Starting Engine...");
-
-    g_LoadingFinished = true;
+void PrintSmokeTelemetry(const Archura::Application& app) {
+    const auto cpu = app.GetFrameTelemetry().Snapshot();
+    const auto pump = app.GetNetworkPumpTelemetry().Snapshot();
+    const auto interval = app.GetFrameIntervalTelemetry().Snapshot();
+    const auto present = app.GetPresentTelemetry().Snapshot();
+    const auto pacing = app.GetPacingTelemetry().Snapshot();
+    const auto& loop = app.GetGameLoopStats();
+    std::cout << "LOOP_METRICS frames=" << cpu.observedFrames << " ticks=" << loop.TotalTicks()
+              << " dropped_ticks=" << loop.DroppedTicks() << " dropped_seconds=" << loop.DroppedSeconds()
+              << " cpu_ms_p50=" << cpu.p50CpuWorkMs << " cpu_ms_p95=" << cpu.p95CpuWorkMs
+              << " cpu_ms_p99=" << cpu.p99CpuWorkMs << " pump_samples=" << pump.observedFrames
+              << " pump_ms_p95=" << pump.p95CpuWorkMs
+              << " frame_ms_p95=" << interval.p95CpuWorkMs
+              << " swap_ms_p95=" << present.p95CpuWorkMs
+              << " pacing_ms_p95=" << pacing.p95CpuWorkMs << '\n';
 }
+
+// SDL's software renderer can still use an accelerated window framebuffer.
+// Preserve the caller's GL context across splash drawing and destruction.
+class ScopedGLContext {
+public:
+    ScopedGLContext() noexcept
+        : m_Window(SDL_GL_GetCurrentWindow()), m_Context(SDL_GL_GetCurrentContext()),
+          m_WindowID(m_Window ? SDL_GetWindowID(m_Window) : 0) {}
+    ~ScopedGLContext() {
+        if (CanRestore() && SDL_GL_MakeCurrent(m_Window, m_Context) != 0)
+            std::cerr << "SPLASH ERROR: Cannot restore graphics context: " << SDL_GetError() << '\n';
+    }
+    ScopedGLContext(const ScopedGLContext&) = delete;
+    ScopedGLContext& operator=(const ScopedGLContext&) = delete;
+
+    void Restore() {
+        if (CanRestore() && SDL_GL_MakeCurrent(m_Window, m_Context) != 0)
+            throw std::runtime_error(std::string("Cannot restore graphics context after splash: ") + SDL_GetError());
+        m_Context = nullptr;
+    }
+
+private:
+    bool CanRestore() const noexcept {
+        return m_Context && m_WindowID && SDL_WasInit(SDL_INIT_VIDEO) &&
+               SDL_GetWindowFromID(m_WindowID) == m_Window;
+    }
+    SDL_Window* m_Window;
+    SDL_GLContext m_Context;
+    Uint32 m_WindowID;
+};
+
+// This object owns one SDL video reference and all splash resources. Declare it
+// after the Application owner so it is destroyed before Engine calls SDL_Quit.
+class StartupSplash {
+public:
+    StartupSplash() = default;
+    StartupSplash(const StartupSplash&) = delete;
+    StartupSplash& operator=(const StartupSplash&) = delete;
+    ~StartupSplash() { Close(); }
+
+    void Open() {
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
+            throw std::runtime_error(std::string("Splash SDL init failed: ") + SDL_GetError());
+        m_Video = true;
+        m_Window = SDL_CreateWindow("Archura Starting...", SDL_WINDOWPOS_CENTERED,
+            SDL_WINDOWPOS_CENTERED, 600, 300, SDL_WINDOW_BORDERLESS | SDL_WINDOW_SHOWN);
+        if (!m_Window) throw std::runtime_error(std::string("Splash window failed: ") + SDL_GetError());
+        // Prefer software rendering, while still guarding against SDL's
+        // optional accelerated window framebuffer during every update.
+        m_Renderer = SDL_CreateRenderer(m_Window, -1, SDL_RENDERER_SOFTWARE);
+        if (!m_Renderer) throw std::runtime_error(std::string("Splash renderer failed: ") + SDL_GetError());
+        if (TTF_Init() == 0) {
+            m_TTF = true;
+            m_TitleFont = TTF_OpenFont("assets/fonts/Roboto-Bold.ttf", 64);
+            m_TextFont = TTF_OpenFont("assets/fonts/Roboto-Bold.ttf", 18);
+        }
+        SDL_RaiseWindow(m_Window);
+        SDL_SetWindowAlwaysOnTop(m_Window, SDL_TRUE);
+    }
+
+    bool Report(Archura::StartupStage stage, bool cancelTest) {
+        if (!m_Window) return true;
+        ScopedGLContext context;
+        if (cancelTest && stage == Archura::StartupStage::CoreReady) {
+            SDL_Event close{};
+            close.type = SDL_WINDOWEVENT;
+            close.window.windowID = SDL_GetWindowID(m_Window);
+            close.window.event = SDL_WINDOWEVENT_CLOSE;
+            if (SDL_PushEvent(&close) != 1)
+                throw std::runtime_error("Could not inject splash cancellation event");
+        }
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT ||
+                (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) ||
+                (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE))
+                return false;
+        }
+
+        int completed = 0;
+        const char* message = "Initializing engine...";
+        switch (stage) {
+        case Archura::StartupStage::Starting: break;
+        case Archura::StartupStage::CoreReady:
+            completed = 1; message = "Core systems ready; preparing world..."; break;
+        case Archura::StartupStage::WorldReady:
+            completed = 2; message = "World ready; preparing first frame..."; break;
+        case Archura::StartupStage::Ready:
+            completed = 3; message = "Ready"; break;
+        }
+        SDL_SetRenderDrawColor(m_Renderer, 30, 30, 30, 255);
+        SDL_RenderClear(m_Renderer);
+        DrawText(m_TitleFont, "ARCHURA", 70, true, {255, 255, 255, 255});
+        DrawText(m_TextFont, message, 195, false, {180, 180, 180, 255});
+        SDL_Rect background{50, 220, 500, 15};
+        SDL_SetRenderDrawColor(m_Renderer, 50, 50, 50, 255);
+        SDL_RenderFillRect(m_Renderer, &background);
+        SDL_Rect foreground{50, 220, 500 * completed / 3, 15};
+        SDL_SetRenderDrawColor(m_Renderer, 80, 180, 255, 255);
+        SDL_RenderFillRect(m_Renderer, &foreground);
+        SDL_RenderPresent(m_Renderer);
+        if (stage == Archura::StartupStage::Ready) Close();
+        context.Restore();
+        return true;
+    }
+
+private:
+    void DrawText(TTF_Font* font, const char* text, int y, bool centered, SDL_Color color) {
+        if (!font) return;
+        SDL_Surface* surface = TTF_RenderText_Blended(font, text, color);
+        if (!surface) return;
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(m_Renderer, surface);
+        if (texture) {
+            SDL_Rect destination{centered ? (600 - surface->w) / 2 : 50, y, surface->w, surface->h};
+            SDL_RenderCopy(m_Renderer, texture, nullptr, &destination);
+            SDL_DestroyTexture(texture);
+        }
+        SDL_FreeSurface(surface);
+    }
+
+    void Close() noexcept {
+        ScopedGLContext context;
+        if (m_TitleFont) TTF_CloseFont(m_TitleFont);
+        if (m_TextFont) TTF_CloseFont(m_TextFont);
+        m_TitleFont = m_TextFont = nullptr;
+        // Window's failed-init cleanup may already have called SDL_Quit,
+        // which destroys every SDL window and renderer, including this splash.
+        const bool videoAlive = SDL_WasInit(SDL_INIT_VIDEO) != 0;
+        if (videoAlive && m_Renderer) SDL_DestroyRenderer(m_Renderer);
+        if (videoAlive && m_Window) SDL_DestroyWindow(m_Window);
+        m_Renderer = nullptr;
+        m_Window = nullptr;
+        if (m_TTF) TTF_Quit();
+        if (m_Video && videoAlive) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        m_TTF = m_Video = false;
+    }
+
+    SDL_Window* m_Window = nullptr;
+    SDL_Renderer* m_Renderer = nullptr;
+    TTF_Font* m_TitleFont = nullptr;
+    TTF_Font* m_TextFont = nullptr;
+    bool m_Video = false;
+    bool m_TTF = false;
+};
+
+} // namespace
 
 int main(int argc, char** argv) {
     bool smokeTest = false;
+    bool startupCancelTest = false;
+    bool startupSplashTest = false;
     bool playStopSmokeTest = false;
     Archura::NetworkLaunchOptions network;
     std::filesystem::path gamePath;
@@ -75,6 +200,8 @@ int main(int argc, char** argv) {
             if (++i >= argc || !argv[i] || !argv[i][0]) throw std::invalid_argument("missing argument value");
             return argv[i];
         };
+        if (option == "--startup-smoke-test") { startupSplashTest = smokeTest = true; continue; }
+        if (option == "--startup-cancel-test") { startupCancelTest = true; continue; }
         if (option == "--connect") { network.host = next(); continue; }
         if (option == "--port") {
             const auto value = next(); std::size_t end = 0;
@@ -95,6 +222,10 @@ int main(int argc, char** argv) {
         if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
             smokeTest = playStopSmokeTest = true;
     }
+    if (startupSplashTest && (playStopSmokeTest || !gamePath.empty() || !network.host.empty()))
+        throw std::invalid_argument("startup splash smoke requires normal editor startup");
+    if (startupCancelTest && (smokeTest || !gamePath.empty() || !network.host.empty()))
+        throw std::invalid_argument("startup cancel test requires normal editor startup");
     if (network.smoke && (network.host.empty() || smokeTest || playStopSmokeTest || !gamePath.empty() ||
         !Archura::Net::ValidPlayerInput({1, network.moveX, network.moveZ})))
         throw std::invalid_argument("network smoke requires --connect, valid axes, and no other smoke/game mode");
@@ -107,6 +238,9 @@ int main(int argc, char** argv) {
         gamePath = executablePath.parent_path() / "game.json";
     Archura::GameManifest game;
     const bool standalone = !gamePath.empty();
+    if (standalone && (startupCancelTest || startupSplashTest)) {
+        std::cerr << "Startup splash tests require editor startup\n"; return 1;
+    }
     if (standalone) {
         std::string error;
         if (!Archura::GameManifest::Load(gamePath, game, error)) {
@@ -129,160 +263,45 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    if (!smokeTest && !standalone && network.host.empty()) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        std::cerr << "SPLASH ERROR: SDL_Init Failed: " << SDL_GetError() << "\n";
-        return -1;
-    }
-
-    if (TTF_Init() == -1) {
-        std::cerr << "SPLASH ERROR: TTF_Init Failed: " << TTF_GetError() << "\n";
-        SDL_Quit();
-        return -1;
-    }
-
-    // Splash Screen Window & Renderer
-    SDL_Window* splashWindow = SDL_CreateWindow(
-        "Archura Starting...",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        600, 300,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_SHOWN
-    );
-
-    if (!splashWindow) {
-        std::cerr << "SPLASH ERROR: Failed to create splash window.\n";
-        TTF_Quit();
-        SDL_Quit();
-        return -1;
-    }
-
-    // Konsol penceresinin önüne getirilmesi için
-    SDL_RaiseWindow(splashWindow);
-    SDL_SetWindowAlwaysOnTop(splashWindow, SDL_TRUE);
-
-    SDL_Renderer* splashRenderer = SDL_CreateRenderer(splashWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!splashRenderer) {
-        std::cerr << "SPLASH ERROR: Failed to create splash renderer.\n";
-        SDL_DestroyWindow(splashWindow);
-        TTF_Quit();
-        SDL_Quit();
-        return -1;
-    }
-
-    // Load Font
-    TTF_Font* titleFont = TTF_OpenFont("assets/fonts/Roboto-Bold.ttf", 64);
-    TTF_Font* subFont = TTF_OpenFont("assets/fonts/Roboto-Bold.ttf", 18);
-
-    if (!titleFont || !subFont) {
-        std::cerr << "SPLASH WARNING: Failed to load font: " << TTF_GetError() << "\n";
-        // Font could not be loaded, but we can still draw the progress bar.
-    }
-
-    // Colors
-    SDL_Color bgColor = { 30, 30, 30, 255 };      // #1E1E1E
-    SDL_Color titleColor = { 255, 255, 255, 255 }; 
-    SDL_Color textColor = { 180, 180, 180, 255 };
-    SDL_Color barBgColor = { 50, 50, 50, 255 };
-    SDL_Color barFgColor = { 80, 180, 255, 255 }; // Light Blue
-
-    // Start Worker Thread
-    std::thread loadingThread(LoadingWorker);
-
-    // Splash Loop (Main Thread)
-    bool quitSplash = false;
-    SDL_Event e;
-    
-    while (!quitSplash && !g_LoadingFinished) {
-        // Handle events to prevent window from "Not Responding"
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                // If user forces close during load
-                exit(0); 
-            }
-        }
-
-        // Draw Background
-        SDL_SetRenderDrawColor(splashRenderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
-        SDL_RenderClear(splashRenderer);
-
-        // Draw Title "ARCHURA"
-        if (titleFont) {
-            SDL_Surface* titleSurf = TTF_RenderText_Blended(titleFont, "ARCHURA", titleColor);
-            if (titleSurf) {
-                SDL_Texture* titleTex = SDL_CreateTextureFromSurface(splashRenderer, titleSurf);
-                SDL_Rect titleRect = { (600 - titleSurf->w) / 2, 70, titleSurf->w, titleSurf->h };
-                SDL_RenderCopy(splashRenderer, titleTex, NULL, &titleRect);
-                SDL_DestroyTexture(titleTex);
-                SDL_FreeSurface(titleSurf);
-            }
-        }
-
-        // Fetch Thread-Safe Progress / UI Info
-        int currentProgress = g_ProgressPercent.load();
-        std::string currentMessage;
-        {
-            std::lock_guard<std::mutex> lock(g_LoadingMutex);
-            currentMessage = g_LoadingMessage;
-        }
-
-        // Draw Progress Bar Background
-        SDL_Rect barBg = { 50, 220, 500, 15 };
-        SDL_SetRenderDrawColor(splashRenderer, barBgColor.r, barBgColor.g, barBgColor.b, barBgColor.a);
-        SDL_RenderFillRect(splashRenderer, &barBg);
-
-        // Draw Progress Bar Foreground
-        int barWidth = (int)((currentProgress / 100.0f) * 500.0f);
-        SDL_Rect barFg = { 50, 220, barWidth, 15 };
-        SDL_SetRenderDrawColor(splashRenderer, barFgColor.r, barFgColor.g, barFgColor.b, barFgColor.a);
-        SDL_RenderFillRect(splashRenderer, &barFg);
-
-        // Draw Sub Text
-        if (subFont) {
-            SDL_Surface* txtSurf = TTF_RenderText_Blended(subFont, currentMessage.c_str(), textColor);
-            if (txtSurf) {
-                SDL_Texture* txtTex = SDL_CreateTextureFromSurface(splashRenderer, txtSurf);
-                SDL_Rect txtRect = { 50, 195, txtSurf->w, txtSurf->h }; // Align left to the bar
-                SDL_RenderCopy(splashRenderer, txtTex, NULL, &txtRect);
-                SDL_DestroyTexture(txtTex);
-                SDL_FreeSurface(txtSurf);
-            }
-        }
-
-        SDL_RenderPresent(splashRenderer);
-        SDL_Delay(16); // ~60 FPS
-    }
-
-    // Cleanup Splash Screen
-    loadingThread.join();
-
-    if (titleFont) TTF_CloseFont(titleFont);
-    if (subFont) TTF_CloseFont(subFont);
-    SDL_DestroyRenderer(splashRenderer);
-    SDL_DestroyWindow(splashWindow);
-    TTF_Quit();
-    // Keep SDL initialized for Application
-    
-    // ------------------------------------
-    // START ENGINE
-    // ------------------------------------
-    
-    // Clear any SDL_QUIT events that were generated by closing the splash window
-    SDL_PumpEvents();
-    SDL_FlushEvent(SDL_QUIT);
-    }
-
     try {
-        auto app = std::make_unique<Archura::Application>(graphicsOptions);
-        app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr,
-                 network.host.empty() ? nullptr : &network);
+        std::unique_ptr<Archura::Application> app;
+        StartupSplash splash;
+        Archura::StartupProgressCallback progress;
+        bool coreReady = false;
+        bool startupReady = false;
+        if ((!smokeTest || startupSplashTest) && !standalone && network.host.empty()) {
+            splash.Open();
+            progress = [&](Archura::StartupStage stage) {
+                if (stage == Archura::StartupStage::CoreReady) coreReady = true;
+                const bool keepGoing = splash.Report(stage, startupCancelTest);
+                if (stage == Archura::StartupStage::Ready && keepGoing) startupReady = true;
+                return keepGoing;
+            };
+        }
+        app = std::make_unique<Archura::Application>(graphicsOptions);
+        try {
+            app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr,
+                     network.host.empty() ? nullptr : &network, progress);
+        } catch (const Archura::StartupCancelled&) {
+            if (startupSplashTest) throw std::runtime_error("Startup splash smoke was interrupted");
+            if (startupCancelTest && (!coreReady || app->GetFrameTelemetry().Snapshot().observedFrames != 0))
+                throw std::runtime_error("Startup cancellation did not occur before the first frame");
+            // Leave this scope to close splash before Application/SDL teardown.
+            if (startupCancelTest) std::cout << "Startup cancellation completed before first frame\n";
+            return 0;
+        }
+        if (startupSplashTest && !startupReady) throw std::runtime_error("Startup splash did not reach ready");
+        if (startupCancelTest) throw std::runtime_error("Startup cancellation test did not cancel");
         if (network.smoke) {
             const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
+            PrintSmokeTelemetry(*app);
             app.reset();
             if (frames < 16) throw std::runtime_error("Graphical network smoke rendered too few frames");
             std::cout << "Graphical network smoke completed and shutdown\n";
         }
         if (smokeTest) {
             const auto frames = app->GetFrameTelemetry().Snapshot().observedFrames;
+            PrintSmokeTelemetry(*app);
             app.reset(); // Include orderly shutdown in the smoke-test result.
             if (frames != 16) {
                 std::cerr << "Startup smoke interrupted after " << frames << " frames\n";

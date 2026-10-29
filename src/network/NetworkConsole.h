@@ -26,7 +26,7 @@ std::string_view DisconnectReasonName(DisconnectReason reason) noexcept;
 std::string FormatNetworkStatus(const NetworkRuntimeSnapshot& snapshot);
 std::string FormatNetworkStats(const NetworkStats& stats);
 std::string FormatNetworkConnectResult(const NetworkEndpoint& endpoint,
-                                       bool transportOpened,
+                                       bool requestAccepted,
                                        const NetworkRuntimeSnapshot& snapshot);
 
 } // namespace Archura
