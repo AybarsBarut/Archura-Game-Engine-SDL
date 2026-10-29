@@ -22,7 +22,13 @@ namespace Archura {
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO(); (void)io;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
-        // io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;        // Enable Docking
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.ConfigWindowsMoveFromTitleBarOnly = true;
+        const char* editorFont = "assets/fonts/Roboto-Bold.ttf";
+        if (FILE* font = fopen(editorFont, "rb")) {
+            fclose(font);
+            io.Fonts->AddFontFromFileTTF(editorFont, 15.0f);
+        }
         // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;      // Enable Multi-Viewport
 
         // Setup Dear ImGui style

@@ -3,6 +3,7 @@
 #include "../core/Engine.h"
 #include "../game/RenderSystem.h"
 #include <algorithm>
+#include <cmath>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <imgui.h>
@@ -66,9 +67,10 @@ void ObjectManipulationTool::Draw(Scene *scene, Camera *camera,
   ImGui::End();
 }
 
-void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
-                                        Entity *selectedEntity) {
-  (void)scene;
+void ObjectManipulationTool::OnSceneGUI(
+    Scene *scene, Entity *selectedEntity, const glm::mat4& view,
+    const glm::mat4& projection, const glm::vec2& viewportOrigin,
+    const glm::vec2& viewportSize, bool hovered, ImDrawList* drawList) {
 
   // Toggle Isolation
   if (selectedEntity && (!scene || !scene->OwnsEntityPointer(selectedEntity))) {
@@ -89,33 +91,38 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
       renderSystem->SetIsolatedEntity(nullptr);
   }
 
-  if (!m_IsOpen || m_CurrentMode != Mode::Terrain)
+  if (!m_IsOpen || m_CurrentMode != Mode::Terrain || !selectedEntity ||
+      !m_CurrentMesh || !hovered || viewportSize.x <= 0.0f || viewportSize.y <= 0.0f) {
+    m_IsPainting = false;
     return;
-  if (!selectedEntity || !m_CurrentMesh)
+  }
+
+  // ImGui captures the Scene image's mouse too, so the caller's image hover
+  // state replaces WantCaptureMouse. Use the exact image rectangle in logical
+  // screen coordinates, independently of window decorations and framebuffer DPI.
+  const ImVec2 mouse = ImGui::GetMousePos();
+  const float x = 2.0f * (mouse.x - viewportOrigin.x) / viewportSize.x - 1.0f;
+  const float y = 1.0f - 2.0f * (mouse.y - viewportOrigin.y) / viewportSize.y;
+  if (x < -1.0f || x > 1.0f || y < -1.0f || y > 1.0f) {
+    m_IsPainting = false;
     return;
-
-  // Check if mouse is over UI
-  if (ImGui::GetIO().WantCaptureMouse)
+  }
+  const glm::mat4 inverseViewProjection = glm::inverse(projection * view);
+  const glm::vec4 nearHomogeneous = inverseViewProjection * glm::vec4(x, y, -1.0f, 1.0f);
+  const glm::vec4 farHomogeneous = inverseViewProjection * glm::vec4(x, y, 1.0f, 1.0f);
+  if (!std::isfinite(nearHomogeneous.w) || !std::isfinite(farHomogeneous.w) ||
+      std::abs(nearHomogeneous.w) < 1e-7f || std::abs(farHomogeneous.w) < 1e-7f) {
+    m_IsPainting = false;
     return;
-
-  // Raycasting Logic
-  // Get Mouse Ray
-  ImVec2 mousePos = ImGui::GetMousePos();
-  ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-
-  float x = (2.0f * mousePos.x) / displaySize.x - 1.0f;
-  float y = 1.0f - (2.0f * mousePos.y) / displaySize.y;
-
-  glm::vec4 rayClip = glm::vec4(x, y, -1.0f, 1.0f);
-  glm::mat4 projection =
-      camera->GetProjectionMatrix(displaySize.x / displaySize.y);
-  glm::mat4 view = camera->GetViewMatrix();
-
-  glm::vec4 rayEye = glm::inverse(projection) * rayClip;
-  rayEye = glm::vec4(rayEye.x, rayEye.y, -1.0f, 0.0f);
-
-  glm::vec3 rayDir = glm::normalize(glm::vec3(glm::inverse(view) * rayEye));
-  glm::vec3 rayOrigin = camera->GetPosition();
+  }
+  const glm::vec3 rayOrigin = glm::vec3(nearHomogeneous) / nearHomogeneous.w;
+  const glm::vec3 direction = glm::vec3(farHomogeneous) / farHomogeneous.w - rayOrigin;
+  const float lengthSquared = glm::dot(direction, direction);
+  if (!std::isfinite(lengthSquared) || lengthSquared <= 1e-12f) {
+    m_IsPainting = false;
+    return;
+  }
+  const glm::vec3 rayDir = direction / std::sqrt(lengthSquared);
 
   // Use World Transform
   glm::mat4 model = selectedEntity->GetWorldTransform();
@@ -127,15 +134,16 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
 
   if (hit) {
     // Draw 3D Brush Cursor
-    DrawBrushCursor(camera, hitPoint, glm::vec3(0, 1, 0), m_BrushRadius);
+    DrawBrushCursor(projection * view, viewportOrigin, viewportSize, drawList,
+                    hitPoint, m_BrushRadius);
 
     // Apply Brush
     if (ImGui::IsMouseDown(0)) {
-      if (!m_IsPainting) {
+      if (!m_IsPainting && ImGui::IsMouseClicked(0)) {
         PushHistory(m_CurrentMesh);
         m_IsPainting = true;
       }
-      ApplyTerrainBrush(m_CurrentMesh.get(), hitPoint, model);
+      if (m_IsPainting) ApplyTerrainBrush(m_CurrentMesh.get(), hitPoint, model);
     } else {
       m_IsPainting = false;
     }
@@ -149,82 +157,41 @@ void ObjectManipulationTool::OnSceneGUI(Scene *scene, Camera *camera,
   }
 }
 
-// Simple immediate mode drawing for the brush ring using GL lines
-// Note: This relies on OpenGL context being active which it is during Editor
-// draw. Ideally should be moved to RenderSystem but kept here for tool-specific
-// logic.
-#include <cmath>
-#include <glad/glad.h>
-
-void ObjectManipulationTool::DrawBrushCursor(Camera *camera,
-                                             const glm::vec3 &position,
-                                             const glm::vec3 &normal,
-                                             float radius) {
-  if (!camera)
+// Draw in the Scene window after its image, with no OpenGL state changes.
+void ObjectManipulationTool::DrawBrushCursor(
+    const glm::mat4& viewProjection, const glm::vec2& viewportOrigin,
+    const glm::vec2& viewportSize, ImDrawList* drawList,
+    const glm::vec3& position, float radius) {
+  if (!drawList || viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
     return;
 
-  // Use a simple shader-less approach or assume a default shader is active?
-  // Actually, we are likely inside ImGui render loop or after Scene Render.
-  // If we want valid depth test Z-buffered ring, we need a shader.
-  // BUT, we can simply rely on GL_LINES and hope previous state + default
-  // shader works? NO, Modern OpenGL requires a shader. Creating a shader here
-  // on the fly is messy. Better idea: Use RenderSystem's Default Shader but set
-  // it to "Unlit" color mode.
-
-  // Since RenderSystem is accessible:
-  // Using ImGui background draw list avoids direct GL state dependencies.
-  // This is getting complex to pipe the shader.
-  // Quick Hack: Generate line segments and draw using
-  // `ImGui::GetBackgroundDrawList()->AddLine` by projecting vertices to screen?
-  // This ensures it works without GL state management hell.
-
-  ImDrawList *drawList = ImGui::GetBackgroundDrawList();
-  int segments = 32;
-  ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-  glm::mat4 view = camera->GetViewMatrix();
-  glm::mat4 proj = camera->GetProjectionMatrix(displaySize.x / displaySize.y);
-  glm::mat4 vp = proj * view;
-
-  auto Project = [&](const glm::vec3 &p) -> ImVec2 {
-    glm::vec4 clip = vp * glm::vec4(p, 1.0f);
-    if (clip.w <= 0)
-      return ImVec2(-10000, -10000); // Behind camera clipping
-
-    glm::vec3 ndc = glm::vec3(clip) / clip.w;
-    float sx = (ndc.x + 1.0f) * 0.5f * displaySize.x;
-    float sy = (1.0f - ndc.y) * 0.5f * displaySize.y;
-    return ImVec2(sx, sy);
+  auto project = [&](const glm::vec3& point, ImVec2& screen) {
+    const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+    if (!std::isfinite(clip.w) || clip.w <= 1e-6f ||
+        clip.z < -clip.w || clip.z > clip.w)
+      return false;
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    screen = ImVec2(viewportOrigin.x + (ndc.x + 1.0f) * 0.5f * viewportSize.x,
+                    viewportOrigin.y + (1.0f - ndc.y) * 0.5f * viewportSize.y);
+    return std::isfinite(screen.x) && std::isfinite(screen.y);
   };
 
-  // Draw Circle in XZ plane (assuming terrain is mostly flat-ish or Up is Y)
-  // Or align to normal? Normal alignment is better.
-  // Tangent/Bitangent basis from normal (0,1,0) -> (1,0,0), (0,0,1)
-  glm::vec3 up = glm::vec3(0, 1, 0);
-  glm::vec3 right = glm::vec3(1, 0, 0);
-  glm::vec3 forward = glm::vec3(0, 0, 1);
-
-  // If normal is very different, recompute basis
-  // But for Terrain Tool, usually Y-up.
-
-  for (int i = 0; i < segments; i++) {
-    float angle1 = (float)i / segments * 6.28318f;
-    float angle2 = (float)(i + 1) / segments * 6.28318f;
-
-    glm::vec3 p1 =
-        position + (right * cos(angle1) + forward * sin(angle1)) * radius;
-    glm::vec3 p2 =
-        position + (right * cos(angle2) + forward * sin(angle2)) * radius;
-
-    // Lift slightly to avoid z-fighting visual
-    p1.y += 0.05f;
-    p2.y += 0.05f;
-
-    ImVec2 s1 = Project(p1);
-    ImVec2 s2 = Project(p2);
-
-    if (s1.x > -5000 && s2.x > -5000)
+  drawList->PushClipRect(ImVec2(viewportOrigin.x, viewportOrigin.y),
+      ImVec2(viewportOrigin.x + viewportSize.x, viewportOrigin.y + viewportSize.y), true);
+  constexpr int segments = 32;
+  for (int i = 0; i < segments; ++i) {
+    const float first = static_cast<float>(i) / segments * 6.2831853f;
+    const float second = static_cast<float>(i + 1) / segments * 6.2831853f;
+    const glm::vec3 lift(0.0f, 0.05f, 0.0f);
+    const glm::vec3 p1 = position + lift +
+        glm::vec3(std::cos(first), 0.0f, std::sin(first)) * radius;
+    const glm::vec3 p2 = position + lift +
+        glm::vec3(std::cos(second), 0.0f, std::sin(second)) * radius;
+    ImVec2 s1, s2;
+    if (project(p1, s1) && project(p2, s2))
       drawList->AddLine(s1, s2, IM_COL32(0, 255, 0, 255), 3.0f);
   }
+  drawList->PopClipRect();
 }
 
 void ObjectManipulationTool::RenderTerrainModeUI() {

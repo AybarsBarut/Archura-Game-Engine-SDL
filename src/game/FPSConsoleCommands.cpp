@@ -282,12 +282,12 @@ namespace Archura {
                 }
 
                 NetworkManager& network = NetworkManager::Get();
-                const bool transportOpened = network.Connect(
+                const bool requestAccepted = network.Connect(
                     parsed.endpoint.host, static_cast<int>(parsed.endpoint.port));
                 const NetworkRuntimeSnapshot snapshot =
                     network.GetRuntimeSnapshot();
                 std::cout << FormatNetworkConnectResult(
-                    parsed.endpoint, transportOpened, snapshot);
+                    parsed.endpoint, requestAccepted, snapshot);
             }
         ));
 

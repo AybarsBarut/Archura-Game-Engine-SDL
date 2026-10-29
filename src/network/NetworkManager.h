@@ -21,7 +21,8 @@ enum class ConnectionState : std::uint8_t {
     Handshaking,
     Connected,
     ShuttingDown,
-    Failed
+    Failed,
+    Connecting
 };
 
 enum class DisconnectReason : std::uint8_t {
@@ -62,7 +63,7 @@ struct NetworkRuntimeSnapshot {
     std::string lastError;
 };
 
-// SDL_net-backed framed TCP transport. Public methods are thread-safe. Socket I/O
+// Nonblocking native framed TCP transport (enabled by the SDL_net build gate). Public methods are thread-safe. Socket I/O
 // happens only in UpdateServer/UpdateClient; callbacks are invoked after the
 // internal lock is released and may safely call NetworkManager again.
 class NetworkManager final {
@@ -91,8 +92,8 @@ public:
     bool StartServer(int port);
     void UpdateServer();
 
-    // Returns true once the TCP transport is open. IsConnected becomes true only
-    // after the protocol handshake completes in UpdateClient.
+    // Returns true when the connection request is accepted. UpdateClient advances
+    // DNS, TCP establishment and handshake; IsConnected is true only afterward.
     bool Connect(const std::string& host, int port);
     bool Reconnect();
     void UpdateClient();

@@ -68,6 +68,8 @@ void TestStateFormatting() {
           "ShuttingDown state label is wrong");
   Require(Archura::ConnectionStateName(ConnectionState::Failed) == "Failed",
           "Failed state label is wrong");
+  Require(Archura::ConnectionStateName(ConnectionState::Connecting) == "Connecting",
+          "Connecting state label is wrong");
 
   Archura::NetworkRuntimeSnapshot sampleSnapshot;
   sampleSnapshot.state = ConnectionState::Listening;
@@ -93,14 +95,14 @@ void TestStateFormatting() {
 
   const Archura::NetworkEndpoint endpoint{"example.com", 27015};
   Archura::NetworkRuntimeSnapshot openedSnapshot;
-  openedSnapshot.state = ConnectionState::Handshaking;
+  openedSnapshot.state = ConnectionState::Connecting;
   const std::string opened = Archura::FormatNetworkConnectResult(
       endpoint, true, openedSnapshot);
-  Require(opened.find("Transport opened to example.com:27015") !=
+  Require(opened.find("Connection request accepted for example.com:27015") !=
               std::string::npos,
           "open transport was not reported");
-  Require(opened.find("Connection state: Handshaking") != std::string::npos,
-          "open transport omitted handshake state");
+  Require(opened.find("Connection state: Connecting") != std::string::npos,
+          "accepted request omitted connecting state");
   Require(opened.find("Connected successfully") == std::string::npos,
           "open transport was mislabeled as a completed handshake");
 }
@@ -161,13 +163,13 @@ void TestNoBackendConnectAndDisconnectAreTruthful() {
 
   const std::string connectReport = Archura::FormatNetworkConnectResult(
       parsed.endpoint, transportOpened, failedSnapshot);
-  Require(connectReport.find("Transport open failed") != std::string::npos,
+  Require(connectReport.find("Connection request failed") != std::string::npos,
           "failed connection was not labeled as failure");
   Require(connectReport.find("Connection state: Failed") != std::string::npos,
           "failed connection omitted manager state");
   Require(connectReport.find(failedSnapshot.lastError) != std::string::npos,
           "failed connection omitted manager error");
-  Require(connectReport.find("Transport opened to") == std::string::npos,
+  Require(connectReport.find("Connection request accepted for") == std::string::npos,
           "failed connection claimed the transport opened");
   Require(connectReport.find("Connected successfully") == std::string::npos,
           "failed connection claimed success");

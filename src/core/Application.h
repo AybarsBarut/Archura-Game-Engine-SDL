@@ -1,6 +1,8 @@
 #pragma once
 
 #include "FrameTelemetry.h"
+#include "GameLoopHarness.h"
+#include "StartupProgress.h"
 #include "Window.h"
 #include "../editor/PlayModeSession.h"
 #include "../rendering/GraphicsAPI.h"
@@ -18,10 +20,12 @@ namespace Archura {
         static Application* TryGet() noexcept { return s_Instance; }
 
         void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false,
-                 const struct GameManifest* game = nullptr, const struct NetworkLaunchOptions* network = nullptr);
+                 const struct GameManifest* game = nullptr, const struct NetworkLaunchOptions* network = nullptr,
+                 const StartupProgressCallback& progress = {});
         bool JoinNetworkGame(const std::string& host, int port);
         void LeaveNetworkGame();
         void Quit() { m_Running = false; }
+        bool LoadEditorProject(const std::string& path);
 
         Window& GetWindow() { return *m_Window; }
 
@@ -46,6 +50,11 @@ namespace Archura {
         class RenderSystem* GetRenderSystem();
         class Camera* GetCamera();
         const FrameTelemetry& GetFrameTelemetry() const { return m_FrameTelemetry; }
+        const FrameTelemetry& GetNetworkPumpTelemetry() const { return m_NetworkPumpTelemetry; }
+        const FrameTelemetry& GetFrameIntervalTelemetry() const { return m_FrameIntervalTelemetry; }
+        const FrameTelemetry& GetPresentTelemetry() const { return m_PresentTelemetry; }
+        const FrameTelemetry& GetPacingTelemetry() const { return m_PacingTelemetry; }
+        const GameLoopHarness& GetGameLoopStats() const { return m_GameLoop; }
 
     private:
         static Application* s_Instance;
@@ -55,14 +64,10 @@ namespace Archura {
         GraphicsLaunchOptions m_GraphicsOptions;
         
         // Tickrate Configuration (128 Hz fixed timestep)
-        static constexpr float TICK_RATE = 128.0f;
-        static constexpr float TICK_INTERVAL = 1.0f / TICK_RATE;  // 7.8125ms
-        static constexpr int MAX_TICKS_PER_FRAME = 5;  // Spiral of death protection
+        static constexpr float TICK_INTERVAL = static_cast<float>(GameLoopHarness::TickInterval);
         
         // Timing
-        float m_Accumulator = 0.0f;
-        float m_LastFrameTime = 0.0f;
-        uint32_t m_TickCount = 0;  // Total ticks since start
+        GameLoopHarness m_GameLoop;
         
         // Performance Monitoring
         double m_LastFPSUpdateTime = 0.0;
@@ -70,6 +75,12 @@ namespace Archura {
         float m_CurrentFPS = 0.0f;
         float m_FPSLimit = 144.0f;
         FrameTelemetry m_FrameTelemetry;
+        FrameTelemetry m_NetworkPumpTelemetry;
+        // Reuse the bounded duration ring; samples are milliseconds for each
+        // named scope, independently of the CPU-work ring's observation count.
+        FrameTelemetry m_FrameIntervalTelemetry;
+        FrameTelemetry m_PresentTelemetry;
+        FrameTelemetry m_PacingTelemetry;
 
         // Game State (Moved from local Run scope)
         std::unique_ptr<class Scene> m_Scene; // Scene is now a member
@@ -116,7 +127,7 @@ namespace Archura {
         void ProcessInput();           // Input processing (Once per frame)
         void UpdateGameLogic(float dt);    // Game logic (128 Hz fixed)
         void RenderFrame(float alpha);     // Rendering (variable Hz)
-        void LimitFrameRate(float frameStartTime);
+        void LimitFrameRate(double frameStartTime);
     };
 
 }

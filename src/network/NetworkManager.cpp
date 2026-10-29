@@ -11,13 +11,9 @@
 #include <utility>
 
 #if defined(ARCHURA_HAS_SDL_NET)
-#  if __has_include(<SDL_net.h>)
-#    include <SDL_net.h>
-#  elif __has_include(<SDL2/SDL_net.h>)
-#    include <SDL2/SDL_net.h>
-#  else
-#    error "ARCHURA_HAS_SDL_NET is set but SDL_net.h is unavailable"
-#  endif
+#include "NativeSocket.h"
+#include "AsyncResolver.h"
+#include "PendingSendQueue.h"
 #endif
 
 namespace Archura {
@@ -26,6 +22,9 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t kMaxAcceptsPerUpdate = 32;
 constexpr std::size_t kMaxFramesPerReceive = 256;
+constexpr std::size_t kSendBudgetPerPeer = 64U * 1024U;
+constexpr std::size_t kGlobalSendBudget = 1024U * 1024U;
+constexpr std::size_t kGlobalReceiveBudget = 1024U * 1024U;
 
 std::uint32_t NextSequence(std::uint32_t sequence) noexcept {
     ++sequence;
@@ -73,16 +72,10 @@ struct NetworkManager::Impl {
 #if defined(ARCHURA_HAS_SDL_NET)
     enum class PeerPhase : std::uint8_t { AwaitingHello, AwaitingWelcome, Established };
 
-    struct PendingWrite {
-        std::vector<std::uint8_t> bytes;
-        std::size_t offset = 0;
-    };
-
     struct Peer {
-        TCPsocket socket = nullptr;
+        Net::NativeSocket socket;
         Net::StreamFrameParser parser;
-        std::deque<PendingWrite> writes;
-        std::size_t queuedBytes = 0;
+        Net::PendingSendQueue writes;
         std::uint32_t nextSendSequence = 1;
         std::uint32_t expectedReceiveSequence = 1;
         std::uint64_t sessionToken = 0;
@@ -103,8 +96,10 @@ struct NetworkManager::Impl {
         Net::PlayerInputPacket input;
     };
 
-    TCPsocket listener = nullptr;
-    SDLNet_SocketSet socketSet = nullptr;
+    Net::NativeSocket listener;
+    Net::AsyncResolver resolver;
+    Clock::time_point connectStarted{};
+    bool tcpStarted = false;
     std::vector<std::unique_ptr<Peer>> peers;
     std::vector<Event> events;
     std::uint64_t clientSessionToken = 0;
@@ -128,16 +123,6 @@ struct NetworkManager::Impl {
         return 0;
     }
 
-    static std::string SdlError(const char* operation) {
-        const char* detail = SDL_GetError();
-        std::string message(operation);
-        if (detail != nullptr && detail[0] != '\0') {
-            message += ": ";
-            message += detail;
-        }
-        return message;
-    }
-
     void SetFailure(DisconnectReason reason, std::string message) {
         lastDisconnect = reason;
         lastError = std::move(message);
@@ -145,86 +130,50 @@ struct NetworkManager::Impl {
     }
 
     void ClosePeer(Peer& peer) noexcept {
-        if (peer.socket != nullptr) {
-            if (socketSet != nullptr) {
-                SDLNet_TCP_DelSocket(socketSet, peer.socket);
-            }
-            SDLNet_TCP_Close(peer.socket);
-            peer.socket = nullptr;
-        }
-        stats.queuedBytes -= std::min(stats.queuedBytes, peer.queuedBytes);
-        peer.queuedBytes = 0;
-        peer.writes.clear();
+        peer.socket.Close();
+        stats.queuedBytes -= std::min(stats.queuedBytes, peer.writes.QueuedBytes());
+        peer.writes.Clear();
     }
 
     void CloseAllSockets() noexcept {
-        for (auto& peer : peers) {
-            ClosePeer(*peer);
-        }
-        peers.clear();
-        events.clear();
-        localPeerId = 0;
-        if (listener != nullptr) {
-            SDLNet_TCP_Close(listener);
-            listener = nullptr;
-        }
-        if (socketSet != nullptr) {
-            SDLNet_FreeSocketSet(socketSet);
-            socketSet = nullptr;
-        }
-        stats.connectedPeers = 0;
-        stats.queuedBytes = 0;
+        resolver.Cancel();
+        tcpStarted = false;
+        for (auto& peer : peers) ClosePeer(*peer);
+        peers.clear(); events.clear(); localPeerId = 0;
+        listener.Close();
+        stats.connectedPeers = stats.queuedBytes = 0;
     }
 
     bool Queue(Peer& peer, Net::PacketType type,
                const std::vector<std::uint8_t>& payload) {
-        if (payload.size() > Net::kMaxPayloadSize) {
-            return false;
-        }
-        std::vector<std::uint8_t> frame;
+        if (payload.size() > Net::kMaxPayloadSize) return false;
         try {
-            frame = Net::EncodeFrame(type, peer.nextSendSequence, payload);
+            auto frame = Net::EncodeFrame(type, peer.nextSendSequence, payload);
+            const auto size = frame.size();
+            if (!peer.writes.Push(std::move(frame), limits.maxQueuedBytesPerPeer)) {
+                peer.pendingDisconnect = DisconnectReason::Backpressure;
+                return false;
+            }
+            peer.nextSendSequence = NextSequence(peer.nextSendSequence);
+            stats.queuedBytes += size;
+            return true;
         } catch (const std::exception& exception) {
             lastError = exception.what();
+            peer.pendingDisconnect = DisconnectReason::Backpressure;
             return false;
         }
-        if (frame.size() > limits.maxQueuedBytesPerPeer -
-                               std::min(peer.queuedBytes, limits.maxQueuedBytesPerPeer)) {
-            return false;
-        }
-        peer.nextSendSequence = NextSequence(peer.nextSendSequence);
-        peer.queuedBytes += frame.size();
-        stats.queuedBytes += frame.size();
-        peer.writes.push_back(PendingWrite{std::move(frame), 0});
-        return true;
     }
 
-    bool Flush(Peer& peer) {
-        // SDL_net documents a short transfer as connection closure or an
-        // unknown socket error, not as EAGAIN. Retrying the suffix would risk
-        // treating a failed stream as healthy.
-        if (peer.writes.empty()) {
-            return true;
-        }
-        auto& write = peer.writes.front();
-        const auto remaining = write.bytes.size() - write.offset;
-        const auto amount = static_cast<int>(std::min<std::size_t>(
-            remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
-        SDL_ClearError();
-        const int sent = SDLNet_TCP_Send(peer.socket, write.bytes.data() + write.offset, amount);
-        if (sent != amount) {
-            lastError = SdlError("SDLNet_TCP_Send failed");
-            return false;
-        }
-        write.offset += static_cast<std::size_t>(sent);
-        peer.queuedBytes -= static_cast<std::size_t>(sent);
-        stats.queuedBytes -= std::min(stats.queuedBytes, static_cast<std::size_t>(sent));
-        stats.bytesSent += static_cast<std::uint64_t>(sent);
-        if (write.offset == write.bytes.size()) {
-            peer.writes.pop_front();
-            ++stats.framesSent;
-        }
-        return true;
+    bool Flush(Peer& peer, std::size_t& globalBudget) {
+        const auto result = peer.writes.Flush(std::min(kSendBudgetPerPeer, globalBudget),
+            [&](const std::uint8_t* bytes, std::size_t size) {
+                return peer.socket.Send(bytes, size, lastError);
+            });
+        globalBudget -= result.bytesSent;
+        stats.queuedBytes -= std::min(stats.queuedBytes, result.bytesSent);
+        stats.bytesSent += result.bytesSent;
+        stats.framesSent += result.framesSent;
+        return result.ok;
     }
 
     bool ValidateSequence(Peer& peer, const Net::Frame& frame) noexcept {
@@ -385,21 +334,17 @@ struct NetworkManager::Impl {
         return false;
     }
 
-    bool Receive(Peer& peer, DisconnectReason& reason) {
+    bool Receive(Peer& peer, DisconnectReason& reason, std::size_t& globalBudget) {
+        if (globalBudget == 0) return true;
         std::uint8_t buffer[16U * 1024U];
-        SDL_ClearError();
-        const int received = SDLNet_TCP_Recv(peer.socket, buffer, sizeof(buffer));
-        if (received <= 0) {
-            const char* detail = SDL_GetError();
-            if (detail != nullptr && detail[0] != '\0') {
-                reason = DisconnectReason::TransportError;
-                lastError = SdlError("SDLNet_TCP_Recv failed");
-            } else {
-                reason = DisconnectReason::PeerClosed;
-                lastError = "peer closed the TCP stream";
-            }
+        const auto result = peer.socket.Receive(buffer, std::min(sizeof(buffer), globalBudget), lastError);
+        if (result.status == Net::IoStatus::Pending) return true;
+        if (result.status != Net::IoStatus::Ready) {
+            reason = result.status == Net::IoStatus::Closed ? DisconnectReason::PeerClosed : DisconnectReason::TransportError;
             return false;
         }
+        const auto received = result.bytes;
+        globalBudget -= received;
         stats.bytesReceived += static_cast<std::uint64_t>(received);
         peer.lastReceiveActivity = Clock::now();
         auto batch = peer.parser.Feed(buffer, static_cast<std::size_t>(received));
@@ -492,9 +437,9 @@ bool NetworkManager::Init() {
         return true;
     }
 #if defined(ARCHURA_HAS_SDL_NET)
-    if (SDLNet_Init() != 0) {
+    if (!Net::NativeSocket::Startup(m_Impl->lastError)) {
         m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_Init failed"));
+                           m_Impl->lastError);
         return false;
     }
     m_Impl->initialized = true;
@@ -526,7 +471,7 @@ void NetworkManager::Shutdown() {
         m_Impl->state = ConnectionState::ShuttingDown;
 #if defined(ARCHURA_HAS_SDL_NET)
         m_Impl->CloseAllSockets();
-        SDLNet_Quit();
+        Net::NativeSocket::Cleanup();
 #endif
         m_Impl->initialized = false;
         m_Impl->server = false;
@@ -605,24 +550,9 @@ bool NetworkManager::StartServer(int port) {
     }
 #if defined(ARCHURA_HAS_SDL_NET)
     std::lock_guard<std::mutex> lock(m_Impl->mutex);
-    IPaddress address{};
-    if (SDLNet_ResolveHost(&address, nullptr, static_cast<Uint16>(port)) != 0) {
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_ResolveHost failed"));
-        return false;
-    }
-    m_Impl->listener = SDLNet_TCP_Open(&address);
-    if (m_Impl->listener == nullptr) {
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_TCP_Open listener failed"));
-        return false;
-    }
-    m_Impl->socketSet = SDLNet_AllocSocketSet(static_cast<int>(m_Impl->limits.maxClients));
-    if (m_Impl->socketSet == nullptr) {
-        SDLNet_TCP_Close(m_Impl->listener);
-        m_Impl->listener = nullptr;
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_AllocSocketSet failed"));
+    m_Impl->listener = Net::NativeSocket::Listen(static_cast<std::uint16_t>(port), m_Impl->lastError);
+    if (!m_Impl->listener) {
+        m_Impl->SetFailure(DisconnectReason::TransportError, m_Impl->lastError);
         return false;
     }
     m_Impl->server = true;
@@ -637,7 +567,7 @@ bool NetworkManager::StartServer(int port) {
 }
 
 bool NetworkManager::Connect(const std::string& host, int port) {
-    if (host.empty() || port < 1 || port > 65535) {
+    if (host.empty() || host.size() > 253 || host.find('\0') != std::string::npos || port < 1 || port > 65535) {
         return false;
     }
     Shutdown();
@@ -646,46 +576,16 @@ bool NetworkManager::Connect(const std::string& host, int port) {
     }
 #if defined(ARCHURA_HAS_SDL_NET)
     std::lock_guard<std::mutex> lock(m_Impl->mutex);
-    IPaddress address{};
-    if (SDLNet_ResolveHost(&address, host.c_str(), static_cast<Uint16>(port)) != 0) {
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_ResolveHost failed"));
+    m_Impl->connectStarted = Clock::now();
+    if (!m_Impl->resolver.Start(host, static_cast<std::uint16_t>(port), m_Impl->lastError)) {
+        m_Impl->SetFailure(DisconnectReason::TransportError, m_Impl->lastError);
         return false;
     }
-    TCPsocket socket = SDLNet_TCP_Open(&address);
-    if (socket == nullptr) {
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("SDLNet_TCP_Open connection failed"));
-        return false;
-    }
-    m_Impl->socketSet = SDLNet_AllocSocketSet(1);
-    if (m_Impl->socketSet == nullptr || SDLNet_TCP_AddSocket(m_Impl->socketSet, socket) < 0) {
-        if (m_Impl->socketSet != nullptr) {
-            SDLNet_FreeSocketSet(m_Impl->socketSet);
-            m_Impl->socketSet = nullptr;
-        }
-        SDLNet_TCP_Close(socket);
-        m_Impl->SetFailure(DisconnectReason::TransportError,
-                           Impl::SdlError("failed to register client socket"));
-        return false;
-    }
-    auto peer = std::make_unique<Impl::Peer>();
-    peer->socket = socket;
-    peer->phase = Impl::PeerPhase::AwaitingWelcome;
-    peer->sessionToken = NewSessionToken();
-    m_Impl->clientSessionToken = peer->sessionToken;
     m_Impl->reconnectHost = host;
     m_Impl->reconnectPort = port;
-    if (!m_Impl->Queue(*peer, Net::PacketType::Connect,
-                       Net::SerializeSessionToken(peer->sessionToken))) {
-        m_Impl->ClosePeer(*peer);
-        m_Impl->SetFailure(DisconnectReason::Backpressure,
-                           "client hello exceeded send queue");
-        return false;
-    }
-    m_Impl->peers.push_back(std::move(peer));
+    m_Impl->tcpStarted = false;
     m_Impl->server = false;
-    m_Impl->state = ConnectionState::Handshaking;
+    m_Impl->state = ConnectionState::Connecting;
     m_Impl->lastDisconnect = DisconnectReason::None;
     m_Impl->lastError.clear();
     return true;
@@ -724,40 +624,34 @@ void NetworkManager::UpdateServer() {
         // server tick even when every accepted socket is immediately rejected.
         for (std::size_t acceptedThisUpdate = 0;
              acceptedThisUpdate < kMaxAcceptsPerUpdate; ++acceptedThisUpdate) {
-            TCPsocket accepted = SDLNet_TCP_Accept(m_Impl->listener);
-            if (accepted == nullptr) {
+            Net::IoStatus acceptStatus;
+            auto accepted = m_Impl->listener.Accept(acceptStatus, m_Impl->lastError);
+            if (!accepted) {
+                if (acceptStatus == Net::IoStatus::Error) {
+                    m_Impl->SetFailure(DisconnectReason::TransportError, m_Impl->lastError);
+                    m_Impl->CloseAllSockets(); m_Impl->server = false; return;
+                }
                 break;
             }
-            if (m_Impl->peers.size() >= m_Impl->limits.maxClients ||
-                SDLNet_TCP_AddSocket(m_Impl->socketSet, accepted) < 0) {
-                SDLNet_TCP_Close(accepted);
-                ++m_Impl->stats.rejectedConnections;
-                continue;
+            if (m_Impl->peers.size() >= m_Impl->limits.maxClients) {
+                ++m_Impl->stats.rejectedConnections; continue;
             }
             auto peer = std::make_unique<Impl::Peer>();
-            peer->socket = accepted;
+            peer->socket = std::move(accepted);
             peer->phase = Impl::PeerPhase::AwaitingHello;
             peer->peerId = m_Impl->AllocatePeerId();
             if (peer->peerId == 0) {
-                SDLNet_TCP_DelSocket(m_Impl->socketSet, accepted);
-                SDLNet_TCP_Close(accepted);
                 ++m_Impl->stats.rejectedConnections;
                 continue;
             }
             m_Impl->peers.push_back(std::move(peer));
         }
 
-        // Winsock select rejects an empty socket set. An idle listener has no
-        // accepted peers yet; polling that set used to close the listener on
-        // its very first tick while the process continued reporting "started".
-        const int ready = m_Impl->peers.empty() ? 0 : SDLNet_CheckSockets(m_Impl->socketSet, 0);
-        if (ready < 0) {
-            m_Impl->SetFailure(DisconnectReason::TransportError,
-                               Impl::SdlError("SDLNet_CheckSockets failed"));
-            m_Impl->CloseAllSockets();
-            m_Impl->server = false;
-            return;
+        // Rotate the first serviced peer so global budgets cannot starve later peers.
+        if (!m_Impl->peers.empty()) {
+            std::rotate(m_Impl->peers.begin(), m_Impl->peers.begin() + 1, m_Impl->peers.end());
         }
+        std::size_t sendBudget = kGlobalSendBudget, receiveBudget = kGlobalReceiveBudget;
         const auto now = Clock::now();
         for (auto it = m_Impl->peers.begin(); it != m_Impl->peers.end();) {
             auto& peer = **it;
@@ -766,15 +660,15 @@ void NetworkManager::UpdateServer() {
                 reason = m_Impl->TimeoutReason(peer, now);
             }
             bool keep = reason == DisconnectReason::None;
-            if (keep && ready > 0 && SDLNet_SocketReady(peer.socket)) {
-                keep = m_Impl->Receive(peer, reason);
+            if (keep) {
+                keep = m_Impl->Receive(peer, reason, receiveBudget);
             }
             if (keep && !m_Impl->QueueHeartbeatIfDue(peer, now)) {
                 keep = false;
                 reason = DisconnectReason::Backpressure;
             }
-            if (keep && !peer.writes.empty()) {
-                keep = m_Impl->Flush(peer);
+            if (keep && !peer.writes.Empty()) {
+                keep = m_Impl->Flush(peer, sendBudget);
                 if (!keep) {
                     reason = DisconnectReason::TransportError;
                 }
@@ -813,45 +707,86 @@ void NetworkManager::UpdateClient() {
     DisconnectReason disconnected = DisconnectReason::None;
     {
         std::lock_guard<std::mutex> lock(m_Impl->mutex);
-        if (m_Impl->server || (m_Impl->state != ConnectionState::Handshaking &&
-                               m_Impl->state != ConnectionState::Connected) ||
-            m_Impl->peers.empty()) {
-            return;
-        }
-        auto& peer = *m_Impl->peers.front();
-        const int ready = SDLNet_CheckSockets(m_Impl->socketSet, 0);
-        bool keep = ready >= 0;
-        if (!keep) {
-            disconnected = DisconnectReason::TransportError;
-            m_Impl->lastError = Impl::SdlError("SDLNet_CheckSockets failed");
-        }
-        if (keep && ready > 0 && SDLNet_SocketReady(peer.socket)) {
-            keep = m_Impl->Receive(peer, disconnected);
-        }
+        if (m_Impl->server || (m_Impl->state != ConnectionState::Connecting &&
+            m_Impl->state != ConnectionState::Handshaking && m_Impl->state != ConnectionState::Connected)) return;
         const auto now = Clock::now();
-        if (keep && !m_Impl->QueueHeartbeatIfDue(peer, now)) {
-            keep = false;
-            disconnected = DisconnectReason::Backpressure;
-        }
-        if (keep && !peer.writes.empty()) {
-            keep = m_Impl->Flush(peer);
+        bool keep = true;
+        if (m_Impl->state == ConnectionState::Connecting) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_Impl->connectStarted).count() >= m_Impl->limits.handshakeTimeoutMs) {
+                keep = false; disconnected = DisconnectReason::HandshakeTimeout;
+                m_Impl->lastError = "connection deadline exceeded";
+            } else if (!m_Impl->tcpStarted) {
+                Net::NativeAddress address;
+                const auto resolution = m_Impl->resolver.Poll(address, m_Impl->lastError);
+                if (resolution == Net::IoStatus::Pending) return;
+                if (resolution != Net::IoStatus::Ready) keep = false;
+                else {
+                    Net::IoStatus status;
+                    auto socket = Net::NativeSocket::Connect(address, status, m_Impl->lastError);
+                    m_Impl->resolver.Cancel();
+                    if (!socket) keep = false;
+                    else {
+                        auto peer = std::make_unique<Impl::Peer>();
+                        peer->socket = std::move(socket);
+                        peer->phase = Impl::PeerPhase::AwaitingWelcome;
+                        peer->connectedAt = m_Impl->connectStarted;
+                        peer->sessionToken = NewSessionToken();
+                        m_Impl->clientSessionToken = peer->sessionToken;
+                        m_Impl->peers.push_back(std::move(peer));
+                        m_Impl->tcpStarted = true;
+                    }
+                }
+            }
+            if (keep) {
+                auto& connectingPeer = *m_Impl->peers.front();
+                const auto status = connectingPeer.socket.PollConnected(m_Impl->lastError);
+                if (status == Net::IoStatus::Pending) return;
+                keep = status == Net::IoStatus::Ready;
+                if (keep) {
+                    m_Impl->state = ConnectionState::Handshaking;
+                    keep = m_Impl->Queue(connectingPeer, Net::PacketType::Connect, Net::SerializeSessionToken(connectingPeer.sessionToken));
+                    if (!keep) disconnected = DisconnectReason::Backpressure;
+                }
+            }
             if (!keep) {
-                disconnected = DisconnectReason::TransportError;
+                if (disconnected == DisconnectReason::None) disconnected = DisconnectReason::TransportError;
+                m_Impl->CloseAllSockets();
+                m_Impl->SetFailure(disconnected, m_Impl->lastError);
+                disconnectCallback = m_Impl->onDisconnected;
             }
         }
+        if (keep && m_Impl->peers.empty()) return;
+        std::size_t sendBudget = kGlobalSendBudget, receiveBudget = kGlobalReceiveBudget;
         if (keep) {
-            disconnected = m_Impl->TimeoutReason(peer, now);
+            auto& peer = *m_Impl->peers.front();
+            disconnected = peer.pendingDisconnect;
+            if (disconnected == DisconnectReason::None) disconnected = m_Impl->TimeoutReason(peer, now);
             keep = disconnected == DisconnectReason::None;
-        }
-        if (!keep) {
-            m_Impl->ClosePeer(peer);
-            m_Impl->peers.clear();
-            m_Impl->stats.connectedPeers = 0;
-            m_Impl->lastDisconnect = disconnected;
-            m_Impl->state = ConnectionState::Failed;
-            disconnectCallback = m_Impl->onDisconnected;
-        } else {
-            m_Impl->stats.connectedPeers = peer.phase == Impl::PeerPhase::Established ? 1 : 0;
+            if (keep) keep = m_Impl->Receive(peer, disconnected, receiveBudget);
+            if (keep && !m_Impl->QueueHeartbeatIfDue(peer, now)) {
+                keep = false;
+                disconnected = DisconnectReason::Backpressure;
+            }
+            if (keep && !peer.writes.Empty()) {
+                keep = m_Impl->Flush(peer, sendBudget);
+                if (!keep) {
+                    disconnected = DisconnectReason::TransportError;
+                }
+            }
+            if (keep) {
+                disconnected = m_Impl->TimeoutReason(peer, now);
+                keep = disconnected == DisconnectReason::None;
+            }
+            if (!keep) {
+                m_Impl->ClosePeer(peer);
+                m_Impl->peers.clear();
+                m_Impl->stats.connectedPeers = 0;
+                m_Impl->lastDisconnect = disconnected;
+                m_Impl->state = ConnectionState::Failed;
+                disconnectCallback = m_Impl->onDisconnected;
+            } else {
+                m_Impl->stats.connectedPeers = peer.phase == Impl::PeerPhase::Established ? 1 : 0;
+            }
         }
         events.swap(m_Impl->events);
         updateCallback = m_Impl->onPlayerUpdate;

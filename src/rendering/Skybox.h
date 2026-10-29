@@ -14,6 +14,7 @@ public:
     bool Init();
     bool LoadCubemap(const std::vector<std::string>& faces);
     void Draw(const Camera& camera, float aspectRatio);
+    void Draw(const glm::mat4& view, const glm::mat4& projection);
 
 private:
     unsigned int m_VAO = 0;

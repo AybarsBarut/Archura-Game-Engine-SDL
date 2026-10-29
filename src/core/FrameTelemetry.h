@@ -12,6 +12,7 @@ struct FrameTelemetrySummary {
     std::uint64_t observedFrames = 0;
     std::size_t windowSamples = 0;
     double averageCpuWorkMs = 0.0;
+    double p50CpuWorkMs = 0.0;
     double p95CpuWorkMs = 0.0;
     double p99CpuWorkMs = 0.0;
 };

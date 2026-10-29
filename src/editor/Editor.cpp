@@ -3,6 +3,7 @@
 #endif
 
 #include "Editor.h"
+#include "SceneViewport.h"
 #include "../core/DeveloperConsole.h"
 #include "../core/ProjectSerializer.h"
 #include "../core/Window.h"
@@ -16,7 +17,9 @@
 #include "../rendering/Mesh.h"
 #include "../rendering/Texture.h"
 
+#include <glad/glad.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include "../../external/imgui/backends/imgui_impl_opengl3.h"
 #include <iostream>
 
@@ -65,7 +68,7 @@ void ConfigureBall(RigidBody& body) {
 
 Editor::Editor()
     : m_Enabled(true), m_SelectedEntity(nullptr), m_Window(nullptr),
-      m_EditorCamera(glm::vec3(0.0f, 8.0f, 20.0f)) {}
+      m_EditorCamera(glm::vec3(0.0f, 8.0f, 20.0f), -90.0f, -18.0f) {}
 
 Editor::~Editor() { Shutdown(); }
 
@@ -90,6 +93,10 @@ bool Editor::Init(Window *window) {
 
 void Editor::Shutdown() {
   ClearSelection();
+  if (m_SceneTexture) {
+    glDeleteTextures(1, &m_SceneTexture);
+    m_SceneTexture = 0;
+  }
   if (m_OldCoutBuf) {
     std::cout.rdbuf(m_OldCoutBuf);
     m_OldCoutBuf = nullptr;
@@ -139,6 +146,7 @@ void Editor::SetLookedAtEntity(Entity *entity) {
 void Editor::ClearSelection() {
   m_SelectionState.Clear();
   m_SelectedEntity = nullptr;
+  m_CachedEntityID = 0;
   m_SelectedEntities.clear();
   m_LastClickedEntity = nullptr;
   m_LookedAtEntity = nullptr;
@@ -171,55 +179,61 @@ bool Editor::SanitizeSelection(Scene *scene) {
 void Editor::ApplyDarkTheme() {
   ImGuiStyle &style = ImGui::GetStyle();
 
-  style.WindowRounding = 6.0f;
+  style.WindowRounding = 0.0f;
   style.ChildRounding = 4.0f;
-  style.FrameRounding = 4.0f;
+  style.FrameRounding = 3.0f;
   style.PopupRounding = 4.0f;
   style.ScrollbarRounding = 4.0f;
   style.GrabRounding = 4.0f;
-  style.TabRounding = 4.0f;
+  style.TabRounding = 3.0f;
   style.WindowBorderSize = 1.0f;
   style.FrameBorderSize = 0.0f;
   style.WindowPadding = ImVec2(10.0f, 8.0f);
-  style.FramePadding = ImVec2(6.0f, 4.0f);
+  style.FramePadding = ImVec2(8.0f, 5.0f);
   style.ItemSpacing = ImVec2(8.0f, 5.0f);
   style.ScrollbarSize = 12.0f;
   style.GrabMinSize = 10.0f;
   style.IndentSpacing = 16.0f;
 
-  // Navy / slate palette – cheap to render, easy on the eyes
+  // Graphite surfaces, warm text and a single blue interaction accent.
   ImVec4 *c = style.Colors;
-  c[ImGuiCol_WindowBg] = ImVec4(0.11f, 0.13f, 0.16f, 1.00f);
-  c[ImGuiCol_ChildBg] = ImVec4(0.09f, 0.11f, 0.14f, 1.00f);
+  c[ImGuiCol_WindowBg] = ImVec4(0.105f, 0.110f, 0.125f, 1.00f);
+  c[ImGuiCol_ChildBg] = ImVec4(0.080f, 0.085f, 0.100f, 1.00f);
   c[ImGuiCol_PopupBg] = ImVec4(0.11f, 0.13f, 0.16f, 0.97f);
-  c[ImGuiCol_Border] = ImVec4(0.25f, 0.28f, 0.34f, 1.00f);
+  c[ImGuiCol_Border] = ImVec4(0.22f, 0.23f, 0.26f, 1.00f);
   c[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.18f, 0.22f, 1.00f);
   c[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.24f, 0.30f, 1.00f);
   c[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.28f, 0.35f, 1.00f);
   c[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.09f, 0.12f, 1.00f);
   c[ImGuiCol_TitleBgActive] = ImVec4(0.13f, 0.17f, 0.24f, 1.00f);
   c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.08f, 0.09f, 0.12f, 0.80f);
-  c[ImGuiCol_MenuBarBg] = ImVec4(0.09f, 0.11f, 0.14f, 1.00f);
-  c[ImGuiCol_ScrollbarBg] = ImVec4(0.09f, 0.11f, 0.14f, 1.00f);
+  c[ImGuiCol_MenuBarBg] = ImVec4(0.080f, 0.085f, 0.100f, 1.00f);
+  c[ImGuiCol_ScrollbarBg] = ImVec4(0.080f, 0.085f, 0.100f, 1.00f);
   c[ImGuiCol_ScrollbarGrab] = ImVec4(0.26f, 0.30f, 0.38f, 1.00f);
   c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.39f, 0.48f, 1.00f);
   c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.40f, 0.46f, 0.57f, 1.00f);
   c[ImGuiCol_CheckMark] = ImVec4(0.37f, 0.76f, 0.49f, 1.00f);
   c[ImGuiCol_SliderGrab] = ImVec4(0.37f, 0.55f, 0.85f, 1.00f);
   c[ImGuiCol_SliderGrabActive] = ImVec4(0.45f, 0.65f, 0.95f, 1.00f);
-  c[ImGuiCol_Button] = ImVec4(0.20f, 0.27f, 0.40f, 1.00f);
+  c[ImGuiCol_Button] = ImVec4(0.19f, 0.23f, 0.30f, 1.00f);
   c[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.38f, 0.56f, 1.00f);
   c[ImGuiCol_ButtonActive] = ImVec4(0.34f, 0.46f, 0.68f, 1.00f);
-  c[ImGuiCol_Header] = ImVec4(0.20f, 0.27f, 0.40f, 1.00f);
+  c[ImGuiCol_Header] = ImVec4(0.19f, 0.23f, 0.30f, 1.00f);
   c[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.38f, 0.56f, 1.00f);
   c[ImGuiCol_HeaderActive] = ImVec4(0.34f, 0.46f, 0.68f, 1.00f);
-  c[ImGuiCol_Separator] = ImVec4(0.25f, 0.28f, 0.34f, 1.00f);
+  c[ImGuiCol_Separator] = ImVec4(0.22f, 0.23f, 0.26f, 1.00f);
   c[ImGuiCol_Tab] = ImVec4(0.13f, 0.17f, 0.24f, 1.00f);
   c[ImGuiCol_TabHovered] = ImVec4(0.28f, 0.38f, 0.56f, 1.00f);
   c[ImGuiCol_TabActive] = ImVec4(0.22f, 0.31f, 0.47f, 1.00f);
   c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.16f, 0.22f, 0.32f, 1.00f);
   c[ImGuiCol_Text] = ImVec4(0.86f, 0.89f, 0.94f, 1.00f);
   c[ImGuiCol_TextDisabled] = ImVec4(0.45f, 0.49f, 0.56f, 1.00f);
+  c[ImGuiCol_TitleBg] = c[ImGuiCol_MenuBarBg] = ImVec4(0.075f, 0.08f, 0.095f, 1);
+  c[ImGuiCol_TitleBgActive] = c[ImGuiCol_Tab] = ImVec4(0.13f, 0.14f, 0.16f, 1);
+  c[ImGuiCol_TabActive] = c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.20f, 0.26f, 0.35f, 1);
+  c[ImGuiCol_ButtonHovered] = c[ImGuiCol_HeaderHovered] = c[ImGuiCol_TabHovered] = ImVec4(0.27f, 0.38f, 0.53f, 1);
+  c[ImGuiCol_DockingPreview] = ImVec4(0.40f, 0.64f, 0.98f, 0.65f);
+  c[ImGuiCol_DockingEmptyBg] = ImVec4(0.06f, 0.065f, 0.08f, 1);
   c[ImGuiCol_DragDropTarget] = ImVec4(0.37f, 0.76f, 0.49f, 1.00f);
 }
 
@@ -266,86 +280,115 @@ bool Editor::WantCaptureMouse() const {
     return false;
   if (!ImGui::GetCurrentContext())
     return false;
-  return ImGui::GetIO().WantCaptureMouse;
+  return ImGui::GetIO().WantCaptureMouse && !m_SceneHovered;
 }
 
 void Editor::BeginDockSpace() {
-  // This project uses stock (non-docking) ImGui — docking APIs are unavailable.
-  // BeginDockSpace is intentionally a no-op; layout is managed via
-  // SetNextWindowPos.
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float toolbarHeight = 42.0f;
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + toolbarHeight));
+  ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, std::max(1.0f, vp->WorkSize.y - toolbarHeight)));
+  ImGui::SetNextWindowViewport(vp->ID);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::Begin("##ArchuraWorkspace", nullptr, ImGuiWindowFlags_NoDocking |
+      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+      ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoSavedSettings);
+  ImGui::PopStyleVar(3);
+  const ImGuiID dock = ImGui::GetID("ArchuraWorkspaceV1");
+  if (!ImGui::DockBuilderGetNode(dock) || m_ResetWorkspace) {
+    ImGui::DockBuilderRemoveNode(dock);
+    ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dock, ImGui::GetContentRegionAvail());
+    ImGuiID center = dock;
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.26f, nullptr, &center);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
+    ImGui::DockBuilderDockWindow("Scene Hierarchy", left);
+    ImGui::DockBuilderDockWindow("Inspector", right);
+    ImGui::DockBuilderDockWindow("Project", bottom);
+    ImGui::DockBuilderDockWindow("Console", bottom);
+    ImGui::DockBuilderDockWindow("Scene", center);
+    ImGui::DockBuilderFinish(dock);
+    m_ResetWorkspace = false;
+  }
+  ImGui::DockSpace(dock, ImVec2(0, 0));
+  ImGui::End();
+}
+
+float Editor::GetSceneAspect(float fallback) const {
+  return m_SceneVisible ? SceneViewport{m_SceneOrigin, m_SceneSize}.Aspect(fallback) : fallback;
+}
+
+bool Editor::CanStartSceneInteraction(glm::vec2 mouse) const {
+  return m_Enabled && m_SceneHovered && m_SceneVisible &&
+      SceneViewport{m_SceneOrigin, m_SceneSize}.Contains(mouse) &&
+      !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+}
+
+void Editor::CaptureSceneFrame() {
+  if (!m_Enabled || !m_Window) return;
+  const int width = static_cast<int>(m_Window->GetFramebufferWidth());
+  const int height = static_cast<int>(m_Window->GetFramebufferHeight());
+  if (width <= 0 || height <= 0) return;
+  GLint previous = 0;
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous);
+  if (!m_SceneTexture) glGenTextures(1, &m_SceneTexture);
+  glBindTexture(GL_TEXTURE_2D, m_SceneTexture);
+  if (width != m_SceneTextureWidth || height != m_SceneTextureHeight) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_SceneTextureWidth = width;
+    m_SceneTextureHeight = height;
+  }
+  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+  glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous));
+}
+
+void Editor::DrawSceneViewport() {
+  m_SceneHovered = false;
+  m_SceneVisible = false;
+  m_SceneDrawList = nullptr;
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  if (ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+    ImGui::TextDisabled(IsGameRunning() ? "  GAME PREVIEW   |   Tab: fullscreen" : "  PERSPECTIVE   |   RMB + WASD: fly   |   F: focus selection");
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size = ImGui::GetContentRegionAvail();
+    if (size.x > 1 && size.y > 1 && m_SceneTexture) {
+      m_SceneOrigin = {origin.x, origin.y};
+      m_SceneSize = {size.x, size.y};
+      ImGui::Image(reinterpret_cast<ImTextureID>(static_cast<intptr_t>(m_SceneTexture)), size, ImVec2(0, 1), ImVec2(1, 0));
+      m_SceneHovered = ImGui::IsItemHovered();
+      m_SceneVisible = true;
+      m_SceneDrawList = ImGui::GetWindowDrawList();
+    }
+  }
+  ImGui::End();
+  ImGui::PopStyleVar();
 }
 
 void Editor::DrawEditorUI(Scene *scene) {
   SanitizeSelection(scene);
-  if (!m_Enabled)
-    return;
-
-  // Lazy asset scan (only on first frame or after explicit refresh)
-  if (m_AssetCacheDirty)
-    RefreshAssetCache();
-
+  if (!m_Enabled) return;
+  if (m_AssetCacheDirty) RefreshAssetCache();
   DrawToolbar(scene);
-
-  // Panel layout – first-use positioning only (user can resize)
-  ImGuiViewport *vp = ImGui::GetMainViewport();
-  const float W = vp->WorkSize.x;
-  const float H = vp->WorkSize.y;
-  const float Lw = 280.0f; // Hierarchy
-  const float Rw = 300.0f; // Inspector
-  const float Bh = 220.0f; // Bottom strip
-  const float Tb = 36.0f;  // Toolbar height offset
-  const float Py = vp->WorkPos.y + Tb;
-
-  if (m_ShowSceneHierarchy) {
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, Py),
-                            m_HierarchyLocked ? ImGuiCond_Always
-                                              : ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(Lw, H - Bh - Tb),
-                             m_HierarchyLocked ? ImGuiCond_Always
-                                               : ImGuiCond_FirstUseEver);
-    DrawSceneHierarchy(scene);
-  }
-  if (m_ShowInspector) {
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + W - Rw, Py),
-                            m_InspectorLocked ? ImGuiCond_Always
-                                              : ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(Rw, H - Tb), m_InspectorLocked
-                                                     ? ImGuiCond_Always
-                                                     : ImGuiCond_FirstUseEver);
-    DrawInspector(scene);
-  }
-  if (m_ShowProjectPanel || m_ShowConsole) {
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + Lw, vp->WorkPos.y + H - Bh),
-                            m_ConsoleLocked ? ImGuiCond_Always
-                                            : ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(W - Lw - Rw, Bh),
-                             m_ConsoleLocked ? ImGuiCond_Always
-                                             : ImGuiCond_FirstUseEver);
-    if (m_ShowConsole)
-      DrawConsolePanel();
-  }
-  if (m_ShowProjectPanel) {
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + H - Bh),
-                            m_ProjectPanelLocked ? ImGuiCond_Always
-                                                 : ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(Lw, Bh), m_ProjectPanelLocked
-                                                 ? ImGuiCond_Always
-                                                 : ImGuiCond_FirstUseEver);
-    DrawProjectPanel();
-  }
-  if (m_ShowPerformance)
-    DrawPerformanceMetrics(ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
-  if (m_ShowDemoWindow)
-    DrawDemoWindow();
-
+  DrawSceneViewport();
+  if (m_ShowSceneHierarchy) DrawSceneHierarchy(scene);
+  if (m_ShowInspector) DrawInspector(scene);
+  if (m_ShowProjectPanel) DrawProjectPanel();
+  if (m_ShowConsole) DrawConsolePanel();
+  if (m_ShowPerformance) DrawPerformanceMetrics(ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
+  if (m_ShowDemoWindow) DrawDemoWindow();
   SanitizeSelection(scene);
-  if (m_ShowGameBuilder)
-    m_GameBuilderPanel.Draw(scene, m_SelectedEntity);
-
+  if (m_ShowGameBuilder) m_GameBuilderPanel.Draw(scene, m_SelectedEntity);
   m_ObjectTool.Draw(scene, nullptr, m_SelectedEntity);
-
-  if (m_ShowTutorial)
-    DrawTutorialPanel();
+  if (m_ShowTutorial) DrawTutorialPanel();
+  DrawSceneDialog(scene);
 }
 
 void Editor::Update(Scene *scene, float /*deltaTime*/, float /*fps*/) {
@@ -358,9 +401,9 @@ void Editor::Update(Scene *scene, float /*deltaTime*/, float /*fps*/) {
 // Toolbar (Play / Pause / Stop + stats badge)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void Editor::DrawToolbar(Scene * /*scene*/) {
+void Editor::DrawToolbar(Scene *scene) {
   ImGuiViewport *vp = ImGui::GetMainViewport();
-  const float tbH = 36.0f;
+  const float tbH = 42.0f;
 
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y),
                           ImGuiCond_Always);
@@ -384,8 +427,15 @@ void Editor::DrawToolbar(Scene * /*scene*/) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.37f, 0.85f, 0.52f, 1.0f));
   else
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.69f, 0.87f, 1.0f));
-  ImGui::Text(playing ? "  PLAY MODE" : "  EDIT MODE");
+  ImGui::TextUnformatted("ARCHURA");
+  ImGui::SameLine();
+  ImGui::TextDisabled(playing ? " / PLAY" : " / WORKSPACE");
   ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+  ImGui::BeginDisabled(playing);
+  if (ImGui::Button("Save")) SaveCurrentScene(scene);
+  ImGui::EndDisabled();
 
   // ── Center: Play / Pause / Stop ────────────────────────────────────────
   const float btnW = 70.0f;
@@ -440,40 +490,19 @@ void Editor::DrawToolbar(Scene * /*scene*/) {
 void Editor::DrawMenuBar(Scene *scene) {
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("New Scene", "Ctrl+N")) {
-      }
-      if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {
-      }
+      if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, !IsGameRunning())) RequestSceneDialog(false);
+      if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !IsGameRunning())) SaveCurrentScene(scene);
+      if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, !IsGameRunning())) RequestSceneDialog(true);
       ImGui::Separator();
-      if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
-        if (scene) {
-          ProjectConfig cfg{"ArchuraGame", "1.0", "MainScene"};
-          std::filesystem::create_directories("games/ArchuraGame");
-          ProjectSerializer::SaveProject("games/ArchuraGame/project.gameproj",
-                                         cfg, scene);
-          Log("Project saved.");
-        }
-      }
-      if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) {
-      }
-      ImGui::Separator();
-      if (ImGui::MenuItem("Exit", "Alt+F4")) {
-      }
+      if (ImGui::MenuItem("Exit", "Alt+F4") && m_Window) m_Window->SetShouldClose(true);
       ImGui::EndMenu();
     }
-
     if (ImGui::BeginMenu("Edit")) {
-      if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      }
-      if (ImGui::MenuItem("Redo", "Ctrl+Y")) {
-      }
+      if (ImGui::MenuItem("Undo Transform", "Ctrl+Z", false, !IsGameRunning())) UndoLastAction(scene);
       ImGui::Separator();
-      if (ImGui::MenuItem("Cut", "Ctrl+X")) {
-      }
-      if (ImGui::MenuItem("Copy", "Ctrl+C")) {
-      }
-      if (ImGui::MenuItem("Paste", "Ctrl+V")) {
-      }
+      if (ImGui::MenuItem("Copy Entity", "Ctrl+C", false, m_SelectedEntity != nullptr)) CopySelected();
+      if (ImGui::MenuItem("Paste Entity", "Ctrl+V", false, m_Clipboard.valid && !IsGameRunning())) PasteClipboard(scene);
+      if (ImGui::MenuItem("Duplicate Entity", "Ctrl+D", false, m_SelectedEntity && !IsGameRunning())) { CopySelected(); PasteClipboard(scene); }
       ImGui::EndMenu();
     }
 
@@ -482,6 +511,11 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::MenuItem("Inspector", nullptr, &m_ShowInspector);
       ImGui::MenuItem("Project", nullptr, &m_ShowProjectPanel);
       ImGui::MenuItem("Console", nullptr, &m_ShowConsole);
+      ImGui::Separator();
+      if (ImGui::MenuItem("Reset Workspace")) {
+        m_ResetWorkspace = true;
+        m_ShowSceneHierarchy = m_ShowInspector = m_ShowProjectPanel = m_ShowConsole = true;
+      }
       ImGui::Separator();
       ImGui::MenuItem("Performance", nullptr, &m_ShowPerformance);
       ImGui::MenuItem("ImGui Demo", nullptr, &m_ShowDemoWindow);
@@ -494,7 +528,7 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::EndMenu();
     }
 
-    if (ImGui::BeginMenu("Entity")) {
+    if (ImGui::BeginMenu("Entity", !IsGameRunning())) {
       if (ImGui::BeginMenu("Primitives")) {
         if (ImGui::MenuItem("Cube"))
           SpawnEntity(scene, "Cube");
@@ -525,8 +559,7 @@ void Editor::DrawMenuBar(Scene *scene) {
     }
 
     if (ImGui::BeginMenu("Help")) {
-      if (ImGui::MenuItem("About Archura Engine")) {
-      }
+      ImGui::TextDisabled("Archura / SDL + OpenGL editor");
       ImGui::Separator();
       ImGui::MenuItem("Developer Tutorial", nullptr, &m_ShowTutorial);
       ImGui::EndMenu();
@@ -542,90 +575,17 @@ void Editor::DrawMenuBar(Scene *scene) {
 
 void Editor::DrawOverlay(Scene *scene, Camera *gameCamera) {
   SanitizeSelection(scene);
-  m_ObjectTool.OnSceneGUI(scene, gameCamera, m_SelectedEntity);
-
-  constexpr float DIST = 10.0f;
-  ImGuiViewport *vp = ImGui::GetMainViewport();
-  ImGuiIO &io = ImGui::GetIO();
-
-  ImGuiWindowFlags flags =
-      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
-
-  // Move overlay to the top-left of the 3D viewport (Left panel is 280, Toolbar is 36)
-  float offsetX = m_ShowSceneHierarchy ? 280.0f : 0.0f;
-  ImVec2 pos(vp->WorkPos.x + offsetX + DIST, vp->WorkPos.y + 36.0f + DIST);
-  ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(0.0f, 0.0f));
-  ImGui::SetNextWindowBgAlpha(0.45f);
-
-  if (ImGui::Begin("##Overlay", nullptr, flags)) {
-    // Mode ribbon
-    if (GetMode() == EditorMode::Edit)
-      ImGui::TextColored(ImVec4(0.55f, 0.79f, 1.0f, 1.0f), "EDITOR CAM");
-    else
-      ImGui::TextColored(ImVec4(0.37f, 0.85f, 0.52f, 1.0f), "PLAY CAM");
-    ImGui::Separator();
-
-    // Always show editor camera position when in Edit mode
-    glm::vec3 pos3;
-    float yaw, pitch;
-    if (GetMode() == EditorMode::Edit) {
-      pos3 = m_EditorCamera.GetPosition();
-      yaw = m_EditorCamera.GetYaw();
-      pitch = m_EditorCamera.GetPitch();
-    } else if (gameCamera) {
-      pos3 = gameCamera->GetPosition();
-      yaw = gameCamera->GetYaw();
-      pitch = gameCamera->GetPitch();
-    } else {
-      pos3 = glm::vec3(0.0f);
-      yaw = pitch = 0.0f;
-    }
-    ImGui::Text("Pos  (%.1f, %.1f, %.1f)", pos3.x, pos3.y, pos3.z);
-    ImGui::Text("Y/P  (%.1f, %.1f)", yaw, pitch);
-
-    if (GetMode() == EditorMode::Edit)
-      ImGui::TextDisabled("[RMB + WASD] to fly");
-
-    // Axis gizmo
-    ImGui::Separator();
-    ImVec2 orig = ImGui::GetCursorScreenPos();
-    const float sz = 32.0f;
-    ImVec2 center = ImVec2(orig.x + sz + 6.0f, orig.y + sz + 6.0f);
-
-    const glm::mat4 view = m_EditorCamera.GetViewMatrix();
-    const glm::mat3 viewRot = glm::mat3(view);
-
-    glm::vec3 axes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-    ImU32 colors[3] = {IM_COL32(230, 60, 60, 255), IM_COL32(60, 220, 60, 255),
-                       IM_COL32(80, 110, 240, 255)};
-    const char *labels[3] = {"X", "Y", "Z"};
-
-    ImDrawList *dl = ImGui::GetWindowDrawList();
-    for (int i = 0; i < 3; ++i) {
-      glm::vec3 v = viewRot * axes[i];
-      ImVec2 e = ImVec2(center.x + v.x * sz, center.y - v.y * sz);
-      dl->AddLine(center, e, colors[i], 2.5f);
-      dl->AddText(e, colors[i], labels[i]);
-    }
-    ImGui::Dummy(ImVec2(sz * 2.0f + 12.0f, sz * 2.0f + 12.0f));
-    ImGui::Separator();
-    ImGui::Text("FPS %.1f", io.Framerate);
-  }
-  ImGui::End();
+  const float aspect = GetSceneAspect(1.777f);
+  const glm::mat4 view = IsGameRunning() && gameCamera ? gameCamera->GetViewMatrix() : m_EditorCamera.GetViewMatrix();
+  const glm::mat4 projection = IsGameRunning() && gameCamera ? gameCamera->GetProjectionMatrix(aspect) : m_EditorCamera.GetProjectionMatrix(aspect);
+  m_ObjectTool.OnSceneGUI(scene, m_SelectedEntity, view, projection, m_SceneOrigin, m_SceneSize,
+      !IsGameRunning() && CanStartSceneInteraction(glm::vec2(ImGui::GetMousePos().x, ImGui::GetMousePos().y)), m_SceneDrawList);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scene Hierarchy
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Scene hierarchy
 void Editor::DrawSceneHierarchy(Scene *scene) {
   SanitizeSelection(scene);
   ImGuiWindowFlags window_flags = 0;
-  if (m_HierarchyLocked)
-    window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("Scene Hierarchy", nullptr, window_flags);
 
   if (!scene) {
@@ -640,14 +600,6 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
   if (ImGui::SmallButton("+ Add"))
     ImGui::OpenPopup("AddEntityPopup");
 
-  ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
-  if (ImGui::Button("...##HierMenu"))
-    ImGui::OpenPopup("HierConfig");
-  if (ImGui::BeginPopup("HierConfig")) {
-    if (ImGui::MenuItem("Sabit (Fixed Layout)", nullptr, m_HierarchyLocked))
-      m_HierarchyLocked = !m_HierarchyLocked;
-    ImGui::EndPopup();
-  }
 
   if (ImGui::BeginPopup("AddEntityPopup")) {
     if (ImGui::BeginMenu("Primitives")) {
@@ -680,6 +632,9 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 
   ImGui::Separator();
 
+  ImGui::SetNextItemWidth(-1);
+  if (ImGui::InputTextWithHint("##HierarchySearch", "Search entities", m_HierarchyFilter.InputBuf, IM_ARRAYSIZE(m_HierarchyFilter.InputBuf))) m_HierarchyFilter.Build();
+
   // Helper: icon prefix by component set
   auto entityIcon = [](Entity *e) -> const char * {
     if (e->GetComponent<LightComponent>())
@@ -704,7 +659,7 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
     if (isSelected)
       flags |= ImGuiTreeNodeFlags_Selected;
       
-    if (entity->GetChildren().empty())
+    if (entity->GetChildren().empty() || m_HierarchyFilter.IsActive())
       flags |= ImGuiTreeNodeFlags_Leaf;
 
     const bool isLookedAt = (entity == m_LookedAtEntity);
@@ -721,8 +676,8 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.37f, 0.85f, 0.52f, 1.0f));
 
     char label[192];
-    snprintf(label, sizeof(label), "%s%s##%u", entityIcon(entity),
-             entity->GetName().c_str(), entity->GetID());
+    snprintf(label, sizeof(label), "%s%s", entityIcon(entity),
+             entity->GetName().c_str());
     bool opened = ImGui::TreeNodeEx((void *)(uintptr_t)entity->GetID(), flags,
                                     "%s", label);
 
@@ -798,14 +753,15 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
     }
 
     if (opened) {
-      for (auto *child : entity->GetChildren())
-        DrawNode(child);
+      if (!m_HierarchyFilter.IsActive())
+        for (auto *child : entity->GetChildren())
+          DrawNode(child);
       ImGui::TreePop();
     }
   };
 
   for (const auto &ePtr : entities)
-    if (ePtr->GetParent() == nullptr)
+    if (m_HierarchyFilter.IsActive() ? m_HierarchyFilter.PassFilter(ePtr->GetName().c_str()) : ePtr->GetParent() == nullptr)
       DrawNode(ePtr.get());
 
   if (!pendingDeleteHandles.empty()) {
@@ -859,36 +815,23 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 void Editor::DrawInspector(Scene *scene) {
   SanitizeSelection(scene);
   ImGuiWindowFlags window_flags = 0;
-  if (m_InspectorLocked)
-    window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("Inspector", nullptr, window_flags);
 
-  auto DrawMenu = [&]() {
-    ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
-    if (ImGui::Button("...##InspMenu"))
-      ImGui::OpenPopup("InspConfig");
-    if (ImGui::BeginPopup("InspConfig")) {
-      if (ImGui::MenuItem("Sabit (Fixed Layout)", nullptr, m_InspectorLocked))
-        m_InspectorLocked = !m_InspectorLocked;
-      ImGui::EndPopup();
-    }
-  };
-
   if (!m_SelectedEntity) {
-    ImGui::TextDisabled("Nothing selected");
-    DrawMenu();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Select an object");
+    ImGui::TextWrapped("Choose an entity in the Hierarchy or click it in the Scene to inspect its components.");
+    ImGui::Separator();
+    ImGui::TextDisabled("Create: Entity > Primitives");
+    ImGui::TextDisabled("Frame selection: F");
+    ImGui::TextDisabled("Duplicate: Ctrl+D");
     ImGui::End();
     return;
   }
 
-  // Name editing
-  static char nameBuf[128] = "";
-  if (m_SelectedEntity->GetID() != m_CachedEntityID) {
-    strncpy(nameBuf, m_SelectedEntity->GetName().c_str(), sizeof(nameBuf) - 1);
-    nameBuf[sizeof(nameBuf) - 1] = '\0';
-    m_CachedEntityID = m_SelectedEntity->GetID();
-  }
+  auto *sc = m_SelectedEntity->GetComponent<ScriptComponent>();
+  m_InspectorText.Sync(scene, m_SelectedEntity->GetHandle(), m_SelectedEntity->GetName(), sc ? &sc->className : nullptr);
+  auto& nameBuf = m_InspectorText.name;
   ImGui::SetNextItemWidth(-1);
   if (ImGui::InputText("##Name", nameBuf, sizeof(nameBuf),
                        ImGuiInputTextFlags_EnterReturnsTrue |
@@ -900,7 +843,6 @@ void Editor::DrawInspector(Scene *scene) {
       m_SelectedEntity->SetName(nameBuf);
 
   ImGui::TextDisabled("ID: %u", m_SelectedEntity->GetID());
-  DrawMenu();
   ImGui::Separator();
 
   // ── Transform ─────────────────────────────────────────────────────────
@@ -908,17 +850,26 @@ void Editor::DrawInspector(Scene *scene) {
   if (tf &&
       ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
     // Helper: drag + inline reset button
-    auto DragVec3WithReset = [](const char *label, glm::vec3 &v,
+    auto DragVec3WithReset = [this](const char *label, glm::vec3 &v,
                                 float defaultVal, float speed) {
+      const glm::vec3 before = v;
       ImGui::DragFloat3(label, &v.x, speed);
+      if (ImGui::IsItemActivated()) {
+        const glm::vec3 updated = v;
+        v = before;
+        PushUndoSnapshot(m_SelectedEntity);
+        v = updated;
+      }
       ImGui::SameLine();
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.20f, 0.20f, 1.0f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                             ImVec4(0.45f, 0.25f, 0.25f, 1.0f));
       char rbId[64];
       snprintf(rbId, sizeof(rbId), "R##%s", label);
-      if (ImGui::SmallButton(rbId))
+      if (ImGui::SmallButton(rbId)) {
+        PushUndoSnapshot(m_SelectedEntity);
         v = glm::vec3(defaultVal);
+      }
       ImGui::PopStyleColor(2);
     };
     DragVec3WithReset("Position", tf->position, 0.0f, 0.1f);
@@ -1092,13 +1043,10 @@ void Editor::DrawInspector(Scene *scene) {
   }
 
   // ── Script Component ─────────────────────────────────────────────────────
-  auto *sc = m_SelectedEntity->GetComponent<ScriptComponent>();
   if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
     if (sc) {
       // Show + edit attached script class name
-      static char scBuf[128] = "";
-      if (m_SelectedEntity->GetID() != m_CachedEntityID)
-        strncpy(scBuf, sc->className.c_str(), sizeof(scBuf) - 1);
+      auto& scBuf = m_InspectorText.script;
 
       ImGui::SetNextItemWidth(-60);
       ImGui::PushStyleColor(ImGuiCol_FrameBg,
@@ -1117,7 +1065,7 @@ void Editor::DrawInspector(Scene *scene) {
         m_SelectedEntity->RemoveComponent<ScriptComponent>();
       ImGui::PopStyleColor(2);
     } else {
-      static char newScBuf[128] = "";
+      auto& newScBuf = m_InspectorText.newScript;
       ImGui::SetNextItemWidth(-90);
       ImGui::InputText("##NewSC", newScBuf, sizeof(newScBuf));
       ImGui::SameLine();
@@ -1161,9 +1109,6 @@ void Editor::DrawInspector(Scene *scene) {
 
 void Editor::DrawProjectPanel() {
   ImGuiWindowFlags window_flags = 0;
-  if (m_ProjectPanelLocked)
-    window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("Project", nullptr, window_flags);
 
   if (m_CurrentProjectDir != m_BaseProjectDir) {
@@ -1181,17 +1126,11 @@ void Editor::DrawProjectPanel() {
   ImGui::SameLine();
   ImGui::TextDisabled("%s", m_CurrentProjectDir.filename().string().c_str());
 
-  ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
-  if (ImGui::Button("...##ProjMenu"))
-    ImGui::OpenPopup("ProjConfig");
-  if (ImGui::BeginPopup("ProjConfig")) {
-    if (ImGui::MenuItem("Sabit (Fixed Layout)", nullptr, m_ProjectPanelLocked))
-      m_ProjectPanelLocked = !m_ProjectPanelLocked;
-    ImGui::EndPopup();
-  }
 
   ImGui::Separator();
 
+  ImGui::SetNextItemWidth(-1);
+  if (ImGui::InputTextWithHint("##AssetSearch", "Search assets", m_AssetFilter.InputBuf, IM_ARRAYSIZE(m_AssetFilter.InputBuf))) m_AssetFilter.Build();
   m_ProjectDirectoryCache.Update(m_CurrentProjectDir);
   const auto snapshot = m_ProjectDirectoryCache.GetSnapshot();
   if (!snapshot) {
@@ -1209,6 +1148,7 @@ void Editor::DrawProjectPanel() {
   for (const auto& entry : currentFiles) {
     const auto& p = entry.path;
     const auto& name = entry.name;
+    if (!m_AssetFilter.PassFilter(name.c_str())) continue;
     const bool isDir = entry.isDirectory;
     bool isSelected = std::find(m_SelectedFiles.begin(), m_SelectedFiles.end(), p) != m_SelectedFiles.end();
     
@@ -1287,12 +1227,9 @@ void Editor::DrawProjectPanel() {
 
 void Editor::DrawConsolePanel() {
   ImGuiWindowFlags window_flags = 0;
-  if (m_ConsoleLocked)
-    window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("Console", nullptr, window_flags);
 
-  ImGui::TextColored(ImVec4(0.56f, 0.78f, 1.0f, 1.0f), "Command Palette");
+  ImGui::TextColored(ImVec4(0.56f, 0.78f, 1.0f, 1.0f), "Console");
   ImGui::SameLine();
   ImGui::TextDisabled("%zu entries", m_ConsoleLogs.size());
 
@@ -1303,14 +1240,6 @@ void Editor::DrawConsolePanel() {
   if (ImGui::SmallButton("Clear"))
     ClearLogs();
 
-  ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
-  if (ImGui::Button("...##ConsMenu"))
-    ImGui::OpenPopup("ConsConfig");
-  if (ImGui::BeginPopup("ConsConfig")) {
-    if (ImGui::MenuItem("Sabit (Fixed Layout)", nullptr, m_ConsoleLocked))
-      m_ConsoleLocked = !m_ConsoleLocked;
-    ImGui::EndPopup();
-  }
 
   ImGui::Separator();
   if (ImGui::SmallButton("render.stats"))
@@ -1847,16 +1776,15 @@ Entity *Editor::PickEntityAtScreenPos(Scene *scene, Input *input, int screenW,
     return nullptr;
 
   // If any ImGui window wants the mouse (e.g. panel clicked), skip
-  if (ImGui::GetIO().WantCaptureMouse)
+  const glm::vec2 pressPosition = input->GetMouseButtonPressPosition(SDL_BUTTON_LEFT);
+  if (!CanStartSceneInteraction(pressPosition))
     return nullptr;
 
   // ── Build ray from mouse position in NDC ──────────────────────────────────
-  glm::vec2 mp = input->GetMousePosition();
-  // Convert to NDC [-1, 1]
-  float ndcX = (2.0f * mp.x) / screenW - 1.0f;
-  float ndcY = 1.0f - (2.0f * mp.y) / screenH;
-
-  const float aspect = (screenH > 0) ? (float)screenW / (float)screenH : 1.777f;
+  const SceneViewport viewport{m_SceneOrigin, m_SceneSize};
+  const glm::vec2 ndc = viewport.ToNdc(pressPosition);
+  const float ndcX = ndc.x, ndcY = ndc.y;
+  const float aspect = viewport.Aspect(1.777f);
   glm::mat4 proj = m_EditorCamera.GetProjectionMatrix(aspect);
   glm::mat4 view = m_EditorCamera.GetViewMatrix();
   glm::mat4 invVP = glm::inverse(proj * view);
@@ -1960,7 +1888,7 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
   for (int i = 0; i < 3; ++i)
     m_GizmoRotArcSSValid[i] = false;
 
-  if (!m_SelectedEntity) {
+  if (!m_SelectedEntity || !m_SceneVisible) {
     m_GizmoActive = GizmoOp::None;
     m_GizmoHovered = GizmoOp::None;
     m_GizmoTargetHandle = {};
@@ -1975,6 +1903,8 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
   }
   m_GizmoTargetHandle = m_SelectedEntity->GetHandle();
 
+  screenW = static_cast<int>(m_SceneSize.x);
+  screenH = static_cast<int>(m_SceneSize.y);
   const float asp = (screenH > 0) ? (float)screenW / (float)screenH : 1.777f;
   glm::mat4 vp =
       m_EditorCamera.GetProjectionMatrix(asp) * m_EditorCamera.GetViewMatrix();
@@ -1992,7 +1922,7 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
     glm::vec3 ndc = glm::vec3(c) / c.w;
     if (std::abs(ndc.x) > 1.5f || std::abs(ndc.y) > 1.5f)
       return false;
-    out = {(ndc.x + 1.0f) * 0.5f * screenW, (1.0f - ndc.y) * 0.5f * screenH};
+    out = SceneViewport{m_SceneOrigin, m_SceneSize}.ToScreen(glm::vec2(ndc));
     return true;
   };
   auto toImVec = [](const glm::vec2 &v) { return ImVec2(v.x, v.y); };
@@ -2018,7 +1948,9 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
   ImU32 hotR = IM_COL32(255, 235, 80, 200);
   const char *lbl[3] = {"X", "Y", "Z"};
 
-  ImDrawList *dl = ImGui::GetForegroundDrawList();
+  ImDrawList *dl = m_SceneDrawList;
+  if (!dl) return;
+  dl->PushClipRect(ImVec2(m_SceneOrigin.x, m_SceneOrigin.y), ImVec2(m_SceneOrigin.x + m_SceneSize.x, m_SceneOrigin.y + m_SceneSize.y), true);
 
   // ── Translation arrows ────────────────────────────────────────────────────
   for (int i = 0; i < 3; ++i) {
@@ -2090,6 +2022,7 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
   // Center dot
   dl->AddCircleFilled(toImVec(oss), 4.5f, IM_COL32(255, 255, 255, 210));
   dl->AddCircle(toImVec(oss), 4.5f, IM_COL32(0, 0, 0, 160), 12, 1.5f);
+  dl->PopClipRect();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2098,6 +2031,8 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
 
 void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
   (void)screenW;
+  m_GizmoConsumedClick = false;
+  screenH = static_cast<int>(std::max(1.0f, m_SceneSize.y));
   SanitizeSelection();
   m_GizmoHovered = GizmoOp::None;
   if (!m_SelectedEntity || !input || !m_GizmoSSValid ||
@@ -2111,9 +2046,12 @@ void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
     return;
   }
 
-  glm::vec2 mp = input->GetMousePosition();
-  bool lmbDown = input->IsMouseButtonDown(SDL_BUTTON_LEFT);
-  bool lmbPressed = input->IsMouseButtonPressed(SDL_BUTTON_LEFT);
+  const glm::vec2 currentMouse = input->GetMousePosition();
+  const bool lmbDown = input->IsMouseButtonDown(SDL_BUTTON_LEFT);
+  const bool lmbPressed = input->IsMouseButtonPressed(SDL_BUTTON_LEFT);
+  const bool lmbReleased = input->IsMouseButtonReleased(SDL_BUTTON_LEFT);
+  glm::vec2 mp = lmbPressed ? input->GetMouseButtonPressPosition(SDL_BUTTON_LEFT) : currentMouse;
+  m_GizmoConsumedClick = m_GizmoActive != GizmoOp::None;
 
   auto distSeg = [](const glm::vec2 &p, const glm::vec2 &a,
                     const glm::vec2 &b) -> float {
@@ -2149,10 +2087,11 @@ void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
   }
 
   // Begin drag
-  if (lmbPressed && !ImGui::GetIO().WantCaptureMouse &&
+  if (lmbPressed && CanStartSceneInteraction(mp) &&
       m_GizmoHovered != GizmoOp::None) {
     PushUndoSnapshot(m_SelectedEntity); // ← save before-state for Ctrl+Z
     m_GizmoActive = m_GizmoHovered;
+    m_GizmoConsumedClick = true;
     m_GizmoDragMouseStart = mp;
     m_GizmoDragMousePrev = mp;
     m_GizmoDragPosStart = tf->position;
@@ -2162,8 +2101,9 @@ void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
         (float)screenH;
   }
 
-  // Active drag
-  if (m_GizmoActive != GizmoOp::None && lmbDown) {
+  // Apply the final release delta too, including a complete drag in one frame.
+  mp = currentMouse;
+  if (m_GizmoActive != GizmoOp::None && (lmbDown || lmbReleased)) {
     int opIdx = (int)m_GizmoActive;
     if (opIdx >= (int)GizmoOp::TransX && opIdx <= (int)GizmoOp::TransZ) {
       int axis = opIdx - (int)GizmoOp::TransX;
@@ -2314,11 +2254,17 @@ void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
   SanitizeSelection(scene);
   if (!input)
     return;
-  if (ImGui::GetIO().WantTextInput)
+  if (ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
     return; // typing in an ImGui field – don't steal keys
 
   const bool ctrl = input->IsKeyDown(SDL_SCANCODE_LCTRL) ||
                     input->IsKeyDown(SDL_SCANCODE_RCTRL);
+
+  if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_S)) {
+    const bool shift = input->IsKeyDown(SDL_SCANCODE_LSHIFT) || input->IsKeyDown(SDL_SCANCODE_RSHIFT);
+    if (shift) RequestSceneDialog(true); else SaveCurrentScene(scene);
+  }
+  if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_O)) RequestSceneDialog(false);
 
   // Ctrl+Z – Undo
   if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_Z))

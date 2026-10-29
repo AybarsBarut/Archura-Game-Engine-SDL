@@ -18,10 +18,13 @@ int g_Failures = 0;
     }                                                                          \
   } while (false)
 
-void SendButtonEvent(Archura::Input &input, Uint32 type, Uint8 button) {
+void SendButtonEvent(Archura::Input &input, Uint32 type, Uint8 button,
+                     int x = 0, int y = 0) {
   SDL_Event event{};
   event.type = type;
   event.button.button = button;
+  event.button.x = x;
+  event.button.y = y;
   input.OnEvent(event);
 }
 
@@ -42,6 +45,7 @@ void CheckState(const Archura::Input &input, int button, bool pressed,
 void TestNormalCrossFrameLifecycleAndRepeatedQueries() {
   Archura::Input input(nullptr);
   constexpr int button = SDL_BUTTON_LEFT;
+  CHECK(input.GetMouseButtonPressPosition(button) == glm::vec2(0.0f));
 
   input.Update();
   CheckState(input, button, false, false, false);
@@ -137,8 +141,10 @@ void TestInvalidIndicesAreSafe() {
   Archura::Input input(nullptr);
   input.Update();
   const int invalidButtons[] = {-1, 0, 6, INT_MAX};
-  for (const int button : invalidButtons)
+  for (const int button : invalidButtons) {
     CheckState(input, button, false, false, false);
+    CHECK(input.GetMouseButtonPressPosition(button) == glm::vec2(0.0f));
+  }
 
   SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, 0);
   SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, 6);
@@ -146,6 +152,57 @@ void TestInvalidIndicesAreSafe() {
   SendButtonEvent(input, SDL_MOUSEBUTTONUP, 6);
   for (const int button : invalidButtons)
     CheckState(input, button, false, false, false);
+}
+
+void TestCoalescedDragKeepsPressPosition() {
+  Archura::Input input(nullptr);
+  input.Update();
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 100, 200);
+  SDL_Event motion{};
+  motion.type = SDL_MOUSEMOTION;
+  motion.motion.x = 170;
+  motion.motion.y = 230;
+  input.OnEvent(motion);
+  SendButtonEvent(input, SDL_MOUSEBUTTONUP, SDL_BUTTON_LEFT, 170, 230);
+  CHECK(input.GetMousePosition() == glm::vec2(170.0f, 230.0f));
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(100.0f, 200.0f));
+  CheckState(input, SDL_BUTTON_LEFT, true, false, true);
+  input.Update();
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(0.0f));
+  // Button event coordinates also cover a complete drag with no motion event.
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 210, 220);
+  CHECK(input.GetMousePosition() == glm::vec2(210.0f, 220.0f));
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 999, 999);
+  CHECK(input.GetMousePosition() == glm::vec2(210.0f, 220.0f));
+  SendButtonEvent(input, SDL_MOUSEBUTTONUP, SDL_BUTTON_LEFT, 280, 220);
+  CHECK(input.GetMousePosition() == glm::vec2(280.0f, 220.0f));
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(210.0f, 220.0f));
+  SendButtonEvent(input, SDL_MOUSEBUTTONUP, SDL_BUTTON_LEFT, 999, 999);
+  CHECK(input.GetMousePosition() == glm::vec2(280.0f, 220.0f));
+}
+
+void TestPressPositionLifecycle() {
+  Archura::Input input(nullptr);
+  input.Update();
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 10, 20);
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 99, 99);
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_RIGHT, 30, 40);
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(10.0f, 20.0f));
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_RIGHT) == glm::vec2(30.0f, 40.0f));
+  input.Update();
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(10.0f, 20.0f));
+  SendButtonEvent(input, SDL_MOUSEBUTTONUP, SDL_BUTTON_LEFT, 70, 80);
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 50, 60);
+  SendButtonEvent(input, SDL_MOUSEBUTTONUP, SDL_BUTTON_LEFT, 70, 80);
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 90, 100);
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(50.0f, 60.0f));
+  CheckState(input, SDL_BUTTON_LEFT, true, true, true);
+  SendFocusLost(input);
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(0.0f));
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_RIGHT) == glm::vec2(0.0f));
+  CheckState(input, SDL_BUTTON_LEFT, true, false, true);
+  SendButtonEvent(input, SDL_MOUSEBUTTONDOWN, SDL_BUTTON_LEFT, 110, 120);
+  CHECK(input.GetMouseButtonPressPosition(SDL_BUTTON_LEFT) == glm::vec2(110.0f, 120.0f));
 }
 
 } // namespace
@@ -160,6 +217,8 @@ int main() {
   TestDuplicateEventsDoNotCreateTransitions();
   TestFocusLossReleasesHeldButtons();
   TestInvalidIndicesAreSafe();
+  TestCoalescedDragKeepsPressPosition();
+  TestPressPositionLifecycle();
 
   if (g_Failures != 0) {
     std::cerr << g_Failures << " mouse-button check(s) failed\n";

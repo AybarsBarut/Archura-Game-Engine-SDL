@@ -1,6 +1,7 @@
 #include "network/ServerConfig.h"
 #include "network/NetworkManager.h"
 #include "network/AuthoritativeWorld.h"
+#include "core/GameLoopHarness.h"
 #include <algorithm>
 #include <csignal>
 #include <iostream>
@@ -23,6 +24,7 @@ static ServerConfig g_Config;
 static Net::AuthoritativeWorld g_World;
 static std::vector<std::pair<std::uint32_t, Net::PlayerInputPacket>> g_Inputs;
 static float g_SnapshotAccumulator = 0;
+static double g_MaxNetworkPumpMs = 0.0;
 
 void HandleTerminationSignal(int) noexcept {
     g_ServerRunning = 0;
@@ -49,7 +51,10 @@ void PrintServerInfo() {
 void ServerTick(float deltaTime) {
     auto& network = NetworkManager::Get();
     g_Inputs.clear();
+    const auto pumpStart = std::chrono::steady_clock::now();
     network.UpdateServer();
+    g_MaxNetworkPumpMs = std::max(g_MaxNetworkPumpMs,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pumpStart).count());
     if (network.GetState() != ConnectionState::Listening) {
         std::cerr << "Network listener failed: " << network.GetLastError() << std::endl;
         g_ServerRunning = 0;
@@ -74,12 +79,18 @@ void ServerTick(float deltaTime) {
 
 void RunServerLoop() {
     const float tickInterval = g_Config.GetTickInterval();
-    const int maxTicksPerFrame = 5; // Prevent spiral of death
+    // Authority retains its existing bounded catch-up policy. Unlike the client,
+    // it must not silently apply the presentation loop's debt-dropping policy.
+    GameLoopHarness loop(GameLoopHarness::OverloadPolicy::PreserveBacklog);
+    GameLoopHarness::Callbacks callbacks;
+    callbacks.shouldContinue = [] { return g_ServerRunning != 0; };
+    int tickCount = 0;
+    callbacks.fixedTick = [&tickCount](double dt) {
+        ServerTick(static_cast<float>(dt));
+        ++tickCount;
+    };
     
     auto lastTime = std::chrono::steady_clock::now();
-    float accumulator = 0.0f;
-    
-    int tickCount = 0;
     auto lastSecond = std::chrono::steady_clock::now();
     
     std::cout << "Server started! Tick interval: " << (tickInterval * 1000.0f) << "ms\n";
@@ -87,20 +98,10 @@ void RunServerLoop() {
     
     while (g_ServerRunning != 0) {
         auto currentTime = std::chrono::steady_clock::now();
-        float frameTime = std::min(0.25f,
-            std::chrono::duration<float>(currentTime - lastTime).count());
+        const double frameTime = std::chrono::duration<double>(currentTime - lastTime).count();
         lastTime = currentTime;
         
-        accumulator += frameTime;
-        
-        // Fixed timestep loop
-        int ticks = 0;
-        while (accumulator >= tickInterval && ticks < maxTicksPerFrame) {
-            ServerTick(tickInterval);
-            accumulator -= tickInterval;
-            ticks++;
-            tickCount++;
-        }
+        loop.RunFrame(frameTime, callbacks);
         
         // Print tickrate every second
         auto timeSinceLastSecond = std::chrono::duration<float>(currentTime - lastSecond).count();
@@ -124,7 +125,7 @@ void RunServerLoop() {
         }
     }
     
-    std::cout << "\nServer shutting down...\n";
+    std::cout << "\nServer shutting down... max network pump " << g_MaxNetworkPumpMs << " ms\n";
 }
 
 int main(int argc, char** argv) {

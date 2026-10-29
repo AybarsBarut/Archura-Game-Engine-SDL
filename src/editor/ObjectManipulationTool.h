@@ -8,6 +8,8 @@
 #include <string>
 #include <glm/glm.hpp>
 
+struct ImDrawList;
+
 namespace Archura {
 
 class Scene;
@@ -44,7 +46,12 @@ public:
 
     void Init();
     void Draw(Scene* scene, Camera* camera, Entity* selectedEntity);
-    void OnSceneGUI(Scene* scene, Camera* camera, Entity* selectedEntity);
+    // Caller supplies the Scene image rectangle and the camera used to render it.
+    // hovered must also be false outside Edit mode; isolation still updates.
+    void OnSceneGUI(Scene* scene, Entity* selectedEntity,
+                    const glm::mat4& view, const glm::mat4& projection,
+                    const glm::vec2& viewportOrigin, const glm::vec2& viewportSize,
+                    bool hovered, ImDrawList* drawList);
 
     // Visibility
     bool IsOpen() const { return m_IsOpen; }
@@ -59,7 +66,9 @@ private:
                           Mesh* mesh, const glm::mat4& modelMatrix, float& outT, glm::vec3& outHitPoint);
     
     // Visualization
-    void DrawBrushCursor(Camera* camera, const glm::vec3& position, const glm::vec3& normal, float radius);
+    void DrawBrushCursor(const glm::mat4& viewProjection,
+                         const glm::vec2& viewportOrigin, const glm::vec2& viewportSize,
+                         ImDrawList* drawList, const glm::vec3& position, float radius);
 
     // Terrain Ops
     void ApplyTerrainBrush(Mesh* mesh, const glm::vec3& hitPoint, const glm::mat4& modelMatrix);

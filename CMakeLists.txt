@@ -25,6 +25,25 @@ option(ARCHURA_DEBUG_PHYSICS "Build the F3 physics debug wireframe overlay" ON)
 option(ARCHURA_OPENAL "Build OpenAL Soft spatial audio support" OFF)
 option(ARCHURA_REQUIRE_SDL_NET "Fail configuration when SDL_net is unavailable" OFF)
 option(ARCHURA_BUILD_STARTUP_TESTS "Enable startup smoke tests (requires a desktop/OpenGL context)" OFF)
+option(ARCHURA_LOOP_TESTS_ONLY "Build SDK-free game loop contracts only" OFF)
+option(ARCHURA_BUILD_LOOP_BENCHMARK "Build the synthetic game loop benchmark" OFF)
+
+# Keep this path before SDL/OpenGL/Mono discovery. It tests the production loop,
+# not a duplicate implementation, on machines without the runtime SDKs.
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(ArchuraGameLoopTests tests/GameLoopHarnessTests.cpp src/core/GameLoopHarness.cpp)
+    target_include_directories(ArchuraGameLoopTests PRIVATE src)
+    add_test(NAME Archura.Core.GameLoop COMMAND ArchuraGameLoopTests)
+    set_tests_properties(Archura.Core.GameLoop PROPERTIES LABELS "contract;loop" TIMEOUT 30)
+endif()
+if(ARCHURA_BUILD_LOOP_BENCHMARK)
+    add_executable(ArchuraGameLoopBenchmark benchmarks/GameLoopBenchmark.cpp src/core/GameLoopHarness.cpp)
+    target_include_directories(ArchuraGameLoopBenchmark PRIVATE src)
+endif()
+if(ARCHURA_LOOP_TESTS_ONLY)
+    return()
+endif()
 
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
 if(MSVC)
@@ -189,6 +208,7 @@ file(GLOB_RECURSE SHARED_HEADERS
 file(GLOB_RECURSE CLIENT_SOURCES
     "src/core/Engine.cpp"
     "src/core/Application.cpp"
+    "src/core/GameLoopHarness.cpp"
     "src/core/Window.cpp"
     "src/core/ImGuiLayer.cpp"
     "src/core/AudioSystem.cpp"
@@ -404,6 +424,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # DEDICATED SERVER EXECUTABLE (ArchuraServer)
 # ============================================
 add_executable(ArchuraServer
+    src/core/GameLoopHarness.cpp
     src/server/server_main.cpp
     ${SHARED_SOURCES}
     ${SHARED_HEADERS}
@@ -427,6 +448,9 @@ if(ARCHURA_SDL_NET_TARGET)
     add_executable(ArchuraNetClient src/client/network_client_main.cpp ${SHARED_SOURCES})
     target_include_directories(ArchuraNetClient PRIVATE src external/glm)
     target_link_libraries(ArchuraNetClient PRIVATE SDL2 ${ARCHURA_SDL_NET_TARGET})
+    if(WIN32)
+        target_link_libraries(ArchuraNetClient PRIVATE ws2_32)
+    endif()
     target_compile_definitions(ArchuraNetClient PRIVATE ARCHURA_HAS_SDL_NET=1)
     # Executables must carry the transport backend; do not rely on developer PATH.
     foreach(network_target IN ITEMS ArchuraEngine ArchuraServer ArchuraNetClient)
@@ -443,6 +467,31 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(ArchuraPendingSendQueueTests tests/network/PendingSendQueueTests.cpp)
+    target_include_directories(ArchuraPendingSendQueueTests PRIVATE src)
+    add_test(NAME Archura.Network.PendingSendQueue COMMAND ArchuraPendingSendQueueTests)
+    if(ARCHURA_SDL_NET_TARGET)
+        add_executable(ArchuraNetworkConnectionTests
+            tests/network/NetworkConnectionTests.cpp
+            src/network/NetworkManager.cpp src/network/NetworkProtocol.cpp
+            src/network/NativeSocket.cpp src/network/AsyncResolver.cpp)
+        target_include_directories(ArchuraNetworkConnectionTests PRIVATE src)
+        target_compile_definitions(ArchuraNetworkConnectionTests PRIVATE ARCHURA_HAS_SDL_NET=1)
+        if(WIN32)
+            target_link_libraries(ArchuraNetworkConnectionTests PRIVATE ws2_32)
+        endif()
+        add_test(NAME Archura.Network.Connection COMMAND ArchuraNetworkConnectionTests)
+        set_tests_properties(Archura.Network.Connection PROPERTIES RUN_SERIAL TRUE)
+        add_executable(ArchuraNetworkBackpressureTests
+            tests/network/NetworkBackpressureTests.cpp
+            src/network/NetworkManager.cpp src/network/NetworkProtocol.cpp
+            src/network/NativeSocket.cpp src/network/AsyncResolver.cpp)
+        target_include_directories(ArchuraNetworkBackpressureTests PRIVATE src)
+        target_compile_definitions(ArchuraNetworkBackpressureTests PRIVATE ARCHURA_HAS_SDL_NET=1)
+        if(WIN32)
+            target_link_libraries(ArchuraNetworkBackpressureTests PRIVATE ws2_32)
+        endif()
+    endif()
     add_executable(ArchuraWeaponSerializationTests tests/WeaponSerializationTests.cpp)
     target_include_directories(ArchuraWeaponSerializationTests PRIVATE src external/glm)
     add_test(NAME Archura.Core.WeaponSerialization COMMAND ArchuraWeaponSerializationTests)
@@ -455,6 +504,19 @@ if(BUILD_TESTING)
         tests/ProjectDirectoryCacheTests.cpp src/editor/ProjectDirectoryCache.cpp)
     target_include_directories(ArchuraProjectDirectoryCacheTests PRIVATE src)
     add_test(NAME Archura.Editor.ProjectDirectoryCache COMMAND ArchuraProjectDirectoryCacheTests)
+
+    add_executable(ArchuraSceneViewportTests tests/SceneViewportTests.cpp)
+    target_include_directories(ArchuraSceneViewportTests PRIVATE src external/glm)
+    add_test(NAME Archura.Editor.SceneViewport COMMAND ArchuraSceneViewportTests)
+
+    add_executable(ArchuraInspectorTextStateTests tests/InspectorTextStateTests.cpp
+        src/ecs/Entity.cpp src/ecs/Component.cpp)
+    target_include_directories(ArchuraInspectorTextStateTests PRIVATE src external/glm)
+    add_test(NAME Archura.Editor.InspectorTextState COMMAND ArchuraInspectorTextStateTests)
+
+    add_executable(ArchuraLauncherDiscoveryTests src/launcher/RuntimeDiscoveryTests.cpp)
+    target_include_directories(ArchuraLauncherDiscoveryTests PRIVATE src/launcher)
+    add_test(NAME Archura.Launcher.RuntimeDiscovery COMMAND ArchuraLauncherDiscoveryTests)
 
     add_executable(ArchuraTransformUndoTests
         tests/TransformUndoHistoryTests.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
@@ -721,7 +783,7 @@ if(BUILD_TESTING AND ARCHURA_BUILD_PHYSICS_TESTS)
     )
     add_test(NAME Archura.Physics.Core COMMAND ArchuraPhysicsCoreTests)
     add_executable(ArchuraPhysicsPresentationTests tests/PhysicsPresentationTests.cpp
-        src/ecs/Component.cpp src/ecs/Entity.cpp src/game/PhysicsSystem.cpp)
+        src/core/GameLoopHarness.cpp src/ecs/Component.cpp src/ecs/Entity.cpp src/game/PhysicsSystem.cpp)
     target_include_directories(ArchuraPhysicsPresentationTests PRIVATE src external/glm)
     add_test(NAME Archura.Physics.Presentation COMMAND ArchuraPhysicsPresentationTests)
     add_executable(ArchuraPhysicsGrabTests tests/PhysicsGrabTests.cpp
@@ -754,6 +816,11 @@ if(BUILD_TESTING)
     get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)
     if(Python3_Interpreter_FOUND AND ARCHURA_SDL_NET_TARGET)
+        add_test(NAME Archura.Network.Backpressure
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/NetworkBackpressureProcessTests.py"
+                --fixture "$<TARGET_FILE:ArchuraNetworkBackpressureTests>")
+        set_tests_properties(Archura.Network.Backpressure PROPERTIES
+            LABELS "network;integration" TIMEOUT 15 RUN_SERIAL TRUE)
         add_test(NAME Archura.Network.ProcessIntegration
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/NetworkProcessTests.py"
                 --server "$<TARGET_FILE:ArchuraServer>" --client "$<TARGET_FILE:ArchuraNetClient>")
@@ -769,6 +836,11 @@ if(BUILD_TESTING)
                 LABELS "startup;integration;network" TIMEOUT 60 RUN_SERIAL TRUE)
         endif()
         if(Python3_Interpreter_FOUND)
+            add_test(NAME Archura.Startup.Failure
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/StartupFailureSmoke.py"
+                    --engine "$<TARGET_FILE:ArchuraEngine>")
+            set_tests_properties(Archura.Startup.Failure PROPERTIES
+                LABELS "startup;integration" TIMEOUT 100 RUN_SERIAL TRUE)
             add_test(NAME Archura.Startup.StandalonePackage
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/StandalonePackageSmoke.py"
                     --runtime-dir "$<TARGET_FILE_DIR:ArchuraEngine>")
@@ -781,8 +853,16 @@ if(BUILD_TESTING)
             COMMAND ArchuraEngine --smoke-test --graphics=vulkan --no-graphics-fallback)
         add_test(NAME Archura.Startup.PlayStop
             COMMAND ArchuraEngine --play-stop-smoke-test --graphics=opengl --no-graphics-fallback)
+        add_test(NAME Archura.Startup.Cancel
+            COMMAND ArchuraEngine --startup-cancel-test --graphics=opengl --no-graphics-fallback)
+        add_test(NAME Archura.Startup.Splash
+            COMMAND ArchuraEngine --startup-smoke-test --graphics=opengl --no-graphics-fallback)
+        add_test(NAME Archura.Startup.SplashAcceleratedFramebuffer
+            COMMAND ArchuraEngine --startup-smoke-test --graphics=opengl --no-graphics-fallback)
+        set_tests_properties(Archura.Startup.SplashAcceleratedFramebuffer PROPERTIES
+            ENVIRONMENT "SDL_FRAMEBUFFER_ACCELERATION=opengl")
         set_tests_properties(Archura.Startup.UnsupportedBackend PROPERTIES WILL_FAIL TRUE)
-        set_tests_properties(Archura.Startup.OpenGL Archura.Startup.UnsupportedBackend Archura.Startup.PlayStop PROPERTIES
+        set_tests_properties(Archura.Startup.OpenGL Archura.Startup.UnsupportedBackend Archura.Startup.PlayStop Archura.Startup.Cancel Archura.Startup.Splash Archura.Startup.SplashAcceleratedFramebuffer PROPERTIES
             LABELS "startup;integration" TIMEOUT 60
             WORKING_DIRECTORY "$<TARGET_FILE_DIR:ArchuraEngine>")
     endif()

@@ -25,6 +25,8 @@ Input::Input(SDL_Window* window)
     std::memset(m_MouseButtons, 0, sizeof(m_MouseButtons));
     std::memset(m_MouseButtonsPressed, 0, sizeof(m_MouseButtonsPressed));
     std::memset(m_MouseButtonsReleased, 0, sizeof(m_MouseButtonsReleased));
+    for (auto& position : m_MouseButtonPressPositions)
+        position = glm::vec2(0.0f);
 }
 
 void Input::Update() {
@@ -33,6 +35,11 @@ void Input::Update() {
     m_ScrollDelta = 0.0f;
     std::memset(m_MouseButtonsPressed, 0, sizeof(m_MouseButtonsPressed));
     std::memset(m_MouseButtonsReleased, 0, sizeof(m_MouseButtonsReleased));
+    for (int button = 1; button < 6; ++button) {
+        m_MousePressPositionCaptured[button] = false;
+        if (!m_MouseButtons[button])
+            m_MouseButtonPressPositions[button] = glm::vec2(0.0f);
+    }
 }
 
 void Input::OnEvent(const SDL_Event& event) {
@@ -47,6 +54,14 @@ void Input::OnEvent(const SDL_Event& event) {
     else if (event.type == SDL_MOUSEBUTTONDOWN) {
         const int button = event.button.button;
         if (IsValidMouseButton(button) && !m_MouseButtons[button]) {
+            m_MousePosition = glm::vec2(static_cast<float>(event.button.x),
+                                        static_cast<float>(event.button.y));
+            if (!m_MousePressPositionCaptured[button]) {
+                m_MouseButtonPressPositions[button] =
+                    glm::vec2(static_cast<float>(event.button.x),
+                              static_cast<float>(event.button.y));
+                m_MousePressPositionCaptured[button] = true;
+            }
             m_MouseButtons[button] = true;
             m_MouseButtonsPressed[button] = true;
         }
@@ -54,6 +69,8 @@ void Input::OnEvent(const SDL_Event& event) {
     else if (event.type == SDL_MOUSEBUTTONUP) {
         const int button = event.button.button;
         if (IsValidMouseButton(button) && m_MouseButtons[button]) {
+            m_MousePosition = glm::vec2(static_cast<float>(event.button.x),
+                                        static_cast<float>(event.button.y));
             m_MouseButtons[button] = false;
             m_MouseButtonsReleased[button] = true;
         }
@@ -62,6 +79,8 @@ void Input::OnEvent(const SDL_Event& event) {
              event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
         std::memset(m_Keys, 0, sizeof(m_Keys));
         for (int button = 1; button < 6; ++button) {
+            m_MouseButtonPressPositions[button] = glm::vec2(0.0f);
+            m_MousePressPositionCaptured[button] = false;
             if (m_MouseButtons[button]) {
                 m_MouseButtons[button] = false;
                 m_MouseButtonsReleased[button] = true;
@@ -119,6 +138,11 @@ bool Input::IsMouseButtonDown(int button) const {
 bool Input::IsMouseButtonReleased(int button) const {
     if (!IsValidMouseButton(button)) return false;
     return m_MouseButtonsReleased[button];
+}
+
+glm::vec2 Input::GetMouseButtonPressPosition(int button) const {
+    if (!IsValidMouseButton(button)) return glm::vec2(0.0f);
+    return m_MouseButtonPressPositions[button];
 }
 
 void Input::SetCursorMode(int mode) {
