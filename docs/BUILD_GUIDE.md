@@ -148,6 +148,70 @@ This skips the splash, renders 16 frames and verifies two actual Editor/Applicat
 Play/Stop cycles and shutdown. It opens an OpenGL window and needs a graphics
 session. Normal `--smoke-test` still checks startup/shutdown without entering Play.
 
+## CI and clean-checkout profiles
+
+`.github/workflows/validation.yml` defines separate gates:
+
+- SDK-free production loop contracts: Windows Server 2022 and Ubuntu 24.04,
+  Debug/Release. This is one harness test, not Linux engine/editor certification.
+- Windows native contracts: Debug/Release, including server/client transport and
+  backendless editor/render/serialization tests. `windows-contracts` sets
+  `ARCHURA_BUILD_RUNTIME=OFF`, retaining all selected native targets and excluding
+  the graphical engine/Mono staging plus nine startup/graphical tests.
+- Scoped Clang-Tidy analysis of `GameLoopHarness.cpp` and its regression fixture.
+  LLVM 18 is selected on Ubuntu. `.clang-format` provides a four-space C++17 policy;
+  CI validates the configuration, not formatting of the entire legacy codebase.
+  No mass formatting or automatic fixes run. Existing module formatting is retained.
+
+Actions are pinned to commit SHAs with read-only repository permissions and no
+persisted checkout credentials. JUnit and CTest logs are retained for 14 days.
+Workflow files and local verification do not establish a hosted CI pass: the branch
+must be published and the actual jobs must complete before claiming that gate.
+Runner software inventories: [Windows 2022](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md),
+[Ubuntu 24.04](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md).
+Tool configuration references: [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/),
+[Clang-Format](https://clang.llvm.org/docs/ClangFormatStyleOptions.html).
+
+Run the Windows CI selection from a checkout containing only tracked inputs:
+
+```powershell
+python tools/check_build_dependencies.py --profile windows-contracts --require-tracked
+cmake --preset windows-contracts
+cmake --build --preset contracts-debug
+ctest --preset contracts-debug
+cmake --build --preset contracts-release
+ctest --preset contracts-release
+```
+
+At this revision the selected graph registers 43 tests; the default local graphical
+validation graph registers 52. The contracts preset does not build `ArchuraEngine`.
+`ARCHURA_BUILD_RUNTIME` defaults to ON, preserving normal builds; requesting startup
+tests with runtime OFF fails configuration rather than silently removing those tests.
+`BUILD_TESTING=OFF` disables test registration.
+
+`cmake/dependency-pins.json` inventories required header entry points, binary SDK
+hashes and available license evidence. The preflight checks presence and selected
+SHA256 digests; `--require-tracked` additionally rejects required untracked inputs.
+The full vendor source snapshot comes from Git; this is not a hash of every vendor
+file or independently authenticated upstream provenance. The checker does not
+download, install or modify dependencies. Missing license/provenance evidence is
+recorded explicitly and needs a separate inventory repair before distribution.
+
+Full runtime clean-checkout limitation: `external/mono/bin/mono-2.0-sgen.dll` is
+ignored/untracked. The local DLL reports `6.12.0 (Visual Studio built mono)`; its
+exact upstream build/provenance is not recorded. The runtime preflight exposes this:
+
+```powershell
+python tools/check_build_dependencies.py --profile windows-runtime --require-tracked
+```
+
+It intentionally fails until a vetted runtime is reproducibly provisioned. No
+replacement DLL is downloaded or committed by this change. The runtime option is
+not switched off automatically to hide a missing dependency. Full graphical
+acceptance still uses `windows-validation` on a provisioned desktop/OpenGL host.
+The dormant `cmake/HeadlessRuntime.cmake` remains unwired and invalid; neither
+these workflows nor loop-only Linux tests certify a Linux server/runtime build.
+
 ## Dedicated server configuration
 
 The dedicated server uses defaults unless `--config <file>` is supplied. An

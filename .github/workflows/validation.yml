@@ -1,0 +1,98 @@
+name: Build and contracts
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  loop:
+    name: SDK-free loop / ${{ matrix.os }} / ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Configure production loop contracts
+        run: cmake -S . -B build/ci-loop -DARCHURA_LOOP_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
+      - name: Build
+        run: cmake --build build/ci-loop --config ${{ matrix.configuration }} --parallel 2
+      - name: Test
+        run: ctest --test-dir build/ci-loop -C ${{ matrix.configuration }} --output-on-failure --no-tests=error --output-junit results.xml
+      - name: Configure with tests disabled
+        run: cmake -S . -B build/ci-no-tests -DARCHURA_LOOP_TESTS_ONLY=ON -DBUILD_TESTING=OFF
+      - name: Verify no tests are registered
+        run: >-
+          python -c "import json,subprocess; r=subprocess.run(['ctest','--test-dir','build/ci-no-tests','--show-only=json-v1'],capture_output=True,text=True,check=True); assert not json.loads(r.stdout)['tests'], r.stdout"
+      - name: Retain test evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: loop-${{ matrix.os }}-${{ matrix.configuration }}
+          path: |
+            build/ci-loop/results.xml
+            build/ci-loop/Testing/Temporary/LastTest.log
+          retention-days: 14
+
+  windows-contracts:
+    name: Windows native contracts / ${{ matrix.configuration }}
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [debug, release]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Verify tracked SDK inputs
+        run: python tools/check_build_dependencies.py --profile windows-contracts --require-tracked
+      - name: Configure
+        run: cmake --preset windows-contracts
+      - name: Build all selected targets
+        run: cmake --build --preset contracts-${{ matrix.configuration }}
+      - name: Test selected graph
+        run: ctest --preset contracts-${{ matrix.configuration }} --output-junit results-${{ matrix.configuration }}.xml
+      - name: Retain test evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-contracts-${{ matrix.configuration }}
+          path: |
+            build/windows-contracts/results-${{ matrix.configuration }}.xml
+            build/windows-contracts/Testing/Temporary/LastTest.log
+          retention-days: 14
+
+  analysis:
+    name: Scoped static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Record tool versions
+        run: |
+          clang-tidy-18 --version
+          clang-format-18 --version
+      - name: Validate formatting configuration
+        run: clang-format-18 --style=file --dump-config > /dev/null
+      - name: Analyze production harness and its regression fixture
+        run: clang-tidy-18 src/core/GameLoopHarness.cpp tests/GameLoopHarnessTests.cpp -- -std=c++17 -Isrc
