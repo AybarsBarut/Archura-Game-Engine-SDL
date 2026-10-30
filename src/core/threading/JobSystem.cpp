@@ -1,8 +1,13 @@
 #include "JobSystem.h"
 #include <iostream>
-#include <algorithm> // for std::max
+#include <utility>
 
 namespace Archura {
+
+#ifdef ARCHURA_JOB_SYSTEM_TESTS
+// Fault injection is linked only into the contract-test executable.
+namespace JobSystemTest { void AfterWorkerCreated(uint32_t workerCount); }
+#endif
 
 std::vector<std::thread> JobSystem::s_WorkerThreads;
 std::deque<JobSystem::Job> JobSystem::s_JobQueue;
@@ -10,19 +15,32 @@ std::mutex JobSystem::s_QueueMutex;
 std::condition_variable JobSystem::s_Condition;
 std::condition_variable JobSystem::s_IdleCondition;
 std::atomic<bool> JobSystem::s_Running = false;
+uint64_t JobSystem::s_Session = 0;
 std::atomic<uint32_t> JobSystem::s_ActiveJobs = 0;
 
 void JobSystem::Init() {
+    std::unique_lock<std::mutex> lock(s_QueueMutex);
     if (s_Running)
         return;
 
     const uint32_t numCores = std::thread::hardware_concurrency();
     const uint32_t numWorkers = numCores > 1 ? numCores - 1 : 1;
 
-    s_Running = true;
-
-    for (uint32_t i = 0; i < numWorkers; ++i) {
-        s_WorkerThreads.emplace_back(WorkerThread);
+    // Keep workers and submissions behind the mutex until creation succeeds.
+    try {
+        s_WorkerThreads.reserve(numWorkers);
+        for (uint32_t i = 0; i < numWorkers; ++i) {
+            s_WorkerThreads.emplace_back(WorkerThread);
+#ifdef ARCHURA_JOB_SYSTEM_TESTS
+            JobSystemTest::AfterWorkerCreated(i + 1);
+#endif
+        }
+        ++s_Session;
+        s_Running = true;
+    } catch (...) {
+        lock.unlock();
+        Shutdown();
+        throw;
     }
     
 #ifdef _DEBUG
@@ -31,10 +49,10 @@ void JobSystem::Init() {
 }
 
 void JobSystem::Shutdown() {
-    if (!s_Running && s_WorkerThreads.empty())
-        return;
-
-    s_Running = false;
+    {
+        std::lock_guard<std::mutex> lock(s_QueueMutex);
+        s_Running = false;
+    }
     
     // Wake up all threads
     s_Condition.notify_all();
@@ -49,14 +67,20 @@ void JobSystem::Shutdown() {
 }
 
 void JobSystem::Execute(const JobSystem::Job& job) {
-    if (!job || !s_Running)
-        return;
-
-    s_ActiveJobs++;
-    
+    if (!job) return;
+    uint64_t session;
     {
         std::lock_guard<std::mutex> lock(s_QueueMutex);
-        s_JobQueue.push_back(job);
+        if (!s_Running) return;
+        session = s_Session;
+    }
+    // User-defined copies may throw or block. Do not hold the queue mutex here.
+    Job queued(job);
+    {
+        std::lock_guard<std::mutex> lock(s_QueueMutex);
+        if (!s_Running || session != s_Session) return;
+        s_JobQueue.push_back(std::move(queued));
+        ++s_ActiveJobs;
     }
     
     s_Condition.notify_one();
@@ -101,7 +125,7 @@ void JobSystem::WorkerThread() {
                 return;
             }
             
-            job = s_JobQueue.front();
+            job = std::move(s_JobQueue.front());
             s_JobQueue.pop_front();
         }
         
@@ -114,7 +138,12 @@ void JobSystem::WorkerThread() {
             std::cerr << "[JobSystem] Job threw an unknown exception\n";
         }
         
-        s_ActiveJobs--;
+        // Release owned captures outside the mutex before publishing completion.
+        job = {};
+        {
+            std::lock_guard<std::mutex> lock(s_QueueMutex);
+            --s_ActiveJobs;
+        }
         s_IdleCondition.notify_all();
     }
 }

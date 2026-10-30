@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
 #include <vector>
 #include <thread>
 #include <atomic>
@@ -20,12 +21,19 @@ public:
         uint32_t groupIndex;
     };
 
+    // Init/Shutdown must be externally serialized and called outside worker jobs.
+    // Shutdown drains accepted work; concurrent Execute calls may be rejected.
     static void Init();
     static void Shutdown();
 
+    // Copies the callback into the queue, or ignores empty/stopped submissions.
+    // A failed copy/allocation propagates without accepting the job.
+    // A copy spanning a shutdown/restart cannot enter the new session.
     static void Execute(const Job& job);
     static void Dispatch(uint32_t jobCount, uint32_t groupSize, const std::function<void(JobDispatchArgs)>& job);
     
+    // Idle includes destruction of callback captures. Wait must not run in a job.
+    // Callers must separately synchronize producers to wait for a closed batch.
     static bool IsBusy();
     static void Wait();
 
@@ -39,6 +47,7 @@ private:
     static std::condition_variable s_Condition;
     static std::condition_variable s_IdleCondition;
     static std::atomic<bool> s_Running;
+    static uint64_t s_Session; // Protected by s_QueueMutex.
     static std::atomic<uint32_t> s_ActiveJobs; // Tracks jobs currently running + in queue
 };
 

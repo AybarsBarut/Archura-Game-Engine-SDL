@@ -607,6 +607,13 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME Archura.Core.JobSystem COMMAND ArchuraJobSystemTests)
+    add_test(NAME Archura.Core.JobSystem.EnqueueFailure COMMAND ArchuraJobSystemTests enqueue-failure)
+    add_test(NAME Archura.Core.JobSystem.WorkerCopy COMMAND ArchuraJobSystemTests worker-copy)
+    add_test(NAME Archura.Core.JobSystem.InitFailure COMMAND ArchuraJobSystemTests init-failure)
+    target_compile_definitions(ArchuraJobSystemTests PRIVATE ARCHURA_JOB_SYSTEM_TESTS=1)
+    set_tests_properties(Archura.Core.JobSystem Archura.Core.JobSystem.EnqueueFailure
+        Archura.Core.JobSystem.WorkerCopy Archura.Core.JobSystem.InitFailure
+        PROPERTIES LABELS "contract;jobs" TIMEOUT 30)
 
     add_executable(ArchuraProjectSerializerTests
         tests/ProjectSerializerTests.cpp
