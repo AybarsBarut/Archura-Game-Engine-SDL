@@ -47,6 +47,20 @@ ctest --preset validation-debug -R 'Archura.Core.JobSystem'
 ctest --preset validation-release -R 'Archura.Core.JobSystem'
 ```
 
+### Server configuration contracts
+
+`Archura.Network.ServerConfig` checks complete typed JSON, optional/unknown-field
+compatibility, failed-load/CLI preservation, override ordering, timeout boundaries,
+escaped-string/float round trips and failed-save preservation. The server process
+fixture `Archura.Network.ServerConfigProcess` checks that invalid files and options
+exit before listener startup; help and valid partial-config overrides still succeed.
+The process fixture uses isolated temporary directories and bounded subprocesses.
+
+```powershell
+ctest --preset validation-debug -R 'Archura.Network.ServerConfig'
+ctest --preset validation-release -R 'Archura.Network.ServerConfig'
+```
+
 Loops 4 & 5 extend `Archura.Core.ProjectSerializer` and
 `Archura.Core.GameSaveManager` to cover:
 - Aggregate `SceneReconstructionBudget` rejection for entity count, mesh vertex

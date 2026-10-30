@@ -61,6 +61,10 @@ struct ServerConfig {
      * @param argv Argument values
      */
     void ParseCommandLine(int argc, char** argv);
+
+    // Parses a candidate and commits only on success. Startup callers must check
+    // this result; the void wrapper remains for existing source compatibility.
+    bool TryParseCommandLine(int argc, char** argv);
     
     /**
      * @brief Validate configuration values

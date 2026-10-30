@@ -822,6 +822,13 @@ if(BUILD_TESTING)
     endif()
     get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME Archura.Network.ServerConfigProcess
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/ServerConfigProcessTests.py"
+                --server "$<TARGET_FILE:ArchuraServer>")
+        set_tests_properties(Archura.Network.ServerConfigProcess PROPERTIES
+            LABELS "network;integration" TIMEOUT 30 RUN_SERIAL TRUE)
+    endif()
     if(Python3_Interpreter_FOUND AND ARCHURA_SDL_NET_TARGET)
         add_test(NAME Archura.Network.Backpressure
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/network/NetworkBackpressureProcessTests.py"
