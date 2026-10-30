@@ -148,6 +148,33 @@ This skips the splash, renders 16 frames and verifies two actual Editor/Applicat
 Play/Stop cycles and shutdown. It opens an OpenGL window and needs a graphics
 session. Normal `--smoke-test` still checks startup/shutdown without entering Play.
 
+## Dedicated server configuration
+
+The dedicated server uses defaults unless `--config <file>` is supplied. An
+explicit missing or invalid file, an unknown option, a missing operand or an invalid
+CLI integer exits with status 1 before starting the network listener. CLI integers
+use decimal digits with an optional minus sign; leading `+`, whitespace, overflow
+and suffixes reject. Only one `--config` is allowed. Repeated ordinary overrides
+retain last-value precedence; CLI values override the file regardless of option order.
+String operands are consumed literally, even when they look like options.
+
+Config files are bounded to 1 MiB and parsed as complete JSON objects. Known fields
+require JSON numbers, booleans or strings of the declared type; quoted numbers and
+numeric booleans reject. Duplicate keys, malformed/trailing data and invalid Unicode
+reject. Missing fields retain existing settings; unknown fields remain ignored for
+compatibility, but their JSON must still be valid. Failed load or CLI parsing leaves
+all previous settings unchanged. Startup checks `TryParseCommandLine`; the legacy
+void `ParseCommandLine` wrapper remains available.
+
+Connection timeout must be finite and within 0.1–120 seconds. Client timeout must
+be finite, at least the connection timeout and at most 600 seconds. These bounds
+are checked before millisecond conversion. Existing authoritative gameplay still
+requires 128 Hz and the built-in `dm_arena`; password/RCON remain unsupported.
+
+`SaveToFile` validates before publishing, preserves float precision/JSON escaping,
+and uses the existing atomic writer with a `.bak` of the preceding file. Validation
+or backup failure leaves the destination intact.
+
 ## Standalone game packages (Loop 7)
 
 Build the engine, then create a new output directory from a game manifest:
