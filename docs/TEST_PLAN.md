@@ -23,6 +23,30 @@ down; unsupported-backend failure is also checked.
 
 ## Automated layers
 
+### JobSystem lifecycle contracts
+
+`Archura.Core.JobSystem` and its `EnqueueFailure`, `WorkerCopy` and `InitFailure`
+tests have 30-second timeouts. They cover rejected/empty submissions, callable-copy
+failures, worker move semantics, standard/unknown callback exceptions, capture
+cleanup before idle, multiple waiters, shutdown draining, producer races and restart.
+A gated copy verifies that work from a previous session cannot enter a restarted
+queue. A hook compiled only into the test target throws after the first worker is
+created to exercise partial-initialization cleanup without exhausting OS resources.
+The concurrent producer scenario is stress coverage, not a deterministic race proof.
+
+`Init` and `Shutdown` require external serialization and must run outside worker
+jobs. `Wait` must also run outside jobs and includes callback capture destruction;
+producers need separate synchronization when waiting for an entire batch.
+`Shutdown` joins workers, not external producers; join producers before releasing
+the state they capture. Callable
+copies run outside the queue mutex; stopped or old-session submissions are rejected
+at final admission. `Dispatch` grouping and runtime threading policy are unchanged.
+
+```powershell
+ctest --preset validation-debug -R 'Archura.Core.JobSystem'
+ctest --preset validation-release -R 'Archura.Core.JobSystem'
+```
+
 Loops 4 & 5 extend `Archura.Core.ProjectSerializer` and
 `Archura.Core.GameSaveManager` to cover:
 - Aggregate `SceneReconstructionBudget` rejection for entity count, mesh vertex
