@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import tempfile
 
@@ -35,6 +36,8 @@ def package_path(value):
     for part in value.split("/"):
         if part.endswith((".", " ")) or part.split(".")[0].upper() in devices:
             raise ValueError(f"Windows filename alias/device is not allowed: {value}")
+        if re.fullmatch(r"[^.]{1,6}~[0-9]+(?:\.[^.]{1,3})?", part):
+            raise ValueError(f"Windows short filename alias is not allowed: {value}")
     return PurePosixPath(value)
 
 
@@ -67,13 +70,17 @@ def load_manifest(path):
     seen = set()
     for name in files:
         value = package_path(name)
+        destination = name.casefold()
+        # Publication targets Windows: case aliases must not replace staged
+        # engine files, or use an engine-owned file/directory as a parent.
+        reserved = ("assets/shaders", "resources/scripts/net472/scriptcore.dll")
         if (value.parts[0] not in ("assets", "scenes", "Resources") or
-                name.startswith("assets/shaders/") or
+                any(destination == path or destination.startswith(path + "/") for path in reserved) or
                 (value.parts[0] == "Resources" and not name.startswith("Resources/Scripts/"))):
             raise ValueError(f"Reserved package destination: {name}")
-        if name.lower() in seen:
+        if destination in seen:
             raise ValueError(f"Duplicate content destination: {name}")
-        seen.add(name.lower())
+        seen.add(destination)
     if manifest["scene"] not in files:
         raise ValueError("Startup scene must be in content")
     root = path.resolve(strict=True).parent

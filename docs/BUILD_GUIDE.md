@@ -169,7 +169,11 @@ Paths use forward slashes relative to the manifest. Include the scene and every
 referenced model, texture, skybox face and audio clip in `content`; absolute paths,
 parent traversal, duplicate/case-colliding destinations and undeclared scene assets
 are rejected. Content belongs under `scenes/`, `assets/` or `Resources/Scripts/`;
-engine `assets/shaders/` are reserved and copied from the runtime build.
+Engine `assets/shaders` (including its subtree) and
+`Resources/Scripts/net472/ScriptCore.dll` are reserved and copied from the runtime
+build. Case aliases and paths beneath the reserved DLL are rejected before staging.
+DOS short-name-shaped path components (for example `SCRIPT~1.DLL`) are also
+rejected because Windows may resolve them to an existing runtime file.
 The scene uses the existing version-2 `.scene` schema and must contain exactly one
 entity named `Player`, matching `player_id`. That entity's world position initializes
 the camera spawn; its local rotation.x/y initialize camera pitch/yaw in degrees. Scene load errors fail startup rather than
@@ -184,9 +188,10 @@ systems, HUD and a small Escape pause/resume/quit menu. `--smoke-test` verifies
 this is not yet a smaller editor-free linkage target or an editor export button.
 
 Packages contain staged DLLs, engine shaders, Mono's 4.5 runtime profile and
-ScriptCore. A project may declare its own compiled
-`Resources/Scripts/net472/ScriptCore.dll` in content; separate user assemblies and
-arbitrary managed dependency graphs are not discovered automatically. Declared
+ScriptCore. Project content cannot replace the staged ScriptCore assembly. Other
+assemblies such as `Resources/Scripts/net472/GameScripts.dll` may be declared as
+content; separate user assemblies and arbitrary managed dependency graphs are not
+discovered automatically. Declared
 missing script classes fail startup. The sample has no configured managed script;
 its smoke test verifies Mono/ScriptCore initialization, not custom C# behavior.
 
