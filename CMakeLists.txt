@@ -27,6 +27,7 @@ option(ARCHURA_REQUIRE_SDL_NET "Fail configuration when SDL_net is unavailable" 
 option(ARCHURA_BUILD_STARTUP_TESTS "Enable startup smoke tests (requires a desktop/OpenGL context)" OFF)
 option(ARCHURA_LOOP_TESTS_ONLY "Build SDK-free game loop contracts only" OFF)
 option(ARCHURA_BUILD_LOOP_BENCHMARK "Build the synthetic game loop benchmark" OFF)
+option(ARCHURA_BUILD_RUNTIME "Build ArchuraEngine and stage its Mono runtime" ON)
 
 # Keep this path before SDL/OpenGL/Mono discovery. It tests the production loop,
 # not a duplicate implementation, on machines without the runtime SDKs.
@@ -43,6 +44,9 @@ if(ARCHURA_BUILD_LOOP_BENCHMARK)
 endif()
 if(ARCHURA_LOOP_TESTS_ONLY)
     return()
+endif()
+if(ARCHURA_BUILD_STARTUP_TESTS AND NOT ARCHURA_BUILD_RUNTIME)
+    message(FATAL_ERROR "ARCHURA_BUILD_STARTUP_TESTS requires ARCHURA_BUILD_RUNTIME=ON")
 endif()
 
 # Force MSVC Runtime to be Dynamic (DLL) to avoid LIBCMT conflicts
@@ -298,6 +302,7 @@ endif()
 # ============================================
 # CLIENT EXECUTABLE (ArchuraEngine)
 # ============================================
+if(ARCHURA_BUILD_RUNTIME)
 add_executable(${PROJECT_NAME} 
     src/main.cpp
     ${SHARED_SOURCES}
@@ -419,6 +424,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E ${ARCHURA_COPY_DIRECTORY_COMMAND}
     ${CMAKE_SOURCE_DIR}/Resources $<TARGET_FILE_DIR:${PROJECT_NAME}>/Resources
 )
+endif()
 
 # ============================================
 # DEDICATED SERVER EXECUTABLE (ArchuraServer)
@@ -453,7 +459,11 @@ if(ARCHURA_SDL_NET_TARGET)
     endif()
     target_compile_definitions(ArchuraNetClient PRIVATE ARCHURA_HAS_SDL_NET=1)
     # Executables must carry the transport backend; do not rely on developer PATH.
-    foreach(network_target IN ITEMS ArchuraEngine ArchuraServer ArchuraNetClient)
+    set(network_targets ArchuraServer ArchuraNetClient)
+    if(ARCHURA_BUILD_RUNTIME)
+        list(APPEND network_targets ArchuraEngine)
+    endif()
+    foreach(network_target IN LISTS network_targets)
         add_custom_command(TARGET ${network_target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${network_target}>/licenses"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_NET_BASE_PATH}/LICENSE.txt"
@@ -819,6 +829,8 @@ if(BUILD_TESTING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME Archura.Packaging.Contracts
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/PackageGameTests.py")
+        add_test(NAME Archura.Build.DependencyChecker
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/DependencyCheckTests.py")
     endif()
     get_property(archura_contract_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${archura_contract_tests} PROPERTIES LABELS "contract" TIMEOUT 30)

@@ -61,6 +61,22 @@ ctest --preset validation-debug -R 'Archura.Network.ServerConfig'
 ctest --preset validation-release -R 'Archura.Network.ServerConfig'
 ```
 
+### Build and dependency contracts
+
+`Archura.Build.DependencyChecker` exercises missing/modified SDK inputs, root
+escapes and untracked required files using temporary fixtures. CI additionally
+runs the real dependency preflight against the selected tracked SDKs. The
+`windows-contracts` graph contains 43 tests without a graphical runtime; normal
+desktop validation contains 52. Keep these acceptance scopes separate.
+
+Validate a clean checkout without the ignored Mono runtime, run Debug/Release
+native contract suites, check `BUILD_TESTING=OFF` registers zero, and verify the
+startup/runtime-OFF combination rejects. Run default desktop validation afterward
+to preserve existing startup, Play/Stop, graphical networking and package coverage.
+SDK-free loop tests on Windows/Linux exercise only the production harness. Hosted
+workflow results, native Linux runtime and full runtime dependency provisioning
+remain separate gates; local success must not be reported as hosted CI success.
+
 Loops 4 & 5 extend `Archura.Core.ProjectSerializer` and
 `Archura.Core.GameSaveManager` to cover:
 - Aggregate `SceneReconstructionBudget` rejection for entity count, mesh vertex

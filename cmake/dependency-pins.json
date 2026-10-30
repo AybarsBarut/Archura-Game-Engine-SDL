@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "scope": "Required entry points and binary SDK inputs; full vendor source is pinned by the Git commit, not this inventory. Digests identify current bundled bytes, not independently authenticated upstream provenance.",
+  "components": [
+    {
+      "name": "SDL2",
+      "version": "2.30.9",
+      "license_evidence": "external/SDL2/COPYING.txt"
+    },
+    {
+      "name": "SDL2_ttf",
+      "version": "2.22.0",
+      "license_evidence": "external/SDL2_ttf/SDL2_ttf-2.22.0/LICENSE.txt"
+    },
+    {
+      "name": "SDL2_net",
+      "version": "2.2.0",
+      "license_evidence": "external/SDL2_net/LICENSE.txt",
+      "provenance": "external/SDL2_net/PROVENANCE.txt"
+    },
+    {
+      "name": "ImGui",
+      "license_evidence": "external/imgui/LICENSE.txt"
+    },
+    {
+      "name": "glm",
+      "license_evidence": "external/glm/copying.txt"
+    },
+    {
+      "name": "fast_obj",
+      "license_evidence": "embedded in external/fast_obj/fast_obj.h"
+    },
+    {
+      "name": "stb",
+      "license_evidence": "embedded in external/stb/stb_image.h"
+    },
+    {
+      "name": "ufbx",
+      "license_evidence": null,
+      "note": "No standalone notice or embedded license statement found in the checked local header/source files; provenance inventory remains incomplete."
+    },
+    {
+      "name": "glad",
+      "license_evidence": null,
+      "note": "No standalone notice or embedded license statement found in the checked local header/source files; provenance inventory remains incomplete."
+    },
+    {
+      "name": "dr_wav",
+      "license_evidence": "embedded in external/dr_wav/dr_wav.h"
+    },
+    {
+      "name": "Mono",
+      "version": "6.12.0 (Visual Studio built mono)",
+      "license_evidence": null,
+      "note": "No standalone notice or exact build provenance recorded in this checkout. Runtime DLL is ignored/untracked and cannot be reproduced from Git alone."
+    }
+  ],
+  "files": [
+    {
+      "path": "external/SDL2/include/SDL.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/SDL2_ttf/SDL2_ttf-2.22.0/include/SDL_ttf.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/SDL2_net/include/SDL_net.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/glad/include/glad/glad.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/glm/glm/glm.hpp",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/imgui/imgui.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/stb/stb_image.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/ufbx/ufbx.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/fast_obj/fast_obj.h",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/SDL2/lib/x64/SDL2.lib",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "1018639d73cde0ce11afdada7dc4209b01fefa98f529b011ab6194191a5fd355"
+    },
+    {
+      "path": "external/SDL2/lib/x64/SDL2main.lib",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "24ee70dfc78921237c25c55034f86b2b6741fe6a313e9fa5ac9f9b3f3900ffd1"
+    },
+    {
+      "path": "external/SDL2/lib/x64/SDL2.dll",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "58f0a2af6653445b48e58ace6890fbe237bf76452c9743e800358d6b935ded64"
+    },
+    {
+      "path": "external/SDL2_ttf/SDL2_ttf-2.22.0/lib/x64/SDL2_ttf.lib",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "5cb2d9f85964ba8ff08642027db46e556cedf66283dcc8b945d4f35837da4b97"
+    },
+    {
+      "path": "external/SDL2_ttf/SDL2_ttf-2.22.0/lib/x64/SDL2_ttf.dll",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "fc99fd71fc6dfaa49568cd68c48fddb9075fee41ee6aaeb1d3c75daa1d537721"
+    },
+    {
+      "path": "external/SDL2_net/lib/x64/SDL2_net.lib",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "454ce666856b95d78c97f191b22fad8211ec4babe730f2c1536da91e3b5dceff"
+    },
+    {
+      "path": "external/SDL2_net/lib/x64/SDL2_net.dll",
+      "profiles": [
+        "windows-contracts",
+        "windows-runtime"
+      ],
+      "sha256": "7c62d48922180c4ebcbbae4a2a18209ea976e119c1677cfb56d3cb19d70409d4"
+    },
+    {
+      "path": "external/mono/include/mono-2.0/mono/jit/jit.h",
+      "profiles": [
+        "windows-runtime"
+      ]
+    },
+    {
+      "path": "external/mono/lib/mono-2.0-sgen.lib",
+      "profiles": [
+        "windows-runtime"
+      ],
+      "sha256": "a98b23c61f3553b768fb97d4d84ee0a52f71f339626148bb5af1af8688f7c689"
+    },
+    {
+      "path": "external/mono/bin/mono-2.0-sgen.dll",
+      "profiles": [
+        "windows-runtime"
+      ],
+      "sha256": "07a1debe6ced8e31fb944046eb6531d41969bae1f686cf49a13f06877d77d55d"
+    },
+    {
+      "path": "external/mono/lib/mono/4.5/mscorlib.dll",
+      "profiles": [
+        "windows-runtime"
+      ],
+      "sha256": "c7512c133808acb42e48b6c1b879ab6f3c988a9e7a83b6a80e75a9ff38b6e5cf"
+    },
+    {
+      "path": "Resources/Scripts/net472/ScriptCore.dll",
+      "profiles": [
+        "windows-runtime"
+      ],
+      "sha256": "97d33f8fb95bbf5a13650280507a6abccce36e5efb21282cd9983753f29cfa63"
+    },
+    {
+      "path": "external/dr_wav/dr_wav.h",
+      "profiles": [
+        "windows-runtime"
+      ]
+    }
+  ]
+}

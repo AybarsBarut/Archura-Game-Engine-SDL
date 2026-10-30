@@ -40,6 +40,17 @@
         "ARCHURA_REQUIRE_SDL_NET": "ON",
         "ARCHURA_BUILD_LOOP_BENCHMARK": "ON"
       }
+    },
+    {
+      "name": "windows-contracts",
+      "inherits": "windows-x64",
+      "displayName": "Windows native contracts / no graphical runtime",
+      "binaryDir": "${sourceDir}/build/windows-contracts",
+      "cacheVariables": {
+        "ARCHURA_BUILD_RUNTIME": "OFF",
+        "ARCHURA_BUILD_STARTUP_TESTS": "OFF",
+        "ARCHURA_REQUIRE_SDL_NET": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -76,6 +87,18 @@
     {
       "name": "validation-release",
       "configurePreset": "windows-validation",
+      "configuration": "Release",
+      "jobs": 4
+    },
+    {
+      "name": "contracts-debug",
+      "configurePreset": "windows-contracts",
+      "configuration": "Debug",
+      "jobs": 4
+    },
+    {
+      "name": "contracts-release",
+      "configurePreset": "windows-contracts",
       "configuration": "Release",
       "jobs": 4
     }
@@ -127,6 +150,28 @@
       "configuration": "Release",
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "contracts-debug",
+      "configurePreset": "windows-contracts",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "contracts-release",
+      "configurePreset": "windows-contracts",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
       }
     }
   ]
