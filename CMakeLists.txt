@@ -223,6 +223,7 @@ file(GLOB_RECURSE CLIENT_SOURCES
     "src/core/FrameTelemetry.cpp"
     "src/core/memory/MemoryTracker.cpp"
     "src/core/ProjectSerializer.cpp"
+    "src/core/ProjectSession.cpp"
     "src/core/GameSaveManager.cpp"
     "src/rendering/*.cpp"
     "src/input/*.cpp"
@@ -366,6 +367,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 if(ARCHURA_SDL_NET_TARGET)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${ARCHURA_SDL_NET_TARGET})
     target_compile_definitions(${PROJECT_NAME} PRIVATE ARCHURA_HAS_SDL_NET=1)
+endif()
+
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE shell32)
 endif()
 
 if(ARCHURA_OPENAL)
@@ -518,6 +523,10 @@ if(BUILD_TESTING)
     add_executable(ArchuraSceneViewportTests tests/SceneViewportTests.cpp)
     target_include_directories(ArchuraSceneViewportTests PRIVATE src external/glm)
     add_test(NAME Archura.Editor.SceneViewport COMMAND ArchuraSceneViewportTests)
+
+    add_executable(ArchuraProjectSessionTests tests/ProjectSessionTests.cpp src/core/ProjectSession.cpp)
+    target_include_directories(ArchuraProjectSessionTests PRIVATE src)
+    add_test(NAME Archura.Core.ProjectSession COMMAND ArchuraProjectSessionTests)
 
     add_executable(ArchuraSceneDocumentStateTests tests/SceneDocumentStateTests.cpp)
     target_include_directories(ArchuraSceneDocumentStateTests PRIVATE src)
@@ -866,6 +875,11 @@ if(BUILD_TESTING)
                 LABELS "startup;integration;network" TIMEOUT 60 RUN_SERIAL TRUE)
         endif()
         if(Python3_Interpreter_FOUND)
+            add_test(NAME Archura.Startup.ProjectSession
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/EditorProjectStartupTests.py"
+                    --engine "$<TARGET_FILE:ArchuraEngine>")
+            set_tests_properties(Archura.Startup.ProjectSession PROPERTIES
+                LABELS "startup;integration" TIMEOUT 150 RUN_SERIAL TRUE)
             add_test(NAME Archura.Startup.Failure
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/StartupFailureSmoke.py"
                     --engine "$<TARGET_FILE:ArchuraEngine>")

@@ -3,6 +3,7 @@
 #include "core/ResourceManager.h"
 #include "ecs/Component.h"
 #include "rendering/Mesh.h"
+#include "rendering/Texture.h"
 #include "game/AudioSource.h"
 #include "game/Weapon.h"
 #include "ecs/components/AudioSourceComponent.h"
@@ -14,6 +15,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <stdexcept>
 
 namespace {
 int failures = 0;
@@ -23,9 +26,145 @@ void Check(bool condition, const char* message) {
     std::cerr << "FAIL: " << message << '\n';
   }
 }
+
+void TestExplicitContentRoot() {
+  namespace fs = std::filesystem;
+  auto& resources = Archura::ResourceManager::Get();
+  struct RestoreState {
+    fs::path cwd = fs::current_path();
+    fs::path root = Archura::ResourceManager::Get().GetProjectRoot();
+    bool explicitRoot = Archura::ResourceManager::Get().HasExplicitContentRoot();
+    ~RestoreState() {
+      std::error_code error;
+      fs::current_path(cwd, error);
+      Archura::ResourceManager::Get().SwapProjectRoot(root, explicitRoot);
+    }
+  } restore;
+  struct TemporaryDirectory {
+    fs::path path;
+    TemporaryDirectory() {
+      const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+      for (unsigned attempt = 0; attempt != 64; ++attempt) {
+        auto candidate = fs::temp_directory_path() /
+            ("archura-explicit-root-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+        if (fs::create_directory(candidate)) { path = std::move(candidate); return; }
+      }
+      throw std::runtime_error("could not create explicit-root test directory");
+    }
+    ~TemporaryDirectory() {
+      std::error_code error;
+      fs::current_path(path.parent_path(), error);
+      fs::remove_all(path, error); // Only this exact, exclusively created fixture is owned.
+    }
+  } temporary;
+  const auto contentRoot = temporary.path / "workspace" / "content";
+  const auto sceneFolder = temporary.path / "workspace" / "scenes";
+  const auto wrongCwd = temporary.path / "unrelated";
+  const auto previousRoot = temporary.path / "previous";
+  const auto missingRoot = temporary.path / "missing-assets";
+  for (const auto& directory : {contentRoot, wrongCwd}) {
+    fs::create_directories(directory / "models");
+    fs::create_directories(directory / "textures");
+    std::ofstream model(directory / "models" / "fixture.obj", std::ios::binary);
+    model << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    std::ofstream texture(directory / "textures" / "fixture.ppm", std::ios::binary);
+    const int width = directory == contentRoot ? 2 : 1;
+    texture << "P6\n" << width << " 1\n255\n";
+    for (int pixel = 0; pixel != width; ++pixel) texture.write("\x01\x02\x03", 3);
+  }
+  fs::create_directories(sceneFolder);
+  fs::create_directory(previousRoot);
+  fs::create_directory(missingRoot);
+  const auto document = sceneFolder / "Main.gameproj";
+  {
+    std::ofstream scene(document, std::ios::binary);
+    scene << R"({"project":{"name":"explicit assets","version":"1"},"entities":[{"name":"fixture","has_mesh_renderer":true,"mesh_type":"obj","model_path":"models/fixture.obj","texture":"textures/fixture.ppm"}]})";
+  }
+  fs::current_path(wrongCwd);
+  resources.SetProjectRoot(previousRoot, true);
+  Archura::Scene scene;
+  scene.CreateEntity("original");
+  Archura::ProjectConfig config{"original config", "original version", "original scene"};
+  Check(Archura::ProjectSerializer::LoadProject(document.string(), config, &scene, contentRoot),
+        "explicit project loads relative OBJ and texture from an unrelated working directory");
+  Check(config.name == "explicit assets" && scene.GetEntities().size() == 1,
+        "explicit project commits scene and config");
+  auto* renderer = scene.GetEntities()[0]->GetComponent<Archura::MeshRenderer>();
+  Check(renderer && renderer->GetMesh() && renderer->GetTexture() && renderer->GetTexture()->GetWidth() == 2,
+        "explicit asset root wins over a valid conflicting working-directory texture");
+  Check(resources.GetProjectRoot() == fs::weakly_canonical(contentRoot) && resources.HasExplicitContentRoot(),
+        "successful explicit load commits its content root and resolution mode");
+  resources.SetProjectRoot(previousRoot, true);
+  const auto originalHandle = scene.GetEntities()[0]->GetHandle();
+  const auto originalName = config.name;
+  Check(!Archura::ProjectSerializer::LoadProject(document.string(), config, &scene, missingRoot),
+        "missing explicit project asset cannot fall back to document, old project or working directory");
+  Check(scene.GetEntities().size() == 1 && scene.IsAlive(originalHandle) && config.name == originalName,
+        "failed explicit load preserves scene generation and project config");
+  Check(resources.GetProjectRoot() == fs::weakly_canonical(previousRoot) && resources.HasExplicitContentRoot(),
+        "failed explicit load restores prior root and explicit resolution mode");
+  Check(resources.ResolveAssetPath("models/fixture.obj", contentRoot, true).empty(),
+        "authoritative root ignores a supplied document root with matching assets");
+  Check(resources.ResolveAssetPath("models/fixture.obj", contentRoot, false) == previousRoot / "models/fixture.obj",
+        "nonexistent explicit asset identity remains rooted in that project");
+  Check(resources.ResolveAssetPath((contentRoot / "models/fixture.obj").string(), {}, true) == contentRoot / "models/fixture.obj",
+        "explicit authoring continues to support absolute asset references");
+  const auto saveAs = temporary.path / "SaveAs.gameproj";
+  Check(Archura::ProjectSerializer::SaveProject(saveAs.string(), config, &scene, contentRoot),
+        "explicit Save As validates relative asset references against its content root");
+  Check(resources.GetProjectRoot() == fs::weakly_canonical(previousRoot) && resources.HasExplicitContentRoot(),
+        "successful explicit save restores the previous resolution context");
+  const auto readSaved = [&] {
+    std::ifstream file(saveAs, std::ios::binary);
+    std::ostringstream text; text << file.rdbuf(); return text.str();
+  };
+  const auto savedText = readSaved();
+  Check(!Archura::ProjectSerializer::SaveProject(saveAs.string(), config, &scene, missingRoot),
+        "explicit save rejects missing assets despite valid working-directory assets");
+  Check(readSaved() == savedText && scene.IsAlive(originalHandle),
+        "failed explicit save preserves the previous file and live scene handles");
+  Check(resources.GetProjectRoot() == fs::weakly_canonical(previousRoot) && resources.HasExplicitContentRoot(),
+        "failed explicit save restores previous resolution context");
+  Check(!Archura::ProjectSerializer::LoadProject(document.string(), config, &scene, temporary.path / "absent"),
+        "explicit serializer rejects a nonexistent content root");
+  Check(Archura::ProjectSerializer::LoadProject(document.string(), config, &scene),
+        "legacy scene load disables previous session's explicit root and retains working-directory fallback");
+  renderer = scene.GetEntities()[0]->GetComponent<Archura::MeshRenderer>();
+  Check(renderer && renderer->GetTexture() && renderer->GetTexture()->GetWidth() == 1 &&
+            resources.GetProjectRoot() == fs::weakly_canonical(sceneFolder) && !resources.HasExplicitContentRoot(),
+        "successful legacy load commits the document directory and ordinary legacy resolution");
+  const auto unicodeFolder = temporary.path / fs::u8path(u8"Proje-\u0130\u015f-\u6e38\u620f");
+  const auto unicodeDocument = unicodeFolder / fs::u8path(u8"Sahne-\u015e\u00e9-\u573a\u666f.gameproj");
+  fs::create_directory(unicodeFolder);
+  Archura::Scene unicodeSource;
+  auto* unicodeEntity = unicodeSource.CreateEntity(u8"Nesne-\u0130\u015f-\u6e38\u620f");
+  unicodeEntity->GetComponent<Archura::Transform>()->position = {2, 4, 6};
+  Archura::ProjectConfig unicodeConfig{"Native path project", "1", "MainScene"};
+  Check(Archura::ProjectSerializer::SaveProjectPath(unicodeDocument, unicodeConfig, &unicodeSource, unicodeFolder),
+        "native project path saves a scene below Turkish and CJK directory and file names");
+  Check(fs::is_regular_file(unicodeDocument), "native project save produces the exact Unicode file name");
+  Archura::Scene unicodeLoaded;
+  Archura::ProjectConfig unicodeLoadedConfig;
+  Check(Archura::ProjectSerializer::LoadProjectPath(unicodeDocument, unicodeLoadedConfig, &unicodeLoaded, unicodeFolder),
+        "native project path reopens a Unicode scene from unrelated working directory");
+  Check(unicodeLoadedConfig.name == unicodeConfig.name && unicodeLoaded.GetEntities().size() == 1 &&
+            unicodeLoaded.GetEntities()[0]->GetName() == unicodeEntity->GetName() &&
+            unicodeLoaded.GetEntities()[0]->GetComponent<Archura::Transform>()->position == glm::vec3(2, 4, 6),
+        "native Unicode path round trip retains authored data");
+  Check(resources.GetProjectRoot() == fs::weakly_canonical(unicodeFolder) && resources.HasExplicitContentRoot(),
+        "native Unicode scene load commits the native content-root identity");
+  Check(Archura::ProjectSerializer::SaveProjectPath(unicodeDocument, unicodeConfig, &unicodeSource),
+        "native path default save preserves the active explicit context");
+  auto unicodeBackup = unicodeDocument; unicodeBackup += ".bak";
+  Check(fs::is_regular_file(unicodeBackup), "native Unicode replacement save retains a native-path backup");
+  resources.ClearProjectRoot();
+  Check(resources.GetProjectRoot().empty() && !resources.HasExplicitContentRoot(),
+        "clearing a content root also clears explicit resolution mode");
+}
 } // namespace
 
 int main() {
+  TestExplicitContentRoot();
   const auto path = std::filesystem::temp_directory_path() /
                     "archura_project_serializer_test.json";
   std::error_code ec;

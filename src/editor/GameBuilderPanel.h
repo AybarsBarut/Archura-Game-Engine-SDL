@@ -30,6 +30,7 @@ public:
     void RefreshTextureList();
     void RefreshAudioList();
     void RefreshModelList();
+    void InvalidateAssets();
 
     const std::vector<std::string>& GetTextureFiles() const noexcept { return m_TextureFiles; }
     const std::vector<std::string>& GetAudioFiles() const noexcept { return m_AudioFiles; }

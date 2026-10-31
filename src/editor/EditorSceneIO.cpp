@@ -17,7 +17,7 @@ bool ValidateScenePath(const char* text, bool saving,
         error = "Enter a .gameproj file path.";
         return false;
     }
-    path = std::filesystem::path(text).lexically_normal();
+    path = std::filesystem::u8path(text).lexically_normal();
     if (saving && !path.has_extension()) path += ".gameproj";
     std::string extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
@@ -109,6 +109,10 @@ void Editor::RequestNewScene(Scene* scene) {
 void Editor::ExecuteDocumentAction(Scene* scene) {
     if (!m_Document.HasPending() || m_Document.NeedsDecision()) return;
     const auto action = m_Document.PendingAction();
+    if (action == SceneDocumentState::Action::OpenWorkspace || action == SceneDocumentState::Action::CreateWorkspace) {
+        ExecuteWorkspaceAction(scene);
+        return;
+    }
     const std::string target = m_Document.Target();
     if (action == SceneDocumentState::Action::Close) {
         m_CloseApproved = true;
@@ -127,6 +131,7 @@ void Editor::ExecuteDocumentAction(Scene* scene) {
     }
     m_Document.Cancel();
     if (success) {
+        if (action == SceneDocumentState::Action::OpenLegacy) BindProjectContext(std::nullopt);
         ResetDocument(scene, action == SceneDocumentState::Action::OpenProject ? target : std::string{});
         Log("[Open] " + target);
     } else {
@@ -146,7 +151,9 @@ void Editor::RequestSceneDialog(bool save) {
     m_RequestSceneDialog = true;
     m_ConfirmSceneAction = false;
     m_SceneIOError.clear();
-    const std::string initial = m_Document.Path().empty() ? "ArchuraProject.gameproj" : m_Document.Path();
+    const std::string initial = !m_Document.Path().empty() ? m_Document.Path()
+        : m_Project ? (m_Project->startScene.parent_path() / "Untitled.gameproj").u8string()
+        : "ArchuraProject.gameproj";
     std::snprintf(m_ScenePathBuffer, sizeof(m_ScenePathBuffer), "%s", initial.c_str());
 }
 
@@ -162,11 +169,14 @@ bool Editor::SaveSceneTo(Scene* scene, const std::string& target) {
             m_SceneIOError = "Save failed: this scene contains unsupported data or exceeds the document limit.";
             return false;
         }
-        const ProjectConfig config{path.stem().string(), "1.0", "MainScene"};
-        if (ProjectSerializer::SaveProject(path.string(), config, scene)) {
-            m_Document.Saved(std::move(snapshot), path.string());
+        const ProjectConfig config{path.stem().u8string(), "1.0", "MainScene"};
+        const bool saved = m_Project
+            ? ProjectSerializer::SaveProjectPath(path, config, scene, m_Project->contentRoot)
+            : ProjectSerializer::SaveProjectPath(path, config, scene);
+        if (saved) {
+            m_Document.Saved(std::move(snapshot), path.u8string());
             m_SceneIOError.clear();
-            Log("[Save] " + path.string());
+            Log("[Save] " + path.u8string());
             return true;
         }
         m_SceneIOError = "Save failed. Check permissions, assets and scene data; the previous file was retained.";
@@ -186,7 +196,7 @@ void Editor::SaveCurrentScene(Scene* scene) {
 }
 
 void Editor::DrawDocumentGuard(Scene* scene) {
-    if (m_Document.NeedsDecision() && !m_SceneDialogOpen && !m_RequestSceneDialog)
+    if (m_Document.NeedsDecision() && !m_SceneDialogOpen && !m_RequestSceneDialog && !m_ProjectDialogOpen && !m_RequestProjectDialog)
         ImGui::OpenPopup("Unsaved scene changes");
     if (ImGui::BeginPopupModal("Unsaved scene changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("Save changes to the current scene before continuing?");
@@ -206,7 +216,7 @@ void Editor::DrawDocumentGuard(Scene* scene) {
         }
         ImGui::EndPopup();
     }
-    if (!m_SceneDialogOpen && !m_RequestSceneDialog) ExecuteDocumentAction(scene);
+    if (!m_SceneDialogOpen && !m_RequestSceneDialog && !m_ProjectDialogOpen && !m_RequestProjectDialog) ExecuteDocumentAction(scene);
 }
 
 void Editor::DrawSceneDialog(Scene* scene) {
@@ -219,6 +229,7 @@ void Editor::DrawSceneDialog(Scene* scene) {
     if (!ImGui::BeginPopupModal("Scene file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
     ImGui::TextUnformatted(m_SceneDialogSave ? "Save scene project" : "Open scene project");
     ImGui::TextWrapped("Enter an absolute path or a path relative to the engine working directory.");
+    if (m_Project) ImGui::TextWrapped("This scene uses the active project's content root. Open Project switches project identity; Save As saves a scene copy.");
     ImGui::SetNextItemWidth(520);
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     if (ImGui::InputText("##ScenePath", m_ScenePathBuffer, sizeof(m_ScenePathBuffer))) {
@@ -239,7 +250,7 @@ void Editor::DrawSceneDialog(Scene* scene) {
                 if (ec) m_SceneIOError = "Cannot inspect the selected file: " + ec.message();
                 else if (m_SceneDialogSave && exists && !m_ConfirmSceneAction) m_ConfirmSceneAction = true;
                 else if (m_SceneDialogSave) {
-                    if (SaveSceneTo(scene, path.string())) {
+                    if (SaveSceneTo(scene, path.u8string())) {
                         m_SceneDialogOpen = false;
                         m_ConfirmSceneAction = false;
                         ImGui::CloseCurrentPopup();
@@ -247,7 +258,7 @@ void Editor::DrawSceneDialog(Scene* scene) {
                 } else {
                     m_SceneDialogOpen = false;
                     ImGui::CloseCurrentPopup();
-                    RequestOpenScene(scene, path.string());
+                    RequestOpenScene(scene, path.u8string());
                 }
             }
         } catch (const std::exception& error) {

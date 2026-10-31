@@ -72,9 +72,11 @@ std::string AudioSystem::ResolveAudioPath(const std::string& filename) {
             !resolvedPrefixed.empty()) {
             return resolvedPrefixed.string();
         }
+        if (ResourceManager::Get().HasExplicitContentRoot()) return {};
         return prefixed;
     }
 
+    if (ResourceManager::Get().HasExplicitContentRoot()) return {};
     return normalized;
 }
 

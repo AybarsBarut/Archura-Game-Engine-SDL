@@ -7,6 +7,7 @@
 #include "../core/DeveloperConsole.h"
 #include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
+#include "../core/ResourceManager.h"
 #include "../core/Window.h"
 #include "../core/memory/MemoryTracker.h"
 #include "../ecs/Component.h"
@@ -85,6 +86,8 @@ bool Editor::Init(Window *window) {
   if (std::filesystem::exists(m_BaseProjectDir / "assets"))
     m_BaseProjectDir /= "assets";
   m_CurrentProjectDir = m_BaseProjectDir;
+  m_EngineAssetDir = m_BaseProjectDir;
+  InitProjectSession();
 
   ApplyDarkTheme();
 
@@ -248,26 +251,32 @@ void Editor::RefreshAssetCache() {
   m_CachedTextureFiles.clear();
   m_CachedModelFiles.clear();
 
-  auto scanDir = [](const std::string &dir, std::vector<std::string> &out,
+  auto scanDir = [this](const std::filesystem::path &dir, std::vector<std::string> &out,
                     const auto &extCheck) {
-    if (!std::filesystem::exists(dir))
-      return;
-    for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-      if (!entry.is_regular_file())
-        continue;
-      std::string ext = entry.path().extension().string();
-      for (auto &ch : ext)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      if (extCheck(ext))
-        out.push_back(entry.path().filename().string());
+    std::error_code error;
+    if (dir.empty() || !std::filesystem::is_directory(dir, error)) return;
+    std::filesystem::directory_iterator entry(dir, error), end;
+    while (!error && entry != end) {
+      if (entry->is_regular_file(error)) {
+        try {
+          std::string ext = entry->path().extension().string();
+          for (auto &ch : ext)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+          if (extCheck(ext)) out.push_back(entry->path().filename().string());
+        } catch (const std::exception&) {
+          Log("[Assets] This legacy importer cannot represent the asset filename: " + entry->path().filename().u8string());
+        }
+      }
+      entry.increment(error);
     }
+    if (error) Log("[Assets] Cannot scan " + dir.u8string() + ": " + error.message());
   };
 
-  scanDir("assets/textures", m_CachedTextureFiles, [](const std::string &e) {
+  scanDir(ResourceManager::Get().ResolveAssetPath("assets/textures"), m_CachedTextureFiles, [](const std::string &e) {
     return e == ".jpg" || e == ".png" || e == ".tga" || e == ".bmp" ||
            e == ".jpeg";
   });
-  scanDir("assets/models", m_CachedModelFiles, [](const std::string &e) {
+  scanDir(ResourceManager::Get().ResolveAssetPath("assets/models"), m_CachedModelFiles, [](const std::string &e) {
     return e == ".obj" || e == ".fbx" || e == ".glb" || e == ".gltf";
   });
 
@@ -396,6 +405,7 @@ void Editor::DrawEditorUI(Scene *scene) {
   ImGui::EndDisabled();
   DrawDocumentGuard(scene);
   DrawSceneDialog(scene);
+  DrawProjectDialog(scene);
 }
 
 void Editor::Update(Scene *scene, float /*deltaTime*/, float /*fps*/) {
@@ -498,6 +508,15 @@ void Editor::DrawMenuBar(Scene *scene) {
   if (ImGui::BeginMainMenuBar()) {
     ImGui::BeginDisabled(HasPendingDocumentAction());
     if (ImGui::BeginMenu("File")) {
+      if (ImGui::MenuItem("New Project...", nullptr, false, !IsGameRunning())) RequestProjectDialog(true);
+      if (ImGui::MenuItem("Open Project...", nullptr, false, !IsGameRunning())) RequestProjectDialog(false);
+      if (ImGui::BeginMenu("Recent Projects", !IsGameRunning() && m_RecentProjects && !m_RecentProjects->Entries().empty())) {
+        for (const auto& path : m_RecentProjects->Entries()) {
+          if (ImGui::MenuItem(path.u8string().c_str())) RequestWorkspace(scene, path.u8string());
+        }
+        ImGui::EndMenu();
+      }
+      ImGui::Separator();
       if (ImGui::MenuItem("New Scene", "", false, !IsGameRunning())) RequestNewScene(scene);
       if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, !IsGameRunning())) RequestSceneDialog(false);
       if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !IsGameRunning())) SaveCurrentScene(scene);
@@ -559,8 +578,13 @@ void Editor::DrawMenuBar(Scene *scene) {
       }
       if (ImGui::BeginMenu("Load Model")) {
         for (const auto &fname : m_CachedModelFiles) {
-          if (ImGui::MenuItem(fname.c_str()))
-            SpawnEntity(scene, "Model", "assets/models/" + fname);
+          if (ImGui::MenuItem(fname.c_str())) {
+            try {
+              SpawnEntity(scene, "Model", ResourceManager::Get().ResolveAssetPath("assets/models/" + fname).string());
+            } catch (const std::exception& error) {
+              Log(std::string("[Assets] Model import failed: ") + error.what());
+            }
+          }
         }
         if (m_CachedModelFiles.empty())
           ImGui::TextDisabled("No models in assets/models");
@@ -577,7 +601,8 @@ void Editor::DrawMenuBar(Scene *scene) {
     }
 
     ImGui::EndDisabled();
-    ImGui::TextDisabled("%s%s", m_Document.Path().empty() ? "Untitled" : std::filesystem::path(m_Document.Path()).filename().string().c_str(), IsDocumentDirty() ? " *" : "");
+    if (m_Project) ImGui::TextDisabled("%s /", m_Project->name.c_str());
+    ImGui::TextDisabled("%s%s", m_Document.Path().empty() ? "Untitled" : std::filesystem::u8path(m_Document.Path()).filename().u8string().c_str(), IsDocumentDirty() ? " *" : "");
     ImGui::EndMainMenuBar();
   }
 }
@@ -635,8 +660,13 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
     ImGui::Separator();
     ImGui::TextDisabled("Models");
     for (const auto &fname : m_CachedModelFiles) {
-      if (ImGui::MenuItem(fname.c_str()))
-        SpawnEntity(scene, "Model", "assets/models/" + fname);
+      if (ImGui::MenuItem(fname.c_str())) {
+        try {
+          SpawnEntity(scene, "Model", ResourceManager::Get().ResolveAssetPath("assets/models/" + fname).string());
+        } catch (const std::exception& error) {
+          Log(std::string("[Assets] Model import failed: ") + error.what());
+        }
+      }
     }
     if (m_CachedModelFiles.empty())
       ImGui::TextDisabled("(none in assets/models)");
@@ -915,12 +945,16 @@ void Editor::DrawInspector(Scene *scene) {
         const bool isSel = (selTex == i);
         if (ImGui::Selectable(m_CachedTextureFiles[i].c_str(), isSel)) {
           selTex = i;
-          std::string p = "assets/textures/" + m_CachedTextureFiles[i];
-          std::string nm = std::filesystem::path(p).stem().string();
-          auto tex = TextureManager::Get().LoadShared(nm, p);
-          if (tex) {
-            mr->SetTextureAsset(std::move(tex));
-            Log("Texture: " + p);
+          try {
+            std::string p = ResourceManager::Get().ResolveAssetPath("assets/textures/" + m_CachedTextureFiles[i]).string();
+            std::string nm = std::filesystem::path(p).stem().string();
+            auto tex = TextureManager::Get().LoadShared(nm, p);
+            if (tex) {
+              mr->SetTextureAsset(std::move(tex));
+              Log("Texture: " + p);
+            }
+          } catch (const std::exception& error) {
+            Log(std::string("[Assets] Texture import failed: ") + error.what());
           }
         }
         if (isSel)
@@ -1123,6 +1157,10 @@ void Editor::DrawInspector(Scene *scene) {
 void Editor::DrawProjectPanel() {
   ImGuiWindowFlags window_flags = 0;
   ImGui::Begin("Project", nullptr, window_flags);
+  if (m_Project) {
+    ImGui::TextUnformatted(m_Project->name.c_str());
+    ImGui::TextWrapped("Content: %s", m_Project->contentRoot.u8string().c_str());
+  }
 
   if (m_CurrentProjectDir != m_BaseProjectDir) {
     if (ImGui::SmallButton("..")) {
@@ -1137,7 +1175,7 @@ void Editor::DrawProjectPanel() {
     m_ProjectDirectoryCache.Invalidate();
   }
   ImGui::SameLine();
-  ImGui::TextDisabled("%s", m_CurrentProjectDir.filename().string().c_str());
+  ImGui::TextDisabled("%s", m_CurrentProjectDir.filename().u8string().c_str());
 
 
   ImGui::Separator();
@@ -1146,7 +1184,7 @@ void Editor::DrawProjectPanel() {
   if (ImGui::InputTextWithHint("##AssetSearch", "Search assets", m_AssetFilter.InputBuf, IM_ARRAYSIZE(m_AssetFilter.InputBuf))) m_AssetFilter.Build();
   m_ProjectDirectoryCache.Update(m_CurrentProjectDir);
   const auto snapshot = m_ProjectDirectoryCache.GetSnapshot();
-  if (!snapshot) {
+  if (!snapshot || snapshot->directory != m_CurrentProjectDir) {
     ImGui::TextDisabled("Loading directory...");
     ImGui::End();
     return;
@@ -1757,7 +1795,7 @@ void Editor::DrawModelDirectory(Scene *scene,
   std::error_code ec;
   for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
     if (entry.is_directory(ec)) {
-      if (ImGui::BeginMenu(entry.path().filename().string().c_str())) {
+      if (ImGui::BeginMenu(entry.path().filename().u8string().c_str())) {
         DrawModelDirectory(scene, entry.path());
         ImGui::EndMenu();
       }
@@ -1766,8 +1804,10 @@ void Editor::DrawModelDirectory(Scene *scene,
       for (auto &c : ext)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       if (ext == ".obj" || ext == ".fbx" || ext == ".glb" || ext == ".gltf") {
-        if (ImGui::MenuItem(entry.path().filename().string().c_str()))
-          SpawnEntity(scene, "Model", entry.path().string());
+        if (ImGui::MenuItem(entry.path().filename().u8string().c_str())) {
+          try { SpawnEntity(scene, "Model", entry.path().string()); }
+          catch (const std::exception& error) { Log(std::string("[Assets] Model import failed: ") + error.what()); }
+        }
       }
     }
   }

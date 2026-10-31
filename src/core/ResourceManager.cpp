@@ -5,6 +5,7 @@
 #include "../rendering/Camera.h"
 #include <iostream>
 #include <system_error>
+#include <utility>
 
 namespace Archura {
 
@@ -13,14 +14,20 @@ ResourceManager& ResourceManager::Get() {
     return instance;
 }
 
-void ResourceManager::SetProjectRoot(const std::filesystem::path& rootPath) {
+void ResourceManager::SetProjectRoot(const std::filesystem::path& rootPath, bool explicitContentRoot) {
     if (rootPath.empty()) {
-        m_ProjectRoot.clear();
+        ClearProjectRoot();
         return;
     }
     std::error_code ec;
     const auto canonical = std::filesystem::weakly_canonical(rootPath, ec);
     m_ProjectRoot = ec ? rootPath.lexically_normal() : canonical;
+    m_ExplicitContentRoot = explicitContentRoot;
+}
+
+void ResourceManager::SwapProjectRoot(std::filesystem::path& rootPath, bool& explicitContentRoot) noexcept {
+    m_ProjectRoot.swap(rootPath);
+    std::swap(m_ExplicitContentRoot, explicitContentRoot);
 }
 
 bool ResourceManager::IsSafeAssetPath(std::string_view rawPath) noexcept {
@@ -57,6 +64,10 @@ std::filesystem::path ResourceManager::ResolveAssetPath(
     };
 
     if (inputPath.is_relative()) {
+        if (m_ExplicitContentRoot) {
+            const auto fromContent = (m_ProjectRoot / inputPath).lexically_normal();
+            return !requireExisting || existsRegular(fromContent) ? fromContent : std::filesystem::path{};
+        }
         if (!documentRoot.empty()) {
             const auto fromDoc = (documentRoot / inputPath).lexically_normal();
             if (existsRegular(fromDoc)) return fromDoc;

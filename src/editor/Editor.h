@@ -32,6 +32,7 @@ struct SDL_Window;
 #include "ProjectDirectoryCache.h"
 #include "InspectorTextState.h"
 #include "SceneDocumentState.h"
+#include "../core/ProjectSession.h"
 #include <chrono>
 
 namespace Archura {
@@ -51,6 +52,7 @@ class Texture;
  */
 class Editor {
     friend class EditorDocumentSmoke;
+    friend class EditorProjectSmoke;
 public:
     Editor();
     ~Editor();
@@ -135,11 +137,14 @@ public:
     void ResetDocument(Scene* scene, std::string path = {});
     void RefreshDocument(Scene* scene, bool force = false);
     bool IsDocumentDirty() const { return m_Document.IsDirty(); }
-    bool HasPendingDocumentAction() const { return m_Document.HasPending() || m_SceneDialogOpen || m_RequestSceneDialog; }
+    bool HasPendingDocumentAction() const { return m_Document.HasPending() || m_SceneDialogOpen || m_RequestSceneDialog || m_ProjectDialogOpen || m_RequestProjectDialog; }
     void RequestClose(Scene* scene);
     void RequestOpenScene(Scene* scene, std::string path, bool legacy = false);
     void RequestNewScene(Scene* scene);
     bool ConsumeCloseApproval();
+    const ProjectDescriptor* GetProjectDescriptor() const { return m_Project ? &*m_Project : nullptr; }
+    void RequestWorkspace(Scene* scene, std::string path, bool create = false, std::string name = {});
+    bool OpenStartupProject(Scene* scene, const std::filesystem::path& path);
 
 public: // ── Shared State (kept public for minimal refactor surface) ──────────
     Entity*   m_SelectedEntity = nullptr;
@@ -174,6 +179,11 @@ private:
     bool SaveSceneTo(Scene* scene, const std::string& path);
     void DrawDocumentGuard(Scene* scene);
     void ExecuteDocumentAction(Scene* scene);
+    void InitProjectSession();
+    void RequestProjectDialog(bool create);
+    void DrawProjectDialog(Scene* scene);
+    void ExecuteWorkspaceAction(Scene* scene);
+    void BindProjectContext(std::optional<ProjectDescriptor> project);
 
     // ── Panel Draw ───────────────────────────────────────────────────────────
     void DrawToolbar(Scene* scene);
@@ -210,6 +220,12 @@ private:
     bool m_SceneDialogSave = false;
     bool m_RequestSceneDialog = false;
     bool m_ConfirmSceneAction = false;
+    std::optional<ProjectDescriptor> m_Project;
+    std::unique_ptr<RecentProjects> m_RecentProjects;
+    std::filesystem::path m_EngineAssetDir;
+    bool m_ProjectDialogOpen = false, m_RequestProjectDialog = false, m_ProjectDialogCreate = false;
+    char m_ProjectPathBuffer[1024] = {}, m_ProjectNameBuffer[129] = "My Game";
+    std::string m_ProjectIOError, m_PendingProjectName;
     ImGuiTextFilter m_AssetFilter;
     ImGuiTextFilter m_HierarchyFilter;
     InspectorTextState m_InspectorText;

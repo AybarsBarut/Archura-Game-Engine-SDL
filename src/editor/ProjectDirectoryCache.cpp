@@ -72,14 +72,14 @@ void ProjectDirectoryCache::Worker() {
             while (!error && current != end) {
                 Entry entry;
                 entry.path = current->path();
-                entry.name = entry.path.filename().string();
+                entry.name = entry.path.filename().u8string();
                 entry.isDirectory = current->is_directory(error);
                 if (error) break;
                 result->entries.push_back(std::move(entry));
                 current.increment(error);
             }
             if (error) {
-                result->error = directory.string() + ": " + error.message();
+                result->error = directory.u8string() + ": " + error.message();
                 result->entries.clear();
             } else {
                 std::sort(result->entries.begin(), result->entries.end(),

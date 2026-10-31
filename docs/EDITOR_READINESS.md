@@ -60,7 +60,6 @@ itself was not run because its existing startup path performs Git update operati
 
 ## Remaining product work
 
-- Project creation/open/recent-project workflow and an explicit content root.
 - Asset import/reimport, searchable previews, dependency diagnostics and missing-asset repair.
 - Complete command history for creation, deletion, parenting and component changes.
   Existing transform undo is not general scene Undo/Redo.
@@ -131,3 +130,39 @@ Final Windows validation on this change: all-target Debug and Release builds
 passed; CTest passed 53/53 in Debug (33.18 s) and Release (32.58 s), including the
 native coordinator/SDL event fixture. Evidence is retained under ignored
 build/m1a-final-{debug,release}-{build,tests}.log and CTest JUnit outputs.
+
+## Project sessions — 2026-10-31
+
+File > New Project / Open Project / Recent Projects now operate on separate
+version-1 `.archproj` descriptors. Creation is exclusive, supplies default folders
+and an asset-free Player/Floor/Sun starter, and never overwrites an existing folder.
+Descriptor content and scene paths are canonical, relative and contained in the
+project. The active session owns project identity and the explicit content root;
+scene Save As remains a scene copy. Invalid metadata, missing assets and failed
+loads retain the previous scene, document path, dirty state and project root.
+Project switches invalidate asset caches and hide stale asynchronous browser data.
+
+Relative assets in explicit projects no longer fall back to another project's
+root, parent folders or the process CWD. Asset lists, audio and skybox loading use
+the same context. Absolute legacy authored asset paths remain supported; general
+asset confinement and importer/decode expansion budgets remain later work.
+Legacy scene documents can still be opened without project metadata. Recents are
+bounded and atomically persisted; corrupt preferences are reported and retained.
+
+`--project` supports native Unicode project/scene paths and resolves relative
+arguments against the caller's original CWD, then uses the executable folder for
+engine bootstrap. Actual native fixtures cover creation, guarded cancellation,
+starter Play/Stop, project switching, relative OBJ import with conflicting CWD
+files, missing-asset rollback, recents restart, Unicode scene Save As and legacy
+detachment. A separate process fixture covers Unicode project restart, relative
+CLI paths, preference corruption and invalid/conflicting launch options. Unicode
+project/browser paths are covered; full Unicode asset importer support is not.
+
+Windows all-target Debug and Release builds passed. CTest passed **55/55** in
+Debug (37.66 s) and Release (35.99 s). A separate native Debug UI run, with isolated
+recent-project preferences, verified New Project creation, three starter entities,
+project name/content-root display and directory listing, orderly exit, restart,
+and reopening that same project through Recent Projects. Metadata and recent-list
+JSON were inspected. Keyboard-only and full Unicode asset-import acceptance are
+not claimed. Evidence: ignored build/m1b-final-*-{build,tests}.log, JUnit outputs,
+build/m1b-ui.log, build/m1b-ui-restart.log and isolated test project/preferences.

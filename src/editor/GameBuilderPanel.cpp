@@ -12,10 +12,31 @@
 
 #include <imgui.h>
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 
 namespace Archura {
+namespace {
+std::filesystem::path AssetScanRoot(const char* relativePath) {
+    auto& resources = ResourceManager::Get();
+    const auto resolved = resources.ResolveAssetPath(relativePath);
+    if (!resolved.empty() || resources.HasExplicitContentRoot()) return resolved;
+    return std::filesystem::path(relativePath);
+}
+
+std::optional<std::string> LegacyAssetFilename(const std::filesystem::path& path) {
+    try {
+        return path.filename().string();
+    } catch (const std::exception&) {
+        // Keep the importer's existing byte identity. UTF-8 project browsing is
+        // separate from import APIs that still require a native narrow path.
+        std::cout << "[GameBuilder] Skipped an asset filename that the legacy importer cannot represent.\n";
+        return std::nullopt;
+    }
+}
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Draw – ana giriş noktası
@@ -357,8 +378,11 @@ void GameBuilderPanel::DrawAudioTab() {
         const std::string& audioFile = m_AudioFiles[m_SelectedAudioIdx];
         ImGui::Text("Secilen: %s", audioFile.c_str());
         if (ImGui::Button("Ses Cal (Test)", ImVec2(-1, 36))) {
-            AudioSystem::Get().PlayOneShot(audioFile);
-            std::cout << "[GameBuilder] Ses caliniyor: " << audioFile << std::endl;
+            const auto resolved = ResourceManager::Get().ResolveAssetPath("assets/audio/" + audioFile);
+            if (!resolved.empty()) {
+                AudioSystem::Get().PlayOneShot(resolved.string());
+                std::cout << "[GameBuilder] Ses caliniyor: " << audioFile << std::endl;
+            }
         }
     }
 }
@@ -366,41 +390,50 @@ void GameBuilderPanel::DrawAudioTab() {
 // ---------------------------------------------------------------------------
 // Refresh Helpers
 // ---------------------------------------------------------------------------
+void GameBuilderPanel::InvalidateAssets() {
+    m_TextureFiles.clear();
+    m_AudioFiles.clear();
+    m_ModelFiles.clear();
+    m_ActiveModelDir = "assets/objects";
+    m_SelectedTextureIdx = m_SelectedAudioIdx = -1;
+    m_TexturesDirty = m_AudioDirty = m_ModelsDirty = true;
+}
+
 void GameBuilderPanel::RefreshTextureList() {
     m_TextureFiles.clear();
-    const std::filesystem::path dir =
-        ResourceManager::Get().ResolveAssetPath("assets/textures");
-    const std::filesystem::path scanRoot =
-        dir.empty() ? std::filesystem::path("assets/textures") : dir;
+    const auto scanRoot = AssetScanRoot("assets/textures");
+    if (scanRoot.empty()) return;
     std::error_code ec;
     if (!std::filesystem::exists(scanRoot, ec)) return;
     for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
         if (!entry.is_regular_file(ec)) continue;
-        std::string ext = entry.path().extension().string();
+        const auto name = LegacyAssetFilename(entry.path());
+        if (!name) continue;
+        std::string ext = std::filesystem::path(*name).extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" ||
             ext == ".tga" || ext == ".bmp") {
-            m_TextureFiles.push_back(entry.path().filename().string());
+            m_TextureFiles.push_back(*name);
         }
     }
 }
 
 void GameBuilderPanel::RefreshAudioList() {
     m_AudioFiles.clear();
-    const std::filesystem::path dir =
-        ResourceManager::Get().ResolveAssetPath("assets/audio");
-    const std::filesystem::path scanRoot =
-        dir.empty() ? std::filesystem::path("assets/audio") : dir;
+    const auto scanRoot = AssetScanRoot("assets/audio");
+    if (scanRoot.empty()) return;
     std::error_code ec;
     if (!std::filesystem::exists(scanRoot, ec)) return;
     for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
         if (!entry.is_regular_file(ec)) continue;
-        std::string ext = entry.path().extension().string();
+        const auto name = LegacyAssetFilename(entry.path());
+        if (!name) continue;
+        std::string ext = std::filesystem::path(*name).extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") {
-            m_AudioFiles.push_back(entry.path().filename().string());
+            m_AudioFiles.push_back(*name);
         }
     }
 }
@@ -410,20 +443,20 @@ void GameBuilderPanel::RefreshModelList() {
     m_ActiveModelDir = "assets/objects";
     std::error_code ec;
 
-    auto collectModels = [&](const std::string& relativeDir) -> bool {
-        const std::filesystem::path resolvedDir =
-            ResourceManager::Get().ResolveAssetPath(relativeDir);
-        const std::filesystem::path scanRoot =
-            resolvedDir.empty() ? std::filesystem::path(relativeDir) : resolvedDir;
+    auto collectModels = [&](const char* relativeDir) -> bool {
+        const auto scanRoot = AssetScanRoot(relativeDir);
+        if (scanRoot.empty()) return false;
         if (!std::filesystem::exists(scanRoot, ec)) {
             return false;
         }
         std::vector<std::string> found;
         for (const auto& entry : std::filesystem::directory_iterator(scanRoot, ec)) {
             if (!entry.is_regular_file(ec)) continue;
-            std::string ext = entry.path().extension().string();
+            const auto name = LegacyAssetFilename(entry.path());
+            if (!name) continue;
+            std::string ext = std::filesystem::path(*name).extension().string();
             if (ext == ".obj" || ext == ".OBJ") {
-                found.push_back(entry.path().filename().string());
+                found.push_back(*name);
             }
         }
         if (found.empty()) {

@@ -1,6 +1,7 @@
 #include "Skybox.h"
 #include "RenderThread.h"
 #include "../core/Logger.h"
+#include "../core/ResourceManager.h"
 #include <glad/glad.h>
 #include <vector>
 #include <iostream>
@@ -148,7 +149,10 @@ bool Skybox::LoadCubemap(const std::vector<std::string>& faces) {
     for (unsigned int i = 0; i < faces.size(); i++)
     {
         int width = 0, height = 0, nrChannels = 0;
-        unsigned char *data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
+        const std::string facePath = ResourceManager::Get().HasExplicitContentRoot()
+            ? ResourceManager::Get().ResolveAssetPath(faces[i]).string() : faces[i];
+        unsigned char *data = facePath.empty() ? nullptr
+            : stbi_load(facePath.c_str(), &width, &height, &nrChannels, 0);
         if (data && width > 0 && height > 0 && nrChannels >= 1 && nrChannels <= 4 &&
             (i == 0 || (width == expectedWidth && height == expectedHeight)))
         {
@@ -169,10 +173,13 @@ bool Skybox::LoadCubemap(const std::vector<std::string>& faces) {
             std::cout << "[ERROR] Cubemap texture failed to load: " << faces[i] << std::endl;
             // Print absolute path to help user debug
             try {
-                std::filesystem::path p = std::filesystem::absolute(faces[i]);
-                std::cout << "        Tried looking at absolute path: " << p.string() << std::endl;
+                if (!facePath.empty()) {
+                    std::filesystem::path p = std::filesystem::absolute(facePath);
+                    std::cout << "        Tried looking at absolute path: " << p.string() << std::endl;
+                }
             } catch(...) {}
-            std::cout << "        Reason: " << stbi_failure_reason() << std::endl;
+            std::cout << "        Reason: " << (facePath.empty()
+                ? "Asset is unavailable in the active project." : stbi_failure_reason()) << std::endl;
             stbi_image_free(data);
             loaded = false;
             break;
