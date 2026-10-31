@@ -64,7 +64,7 @@ itself was not run because its existing startup path performs Git update operati
 - Asset import/reimport, searchable previews, dependency diagnostics and missing-asset repair.
 - Complete command history for creation, deletion, parenting and component changes.
   Existing transform undo is not general scene Undo/Redo.
-- Unsaved-change tracking, recovery/autosave and consistent destructive-action prompts.
+- Recovery/autosave and explicit project session identity; document guards are implemented below.
 - Integrated standalone export and a clean-machine package acceptance run.
 - Complete native authoring coverage, especially keyboard focus, terrain tools, asset errors and small/high-DPI windows.
 
@@ -86,3 +86,48 @@ The Scene view currently captures the full-resolution rendered backbuffer into a
 GPU texture before drawing ImGui. This avoids CPU readback, but still adds a GPU
 copy and renders at window resolution; it is not a viewport-sized render target or
 a measured performance improvement. A target-sized framebuffer is follow-up work.
+
+## Scene document guard — 2026-10-31
+
+The editor tracks authored changes against an exact, bounded snapshot from the
+existing scene codec. It polls in Edit mode every 250 ms and checks immediately
+before Save, Play and destructive requests. The menu shows the document name and
+an asterisk for unsaved changes. Active name/script drafts are committed before
+these checks without truncating untouched long source strings.
+
+File > New Scene, Open Scene and Exit share Save / Discard / Cancel decisions.
+New Scene retains engine-owned bootstrap entities. Main-window SDL close and
+SDL_QUIT, both consoles' quit aliases, and legacy loads from the console and pause
+menu use the same guard. Secondary-window close events do not quit the editor.
+Pending decisions keep the editor visible and prevent Play and authoring input.
+Save As owns its path separately from a queued load target. Failed saves and loads
+preserve the current document; cancelling Save As also cancels the pending action.
+Legacy .scene saves omit engine entities and do not mark the .gameproj document clean.
+
+Play freezes the authored dirty state; Stop restores authored contents before a
+close/load decision. A rejected Stop prevents the destructive action. Runtime-only
+changes do not become authored edits. Unsupported codec data (including deformed
+meshes without a reconstruction recipe) is conservatively dirty and cannot be
+made clean by a failed save. This adds no persistence support for such geometry.
+The comparison retains at most 32 MiB of entity text; it is CPU serialization,
+not a measured authoring-performance improvement. Autosave/recovery and an explicit
+project/content-root workflow remain separate work.
+Saving also rejects complete project files above the loader's 32 MiB limit,
+including metadata and the JSON wrapper, before replacing an existing file.
+
+Coverage includes a pure document-state test, actual codec snapshot and inspector
+draft regressions, and a native coordinator fixture within Startup.PlayStop. The
+native fixture covers real save failures, Save As target retention, failed and
+successful opens, New Scene, clean/dirty Play–Stop, and synthetic SDL window/quit
+events through Application input. It does not simulate modal button clicks.
+
+A separate native Debug UI run verified File > Exit > Cancel, Exit > Save > Save As
+> Cancel (both preserve the edited name), toolbar Save to a chosen .gameproj,
+JSON verification of the edited name, removal of the dirty marker, and clean
+File > Exit. Keyboard-only Ctrl+S/Alt+F4 injection was inconclusive and is not
+claimed as acceptance. Broader keyboard, DPI and tool coverage remains open.
+
+Final Windows validation on this change: all-target Debug and Release builds
+passed; CTest passed 53/53 in Debug (33.18 s) and Release (32.58 s), including the
+native coordinator/SDL event fixture. Evidence is retained under ignored
+build/m1a-final-{debug,release}-{build,tests}.log and CTest JUnit outputs.

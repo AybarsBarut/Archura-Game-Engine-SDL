@@ -12,6 +12,10 @@
 #include <sstream>
 
 namespace Archura {
+namespace {
+constexpr size_t MaxProjectBytes = 32u * 1024u * 1024u;
+}
+
 std::string ProjectSerializer::EscapeJson(std::string_view value) { return Serialization::Escape(value); }
 
 bool ProjectSerializer::SaveProject(const std::string& path, const ProjectConfig& config, Scene* scene) {
@@ -28,6 +32,9 @@ bool ProjectSerializer::SaveProject(const std::string& path, const ProjectConfig
     // Reject NaN/infinity and invalid UTF-8 before replacing a previous save.
     Serialization::Json validation;
     const std::string content = file.str();
+    // The complete document, including its project metadata and JSON wrapper,
+    // must fit the same bound enforced when reopening it.
+    if (content.size() > MaxProjectBytes) return false;
     const std::filesystem::path docRoot = std::filesystem::path(path).parent_path();
     return Serialization::JsonParser(content).Parse(validation) &&
         GameSaveManager::LoadEntities(validation, scene, false, true, docRoot) &&
@@ -39,7 +46,7 @@ bool ProjectSerializer::LoadProject(const std::string& path, ProjectConfig& outC
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return false;
     const auto size = file.tellg();
-    if (size <= 0 || size > 32 * 1024 * 1024) return false;
+    if (size <= 0 || size > static_cast<std::streamoff>(MaxProjectBytes)) return false;
     std::string content(static_cast<size_t>(size), '\0');
     file.seekg(0); if (!file.read(content.data(), size)) return false;
     Serialization::Json root;

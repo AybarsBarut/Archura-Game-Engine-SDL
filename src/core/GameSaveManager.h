@@ -75,6 +75,8 @@ public:
     // Dosya adı oluştur (isimden güvenli dosya adı türet)
     // Common scene codec used by project and legacy .scene files.
     static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem);
+    // Read-only observers can suppress repeated diagnostics without changing the codec.
+    static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem, bool diagnostics);
     static bool LoadEntities(const Serialization::Json& root,
                              Scene* scene,
                              bool keepSystem,

@@ -2,6 +2,7 @@
 #include "core/ResourceManager.h"
 #include "core/AudioSystem.h"
 #include "editor/GameBuilderPanel.h"
+#include "editor/SceneDocumentSnapshot.h"
 #include "ecs/Entity.h"
 #include "rendering/Camera.h"
 #include "rendering/Mesh.h"
@@ -12,6 +13,7 @@
 #include "game/Weapon.h"
 #include <filesystem>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -92,9 +94,75 @@ void WriteGrayscaleBMP(const std::filesystem::path& path,
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
 }
+
+void TestSceneDocumentSnapshot() {
+    Archura::Scene scene;
+    auto* parent = scene.CreateEntity("Parent");
+    auto* child = scene.CreateEntity("Child");
+    auto* transform = child->GetComponent<Archura::Transform>();
+    transform->position = {1, 2, 3};
+    const auto baseline = Archura::CaptureSceneDocument(&scene);
+    Check(baseline.has_value(), "supported authored scene has a document snapshot");
+    Check(Archura::CaptureSceneDocument(&scene) == baseline, "unchanged snapshot is stable");
+
+    child->SetName("Renamed");
+    Check(Archura::CaptureSceneDocument(&scene) != baseline, "name edit changes document snapshot");
+    child->SetName("Child");
+    transform->position.x = std::nextafter(1.0f, 2.0f);
+    Check(Archura::CaptureSceneDocument(&scene) != baseline,
+          "one float step changes document snapshot without decimal rounding loss");
+    transform->position.x = 1;
+    Check(child->TrySetParent(parent), "snapshot test hierarchy edit succeeds");
+    Check(Archura::CaptureSceneDocument(&scene) != baseline, "parent edit changes document snapshot");
+    child->TrySetParent(nullptr);
+    auto* script = child->AddComponent<Archura::ScriptComponent>();
+    script->className = "Gameplay.Draft";
+    Check(Archura::CaptureSceneDocument(&scene) != baseline, "component addition changes document snapshot");
+    child->RemoveComponent<Archura::ScriptComponent>();
+    Check(Archura::CaptureSceneDocument(&scene) == baseline,
+          "restoring authored values returns the exact baseline snapshot");
+
+    parent->SetOwnership(Archura::EntityOwnership::Engine);
+    const auto engineBaseline = Archura::CaptureSceneDocument(&scene);
+    parent->SetName("Changed bootstrap entity");
+    Check(Archura::CaptureSceneDocument(&scene) != engineBaseline,
+          "full project snapshot includes engine-owned entity edits");
+    if (baseline) {
+        // The bound includes the complete output; exactly fitting output succeeds.
+        parent->SetOwnership(Archura::EntityOwnership::Authored);
+        parent->SetName("Parent");
+        Check(Archura::CaptureSceneDocument(&scene, baseline->size()) == baseline,
+              "snapshot accepts output at the exact size bound");
+        Check(!Archura::CaptureSceneDocument(&scene, baseline->size() - 1),
+              "snapshot rejects output exceeding its size bound");
+    }
+    Check(!Archura::CaptureSceneDocument(&scene, 0), "nonempty scene rejects zero snapshot bound");
+    Check(!Archura::CaptureSceneDocument(nullptr), "null scene snapshot remains unknown");
+
+    // Mesh creation has its own no-GL-owner diagnostics in this CPU fixture;
+    // capture only the document polling path below.
+    const auto primitive = Archura::Mesh::CreateCubeShared();
+    std::ostringstream diagnostics;
+    auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
+    struct Unsupported final : Archura::Component {};
+    child->AddComponent<Unsupported>();
+    const auto unsupported = Archura::CaptureSceneDocument(&scene);
+    child->RemoveComponent<Unsupported>();
+    auto* mesh = child->AddComponent<Archura::MeshRenderer>();
+    mesh->SetMeshAsset(primitive);
+    const auto supportedMesh = Archura::CaptureSceneDocument(&scene);
+    mesh->GetMesh()->GetVertices();
+    const auto editedMesh = Archura::CaptureSceneDocument(&scene);
+    std::cerr.rdbuf(previous);
+    Check(!unsupported, "unsupported component snapshot is unknown rather than falsely clean");
+    Check(supportedMesh.has_value(), "primitive mesh recipe can be compared without loading assets");
+    Check(!editedMesh, "invalidated mesh recipe snapshot remains unknown");
+    Check(diagnostics.str().empty(), "document polling does not spam codec diagnostics");
+}
 } // namespace
 
 int main() {
+    TestSceneDocumentSnapshot();
     const auto original = std::filesystem::current_path();
     const auto work = std::filesystem::temp_directory_path() /
                       ("archura_save_tests_" +

@@ -31,6 +31,23 @@ int main() {
   std::error_code ec;
   std::filesystem::remove(path, ec);
 
+  {
+    const std::string sentinel = "previous project must survive an oversized save";
+    {
+      std::ofstream previous(path, std::ios::binary);
+      previous << sentinel;
+    }
+    Archura::Scene emptyScene("oversized save source");
+    Archura::ProjectConfig oversized{std::string(32u * 1024u * 1024u, 'N'), "1.0", "MainScene"};
+    Check(!Archura::ProjectSerializer::SaveProject(path.string(), oversized, &emptyScene),
+          "save rejects metadata plus JSON wrapper exceeding the complete project load limit");
+    std::ifstream retained(path, std::ios::binary);
+    std::ostringstream retainedText;
+    retainedText << retained.rdbuf();
+    Check(retainedText.str() == sentinel, "oversized project save preserves the previous file");
+    Check(emptyScene.GetEntities().empty(), "oversized project save leaves its source scene unchanged");
+  }
+
   Archura::Scene source("source");
   auto* entity = source.CreateEntity("quoted \"entity\"");
   entity->SetOwnership(Archura::EntityOwnership::Engine);
