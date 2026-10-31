@@ -528,7 +528,10 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
-      if (ImGui::MenuItem("Undo Transform", "Ctrl+Z", false, !IsGameRunning())) UndoLastAction(scene);
+      if (ImGui::MenuItem("Undo Transform", "Ctrl+Z", false,
+                          !IsGameRunning() && scene && m_UndoHistory.CanUndo(*scene))) UndoLastAction(scene);
+      if (ImGui::MenuItem("Redo Transform", "Ctrl+Shift+Z / Ctrl+Y", false,
+                          !IsGameRunning() && scene && m_UndoHistory.CanRedo(*scene))) RedoLastAction(scene);
       ImGui::Separator();
       if (ImGui::MenuItem("Copy Entity", "Ctrl+C", false, m_SelectedEntity != nullptr)) CopySelected();
       if (ImGui::MenuItem("Paste Entity", "Ctrl+V", false, m_Clipboard.valid && !IsGameRunning())) PasteClipboard(scene);
@@ -2190,16 +2193,34 @@ void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::PushUndoSnapshot(Entity *entity) {
-  if (entity) m_UndoHistory.Capture(*entity);
+  if (entity && !IsGameRunning() && !HasPendingDocumentAction()) m_UndoHistory.Capture(*entity);
 }
 
 void Editor::UndoLastAction(Scene *scene) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;
+  m_GizmoActive = GizmoOp::None;
+  m_GizmoHovered = GizmoOp::None;
+  if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
   Entity* restored = scene ? m_UndoHistory.Undo(*scene) : nullptr;
   if (restored) {
     SetSelectedEntity(restored);
     Log("[Undo] Geri alindi: " + restored->GetName());
   } else {
     Log("[Undo] No live transform to restore.");
+  }
+}
+
+void Editor::RedoLastAction(Scene *scene) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;
+  m_GizmoActive = GizmoOp::None;
+  m_GizmoHovered = GizmoOp::None;
+  if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
+  Entity* restored = m_UndoHistory.Redo(*scene);
+  if (restored) {
+    SetSelectedEntity(restored);
+    Log("[Redo] Restored transform: " + restored->GetName());
+  } else {
+    Log("[Redo] No live transform to restore.");
   }
 }
 
@@ -2322,8 +2343,12 @@ void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
   if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_O)) RequestSceneDialog(false);
 
   // Ctrl+Z – Undo
-  if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_Z))
-    UndoLastAction(scene);
+  if (!m_ObjectTool.IsOpen() && ctrl && input->IsKeyJustPressed(SDL_SCANCODE_Z)) {
+    const bool shift = input->IsKeyDown(SDL_SCANCODE_LSHIFT) || input->IsKeyDown(SDL_SCANCODE_RSHIFT);
+    if (shift) RedoLastAction(scene); else UndoLastAction(scene);
+  } else if (!m_ObjectTool.IsOpen() && ctrl && input->IsKeyJustPressed(SDL_SCANCODE_Y)) {
+    RedoLastAction(scene);
+  }
 
   // Ctrl+C – Copy
   if (ctrl && input->IsKeyJustPressed(SDL_SCANCODE_C))

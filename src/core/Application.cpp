@@ -34,6 +34,7 @@
 #include "editor/Editor.h"
 #include "editor/EditorDocumentSmoke.h"
 #include "editor/EditorProjectSmoke.h"
+#include "editor/EditorHistorySmoke.h"
 
 #include "core/GameSaveManager.h"
 #include "core/SerializationJson.h"
@@ -944,6 +945,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
       throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
     EditorDocumentSmoke::Run(*m_Editor, *this, m_Scene.get());
     EditorProjectSmoke::Run(*m_Editor, *this, m_Scene.get());
+    EditorHistorySmoke::Run(*m_Editor, *this, m_Scene.get());
     smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
   }
   std::string networkProbeID;

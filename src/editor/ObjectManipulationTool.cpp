@@ -152,7 +152,7 @@ void ObjectManipulationTool::OnSceneGUI(
   }
 
   // Hotkeys
-  if (ImGui::IsKeyPressed(ImGuiKey_Z) && ImGui::GetIO().KeyCtrl) {
+  if (ImGui::IsKeyPressed(ImGuiKey_Z) && ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift) {
     Undo();
   }
 }

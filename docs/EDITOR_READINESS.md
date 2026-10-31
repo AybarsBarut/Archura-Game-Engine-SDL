@@ -62,7 +62,7 @@ itself was not run because its existing startup path performs Git update operati
 
 - Asset import/reimport, searchable previews, dependency diagnostics and missing-asset repair.
 - Complete command history for creation, deletion, parenting and component changes.
-  Existing transform undo is not general scene Undo/Redo.
+  Existing transform Undo/Redo is not general scene command history.
 - Recovery/autosave and explicit project session identity; document guards are implemented below.
 - Integrated standalone export and a clean-machine package acceptance run.
 - Complete native authoring coverage, especially keyboard focus, terrain tools, asset errors and small/high-DPI windows.
@@ -166,3 +166,33 @@ and reopening that same project through Recent Projects. Metadata and recent-lis
 JSON were inspected. Keyboard-only and full Unicode asset-import acceptance are
 not claimed. Evidence: ignored build/m1b-final-*-{build,tests}.log, JUnit outputs,
 build/m1b-ui.log, build/m1b-ui-restart.log and isolated test project/preferences.
+
+## Transform history — M1c first slice, 2026-10-31
+
+Transform history now supports Redo, bounded value snapshots and Scene lifetime,
+entity generation and persistent-ID checks. Inspector/gizmo interactions commit
+lazily: an activated field with no actual delta neither consumes Undo nor clears
+Redo. A continuous drag is one operation. New captured transform edits invalidate
+the Redo branch. Both stacks and pending captures rebind after Play/Stop; new scenes
+and scene/project loads clear them. History stores no entity or GPU ownership.
+
+Edit menu availability follows valid history, with Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
+routing. Undo/Redo ends an active gizmo/numeric interaction before applying values.
+Play and pending document decisions block capture and history operations. Mesh
+keyboard Undo is kept separate so one shortcut does not operate on two histories.
+This completes the transform portion only; entity/component command history remains.
+
+Pure regressions cover complete transform round trips, multiple entities, branches,
+no-op activation queries, 50 real edits, deletion/component removal, wrong/reused
+Scene lifetimes and transactional generation replacement. The native coordinator
+fixture extends Startup.PlayStop with clean/dirty baseline restoration, live
+selection, Redo through actual Play/Stop, runtime capture rejection, pending document
+guards, deleted targets and history clearing at scene boundaries.
+
+Final Windows all-target Debug/Release builds passed; CTest passed **55/55** in
+Debug (42.09 s) and Release (42.66 s). Native Debug UI verified Floor scale reset
+(20,1,20) -> (1,1,1), Edit-menu Undo -> original scale/clean marker, Redo -> reset
+scale/dirty marker, Undo -> original again, and unchanged Rotation reset preserving
+Redo availability. The test exited cleanly without changing its saved scene.
+Keyboard injection and all numeric/gizmo combinations are not claimed as UI
+acceptance. Logs/JUnit: ignored build/m1c-transform-*.
