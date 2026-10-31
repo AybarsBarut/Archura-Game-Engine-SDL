@@ -14,6 +14,20 @@ public:
     char script[128] = {};
     char newScript[128] = {};
 
+    // Save/close may arrive before ImGui deactivates the field this frame.
+    void CommitPending(Scene* scene) {
+        const auto owner = m_Lifetime.lock();
+        if (!owner || *owner != scene || m_Scene != scene) return;
+        auto* entity = scene->GetEntity(m_Handle);
+        if (!entity) return;
+        if (entity->GetName() == m_SourceName && name[0] && !MatchesDisplayedSource(name, m_SourceName))
+            entity->SetName(name);
+        auto* component = entity->GetComponent<ScriptComponent>();
+        if (m_HasScript && component && component->className == m_SourceScript &&
+            !MatchesDisplayedSource(script, m_SourceScript))
+            component->className = script;
+    }
+
     void Sync(const Scene* scene, EntityHandle handle,
               const std::string& sourceName, const std::string* sourceScript) {
         if (!scene || !handle || !scene->IsAlive(handle)) {
@@ -42,6 +56,13 @@ public:
     }
 
 private:
+    template<size_t Size>
+    static bool MatchesDisplayedSource(const char (&buffer)[Size], const std::string& source) {
+        // Copy truncates only the displayed draft. An untouched draft must never
+        // truncate the complete authored value when save/close commits fields.
+        const size_t count = std::min(Size - 1, source.size());
+        return buffer[count] == '\0' && std::memcmp(buffer, source.data(), count) == 0;
+    }
     template<size_t Size>
     static void Copy(char (&buffer)[Size], const std::string& source) {
         const size_t count = std::min(Size - 1, source.size());

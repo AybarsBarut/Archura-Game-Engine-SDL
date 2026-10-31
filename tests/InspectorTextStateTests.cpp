@@ -96,12 +96,91 @@ void TestSceneAddressReuseAndBounds() {
     scene->~Scene();
     state.Sync(nullptr, {}, "", nullptr);
 }
+
+void TestCommitPendingDrafts() {
+    Archura::Scene scene;
+    auto* entity = scene.CreateEntity("Authored");
+    auto* component = entity->AddComponent<Archura::ScriptComponent>();
+    component->className = "Gameplay.Authored";
+    Archura::InspectorTextState state;
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    std::strcpy(state.name, "Pending name");
+    std::strcpy(state.script, "Gameplay.Pending");
+    Archura::Scene other;
+    state.CommitPending(&other);
+    CHECK(entity->GetName() == "Authored" && component->className == "Gameplay.Authored");
+    state.CommitPending(nullptr);
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == "Pending name" && component->className == "Gameplay.Pending");
+
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    std::strcpy(state.name, "Outdated name draft");
+    std::strcpy(state.script, "Gameplay.OutdatedDraft");
+    entity->SetName("External name");
+    component->className = "Gameplay.External";
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == "External name" && component->className == "Gameplay.External");
+
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    state.name[0] = '\0';
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == "External name");
+    entity->RemoveComponent<Archura::ScriptComponent>();
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), nullptr);
+    std::strcpy(state.newScript, "Gameplay.NotYetAdded");
+    state.CommitPending(&scene);
+    CHECK(!entity->GetComponent<Archura::ScriptComponent>());
+
+    std::strcpy(state.name, "Deleted entity draft");
+    scene.DestroyEntity(entity->GetHandle());
+    auto* replacement = scene.CreateEntity("Replacement");
+    state.CommitPending(&scene);
+    CHECK(replacement->GetName() == "Replacement");
+
+    alignas(Archura::Scene) unsigned char storage[sizeof(Archura::Scene)];
+    auto* reusedScene = new (storage) Archura::Scene;
+    auto* oldEntity = reusedScene->CreateEntity("Same name");
+    const auto oldHandle = oldEntity->GetHandle();
+    state.Sync(reusedScene, oldHandle, oldEntity->GetName(), nullptr);
+    std::strcpy(state.name, "Destroyed scene draft");
+    reusedScene->~Scene();
+    reusedScene = new (storage) Archura::Scene;
+    auto* newEntity = reusedScene->CreateEntity("Same name");
+    CHECK(newEntity->GetHandle() == oldHandle);
+    state.CommitPending(reusedScene);
+    CHECK(newEntity->GetName() == "Same name");
+    reusedScene->~Scene();
+}
+
+void TestCommitPreservesUntouchedLongSources() {
+    Archura::Scene scene;
+    const std::string longName(400, 'N'), longScript(400, 'S');
+    auto* entity = scene.CreateEntity(longName);
+    auto* component = entity->AddComponent<Archura::ScriptComponent>();
+    component->className = longScript;
+    Archura::InspectorTextState state;
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    CHECK(std::strlen(state.name) == 127 && std::strlen(state.script) == 127);
+    state.CommitPending(&scene);
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == longName && component->className == longScript);
+
+    // Editing the last displayed character still counts as an intentional edit,
+    // even when both draft and displayed source occupy the entire field.
+    state.name[126] = 'X';
+    state.script[126] = 'Y';
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == std::string(126, 'N') + 'X');
+    CHECK(component->className == std::string(126, 'S') + 'Y');
+}
 }
 
 int main() {
     TestDraftsAndExternalChanges();
     TestSelectionAndEntityLifetime();
     TestSceneAddressReuseAndBounds();
+    TestCommitPendingDrafts();
+    TestCommitPreservesUntouchedLongSources();
     if (failures) return 1;
     std::cout << "Inspector text: drafts, external edits, components and scene/entity lifetime passed\n";
     return 0;

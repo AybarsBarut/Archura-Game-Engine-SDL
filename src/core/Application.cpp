@@ -22,6 +22,7 @@
 #include "core/Application.h"
 #include "core/AudioSystem.h"
 #include "core/Engine.h"
+#include "core/DeveloperConsole.h"
 #include "core/ImGuiLayer.h"
 #include "core/ResourceManager.h"
 #include "core/Window.h"
@@ -31,8 +32,10 @@
 #include "ecs/Entity.h"
 
 #include "editor/Editor.h"
+#include "editor/EditorDocumentSmoke.h"
 
 #include "core/GameSaveManager.h"
+#include "core/SerializationJson.h"
 #include "core/ProjectSerializer.h"
 #include "core/GameManifest.h"
 #include "scripting/ScriptEngine.h"
@@ -115,6 +118,46 @@ bool Application::LoadEditorProject(const std::string& path) {
   if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
   ProjectConfig config;
   if (!ProjectSerializer::LoadProject(path, config, m_Scene.get())) return false;
+  RebindEditorScene();
+  return true;
+}
+
+bool Application::LoadEditorLegacy(const std::string& path) {
+  if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
+  if (!GameSaveManager::Get().LoadProject(path, m_Scene.get())) return false;
+  RebindEditorScene();
+  return true;
+}
+
+bool Application::NewEditorScene() {
+  if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
+  Serialization::Json root;
+  root.kind = Serialization::Json::Kind::Object;
+  root.object["entities"].kind = Serialization::Json::Kind::Array;
+  // The shared codec transaction retains engine-owned bootstrap entities while
+  // replacing the authored user scene, just like loading a legacy scene.
+  if (!GameSaveManager::LoadEntities(root, m_Scene.get(), true)) return false;
+  RebindEditorScene();
+  return true;
+}
+
+bool Application::RequestEditorLegacyOpen(const std::string& path) {
+  if (!HasEditor() || path.empty() || m_Editor->HasPendingDocumentAction() ||
+      !PrepareEditorDocumentAction()) return false;
+  m_Editor->RequestOpenScene(m_Scene.get(), path, true);
+  return true;
+}
+
+bool Application::SaveEditorLegacy(const std::string& name) {
+  if (!HasEditor() || m_Editor->HasPendingDocumentAction() ||
+      !PrepareEditorDocumentAction()) return false;
+  m_Editor->RefreshDocument(m_Scene.get(), true);
+  // Legacy saves omit engine-owned entities, so they cannot establish the
+  // saved baseline of the complete .gameproj document.
+  return GameSaveManager::Get().SaveProject(name, m_Scene.get());
+}
+
+void Application::RebindEditorScene() {
   m_PlayerHandleValue = 0;
   m_PlayerPersistentID.clear();
   for (const auto& entity : m_Scene->GetEntities()) {
@@ -130,7 +173,36 @@ bool Application::LoadEditorProject(const std::string& path) {
   if (m_PhysicsSystem) m_PhysicsSystem->ResetRuntimeState();
   if (m_ProjectileSystem) m_ProjectileSystem->ResetRuntimeState();
   if (m_FPSController) m_FPSController->ResetRuntimeState();
-  return true;
+}
+
+bool Application::PrepareEditorDocumentAction() {
+  if (m_Standalone || !m_Editor || !m_Scene) return false;
+  try {
+    if (m_Editor->IsGameRunning() && !m_Editor->SetMode(EditorMode::Edit)) {
+      m_Editor->Log("[ERROR] Stop failed; the current scene was retained.");
+      return false;
+    }
+    m_DevModeActive = true;
+    m_IsPaused = false;
+    if (m_Input) m_Input->SetCursorMode(0);
+    return true;
+  } catch (const std::exception& error) {
+    m_Editor->Log(std::string("[ERROR] Cannot leave Play: ") + error.what());
+    return false;
+  } catch (...) {
+    m_Editor->Log("[ERROR] Cannot leave Play; the current scene was retained.");
+    return false;
+  }
+}
+
+void Application::Quit() {
+  if (m_Standalone || !m_Editor || !m_Scene) {
+    m_Running = false;
+    return;
+  }
+  if (!PrepareEditorDocumentAction()) return;
+  m_Editor->RequestClose(m_Scene.get());
+  if (m_Editor->ConsumeCloseApproval()) m_Running = false;
 }
 
 Application::~Application() {
@@ -194,7 +266,10 @@ void Application::SetFPSLimit(float limit) {
   }
 }
 
-void Application::SetDevMode(bool enabled) { m_DevModeActive = !m_Standalone && enabled; }
+void Application::SetDevMode(bool enabled) {
+  if (!enabled && m_Editor && m_Editor->HasPendingDocumentAction()) return;
+  m_DevModeActive = !m_Standalone && enabled;
+}
 
 bool Application::IsNetworkViewActive() const {
   return m_NetworkGame && GameModeManager::Get().GetMode() == GameMode::MultiplayerClient &&
@@ -342,6 +417,13 @@ bool Application::Init() {
     fclose(f_log);
   }
   FPSConsoleCommands::RegisterAllCommands();
+  for (const char* name : {"app.quit", "app.exit"}) {
+    DeveloperConsole::GetInstance().RegisterCommand(std::make_shared<ConsoleCommand>(
+        name, "Close the application, preserving unsaved scene changes.",
+        [](const std::vector<std::string>&) {
+          if (auto* app = Application::TryGet()) app->Quit();
+        }));
+  }
   CommandRegistry::Get().RegisterCommand(
       "fps_limit", [](const std::vector<std::string> &args) {
         if (!args.empty()) {
@@ -426,11 +508,11 @@ bool Application::Init() {
             r.pop_back();
           return r;
         }();
-        Scene *scene = Application::Get().GetScene();
-        if (scene) {
-          GameSaveManager::Get().SaveProject(name, scene);
+        auto& app = Application::Get();
+        if (app.SaveEditorLegacy(name))
           std::cout << "Proje kaydedildi: " << name << std::endl;
-        }
+        else
+          std::cerr << "Proje kaydedilemedi: " << name << std::endl;
       });
 
   CommandRegistry::Get().RegisterCommand(
@@ -453,38 +535,8 @@ bool Application::Init() {
         if (filePath.find(".scene") == std::string::npos)
           filePath =
               "saves/" + GameSaveManager::MakeSafeFileName(filePath) + ".scene";
-        Scene *scene = Application::Get().GetScene();
-        if (scene) {
-          Application &app = Application::Get();
-          if (app.m_Editor && app.m_Editor->GetMode() == EditorMode::Play) {
-            if (!app.m_Editor->SetMode(EditorMode::Edit)) {
-              std::cerr << "[Load] Cannot replace scene: Stop transition failed\n";
-              return;
-            }
-          }
-          const bool loaded = GameSaveManager::Get().LoadProject(filePath, scene);
-          if (loaded) {
-            app.m_PlayerHandleValue = 0;
-            app.m_PlayerPersistentID.clear();
-            for (const auto &entityPtr : scene->GetEntities()) {
-              if (entityPtr && entityPtr->GetName() == "Player") {
-                app.m_PlayerHandleValue = entityPtr->GetHandle().Value();
-                app.m_PlayerPersistentID = entityPtr->GetPersistentID();
-                break;
-              }
-            }
-            if (app.m_Editor) {
-              app.m_Editor->ClearSelection();
-              app.m_Editor->GetUndoHistory().Clear();
-              app.m_Editor->GetSelectionState().BindScene(scene);
-              app.m_Editor->SanitizeSelection(scene);
-            }
-          }
-          if (loaded)
-            std::cout << "Proje yuklendi: " << filePath << std::endl;
-          else
-            std::cout << "Proje yuklenemedi: " << filePath << std::endl;
-        }
+        auto& app = Application::Get();
+        app.RequestEditorLegacyOpen(filePath);
       });
 
   CommandRegistry::Get().RegisterCommand(
@@ -867,6 +919,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
   if (playStopSmokeTest) {
     if (frameLimit < 16 || !m_Editor)
       throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
+    EditorDocumentSmoke::Run(*m_Editor, *this, m_Scene.get());
     smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
   }
   std::string networkProbeID;
@@ -877,6 +930,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
     probe->AddComponent<RigidBody>();
     networkProbeID = probe->GetPersistentID();
   }
+  if (m_Editor) m_Editor->ResetDocument(m_Scene.get());
   if (network && !JoinNetworkGame(network->host, network->port)) throw std::runtime_error("Network connection failed");
   reportProgress(StartupStage::WorldReady);
   reportProgress(StartupStage::Ready);
@@ -995,11 +1049,11 @@ void Application::ProcessInput() {
   while (SDL_PollEvent(&event)) {
     ImGui_ImplSDL2_ProcessEvent(&event);
     m_Input->OnEvent(event);
-    if (event.type == SDL_QUIT)
-      m_EngineWindow->SetShouldClose(true);
+    if (event.type == SDL_QUIT) Quit();
     if (event.type == SDL_WINDOWEVENT &&
-        event.window.event == SDL_WINDOWEVENT_CLOSE)
-      m_EngineWindow->SetShouldClose(true);
+        event.window.event == SDL_WINDOWEVENT_CLOSE &&
+        event.window.windowID == SDL_GetWindowID(m_EngineWindow->GetNativeWindow()))
+      Quit();
     if (event.type == SDL_WINDOWEVENT &&
         (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
          event.window.event == SDL_WINDOWEVENT_RESIZED)) {
@@ -1018,7 +1072,7 @@ void Application::ProcessInput() {
     bool entering = !m_DevModeActive;
     SetDevMode(entering);
     // In editor mode: free cursor. In play-through: respect game state.
-    if (entering) {
+    if (m_DevModeActive) {
       m_Input->SetCursorMode(0); // Free – ImGui usable
     } else {
       m_Input->SetCursorMode(m_IsPaused ? 0 : 2);
@@ -1043,7 +1097,7 @@ void Application::ProcessInput() {
   // 3. Mouse / Camera look routing
   const bool inEditMode =
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
-  if (inEditMode) {
+  if (inEditMode && !m_Editor->HasPendingDocumentAction()) {
     // Editor fly-cam: update reads Input directly inside EditorCamera::Update
     float frameDt = ImGui::GetIO().DeltaTime;
     if (frameDt <= 0.0f)
@@ -1069,6 +1123,8 @@ void Application::ProcessInput() {
 
     // --- Keyboard Shortcuts (Undo, Copy/Paste, Focus) ---
     m_Editor->ProcessEditorShortcuts(m_Input, m_Scene.get());
+  } else if (inEditMode) {
+    // A document decision owns input until it is resolved.
   } else if (IsNetworkViewActive() && !m_IsPaused && m_Input->IsCursorLocked()) {
     if (!m_NetworkLaunch || !m_NetworkLaunch->smoke) {
       auto delta = m_Input->GetMouseDelta();
@@ -1089,7 +1145,8 @@ void Application::UpdateGameLogic(float dt) {
 
   const bool inEditMode =
       m_DevModeActive && m_Editor && m_Editor->GetMode() == EditorMode::Edit;
-  if (!inEditMode && !m_IsPaused) {
+  if (!inEditMode && !m_IsPaused &&
+      (!m_Editor || !m_Editor->HasPendingDocumentAction())) {
     if (!m_PlaySession.IsPlaying() && m_Editor) {
       if (!m_Editor->SetMode(EditorMode::Play)) {
         m_IsPaused = true;
@@ -1215,10 +1272,11 @@ void Application::RenderFrame(float alpha) {
     m_Editor->DrawMenuBar(m_Scene.get());
     m_Editor->BeginDockSpace();
     m_Editor->DrawEditorUI(m_Scene.get());
+    if (m_Editor->ConsumeCloseApproval()) m_Running = false;
     m_Editor->DrawOverlay(m_Scene.get(), GetCamera());
 
     // Draw 3-D transform gizmo when an entity is selected in Edit mode
-    if (editorEditMode && m_Window) {
+    if (editorEditMode && m_Window && !m_Editor->HasPendingDocumentAction()) {
       m_Editor->DrawTransformGizmo(static_cast<int>(m_Window->GetWidth()),
                                    static_cast<int>(m_Window->GetHeight()));
     }
@@ -1230,7 +1288,11 @@ void Application::RenderFrame(float alpha) {
   }
 #endif
 
-  if (!m_Standalone) DevConsole::Get().Render();
+  if (!m_Standalone) {
+    ImGui::BeginDisabled(m_Editor && m_Editor->HasPendingDocumentAction());
+    DevConsole::Get().Render();
+    ImGui::EndDisabled();
+  }
   if (IsNetworkViewActive()) {
     ImGui::Begin("Multiplayer arena", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("%zu players", m_NetworkGame->Snapshot().players.size());

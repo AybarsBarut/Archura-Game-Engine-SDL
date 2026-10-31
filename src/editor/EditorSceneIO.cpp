@@ -1,6 +1,7 @@
 #include "Editor.h"
 #include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
+#include "SceneDocumentSnapshot.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -57,50 +58,162 @@ bool ValidateScenePath(const char* text, bool saving,
 }
 }
 
-void Editor::RequestSceneDialog(bool save) {
-    if (IsGameRunning()) {
-        Log("[Editor] Stop Play before opening or saving an authored scene.");
+void Editor::ResetDocument(Scene* scene, std::string path) {
+    m_DocumentScene = scene;
+    m_DocumentLifetime = scene ? scene->GetLifetimeToken() : std::weak_ptr<Scene*>{};
+    m_Document.Reset(CaptureSceneDocument(scene), std::move(path));
+    m_NextDocumentCheck = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+}
+
+void Editor::RefreshDocument(Scene* scene, bool force) {
+    if (!scene || IsGameRunning()) return;
+    const auto lifetime = m_DocumentLifetime.lock();
+    if (!m_Document.Initialized() || m_DocumentScene != scene ||
+        !lifetime || lifetime != scene->GetLifetimeToken().lock()) {
+        ResetDocument(scene);
         return;
     }
+    const auto now = std::chrono::steady_clock::now();
+    if (!force && now < m_NextDocumentCheck) return;
+    if (force) m_InspectorText.CommitPending(scene);
+    m_Document.Observe(CaptureSceneDocument(scene));
+    m_NextDocumentCheck = now + std::chrono::milliseconds(250);
+}
+
+bool Editor::ConsumeCloseApproval() {
+    const bool approved = m_CloseApproved;
+    m_CloseApproved = false;
+    return approved;
+}
+
+void Editor::RequestClose(Scene* scene) {
+    if (HasPendingDocumentAction()) return;
+    RefreshDocument(scene, true);
+    if (m_Document.Request(SceneDocumentState::Action::Close) && !m_Document.NeedsDecision())
+        ExecuteDocumentAction(scene);
+}
+
+void Editor::RequestOpenScene(Scene* scene, std::string path, bool legacy) {
+    if (HasPendingDocumentAction() || IsGameRunning()) return;
+    RefreshDocument(scene, true);
+    m_Document.Request(legacy ? SceneDocumentState::Action::OpenLegacy :
+                       SceneDocumentState::Action::OpenProject, std::move(path));
+}
+
+void Editor::RequestNewScene(Scene* scene) {
+    if (HasPendingDocumentAction() || IsGameRunning()) return;
+    RefreshDocument(scene, true);
+    m_Document.Request(SceneDocumentState::Action::NewScene);
+}
+
+void Editor::ExecuteDocumentAction(Scene* scene) {
+    if (!m_Document.HasPending() || m_Document.NeedsDecision()) return;
+    const auto action = m_Document.PendingAction();
+    const std::string target = m_Document.Target();
+    if (action == SceneDocumentState::Action::Close) {
+        m_CloseApproved = true;
+        m_Document.Cancel();
+        return;
+    }
+    bool success = false;
+    try {
+        if (auto* app = Application::TryGet()) {
+            if (action == SceneDocumentState::Action::NewScene) success = app->NewEditorScene();
+            else success = action == SceneDocumentState::Action::OpenLegacy
+                ? app->LoadEditorLegacy(target) : app->LoadEditorProject(target);
+        }
+    } catch (const std::exception& error) {
+        m_SceneIOError = std::string("Open failed: ") + error.what();
+    }
+    m_Document.Cancel();
+    if (success) {
+        ResetDocument(scene, action == SceneDocumentState::Action::OpenProject ? target : std::string{});
+        Log("[Open] " + target);
+    } else {
+        if (m_SceneIOError.empty()) m_SceneIOError = "Open failed. The current scene was retained; check the file and its assets.";
+        Log("[ERROR] " + m_SceneIOError);
+        // Keep the failure visible without silently retrying the destructive action.
+        const std::string error = m_SceneIOError;
+        RequestSceneDialog(false);
+        m_SceneIOError = error;
+        std::snprintf(m_ScenePathBuffer, sizeof(m_ScenePathBuffer), "%s", target.c_str());
+    }
+}
+
+void Editor::RequestSceneDialog(bool save) {
+    if (IsGameRunning() || m_SceneDialogOpen || m_RequestSceneDialog) return;
     m_SceneDialogSave = save;
     m_RequestSceneDialog = true;
     m_ConfirmSceneAction = false;
     m_SceneIOError.clear();
-    const auto& initial = m_CurrentScenePath.empty()
-        ? std::string("ArchuraProject.gameproj") : m_CurrentScenePath;
+    const std::string initial = m_Document.Path().empty() ? "ArchuraProject.gameproj" : m_Document.Path();
     std::snprintf(m_ScenePathBuffer, sizeof(m_ScenePathBuffer), "%s", initial.c_str());
 }
 
-void Editor::SaveCurrentScene(Scene* scene) {
-    if (IsGameRunning() || !scene) return;
-    if (m_CurrentScenePath.empty()) {
-        RequestSceneDialog(true);
-        return;
-    }
+bool Editor::SaveSceneTo(Scene* scene, const std::string& target) {
+    if (!scene || IsGameRunning()) return false;
+    RefreshDocument(scene, true);
     try {
         std::filesystem::path path;
-        std::string error;
-        const bool valid = ValidateScenePath(m_CurrentScenePath.c_str(), true, path, error);
-        const ProjectConfig config{path.stem().string(), "1.0", "MainScene"};
-        if (valid && ProjectSerializer::SaveProject(path.string(), config, scene)) {
-            Log("[Save] " + path.string());
-            return;
+        if (!ValidateScenePath(target.c_str(), true, path, m_SceneIOError)) return false;
+        // Preflight before touching the file; unknown/oversized scenes stay dirty.
+        auto snapshot = CaptureSceneDocument(scene);
+        if (!snapshot) {
+            m_SceneIOError = "Save failed: this scene contains unsupported data or exceeds the document limit.";
+            return false;
         }
-        RequestSceneDialog(true);
-        m_SceneIOError = valid
-            ? "Save failed. Check file permissions, assets and scene data; the previous file was retained."
-            : error;
+        const ProjectConfig config{path.stem().string(), "1.0", "MainScene"};
+        if (ProjectSerializer::SaveProject(path.string(), config, scene)) {
+            m_Document.Saved(std::move(snapshot), path.string());
+            m_SceneIOError.clear();
+            Log("[Save] " + path.string());
+            return true;
+        }
+        m_SceneIOError = "Save failed. Check permissions, assets and scene data; the previous file was retained.";
     } catch (const std::exception& error) {
-        RequestSceneDialog(true);
         m_SceneIOError = std::string("Save failed: ") + error.what();
     }
     Log("[ERROR] " + m_SceneIOError);
+    return false;
+}
+
+void Editor::SaveCurrentScene(Scene* scene) {
+    if (!scene || IsGameRunning()) return;
+    if (!m_Document.Path().empty() && SaveSceneTo(scene, m_Document.Path())) return;
+    const std::string error = m_SceneIOError;
+    RequestSceneDialog(true);
+    m_SceneIOError = error;
+}
+
+void Editor::DrawDocumentGuard(Scene* scene) {
+    if (m_Document.NeedsDecision() && !m_SceneDialogOpen && !m_RequestSceneDialog)
+        ImGui::OpenPopup("Unsaved scene changes");
+    if (ImGui::BeginPopupModal("Unsaved scene changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Save changes to the current scene before continuing?");
+        if (ImGui::Button("Save", ImVec2(100, 0))) {
+            ImGui::CloseCurrentPopup();
+            SaveCurrentScene(scene);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(100, 0))) {
+            m_Document.Discard();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_Document.Cancel();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (!m_SceneDialogOpen && !m_RequestSceneDialog) ExecuteDocumentAction(scene);
 }
 
 void Editor::DrawSceneDialog(Scene* scene) {
     if (m_RequestSceneDialog) {
         ImGui::OpenPopup("Scene file");
         m_RequestSceneDialog = false;
+        m_SceneDialogOpen = true;
     }
     ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Scene file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
@@ -112,66 +225,42 @@ void Editor::DrawSceneDialog(Scene* scene) {
         m_ConfirmSceneAction = false;
         m_SceneIOError.clear();
     }
-    if (!m_SceneIOError.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.50f, 0.40f, 1.0f));
-        ImGui::PushTextWrapPos(520);
-        ImGui::TextUnformatted(m_SceneIOError.c_str());
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-    }
-    if (m_ConfirmSceneAction) {
-        ImGui::TextWrapped(m_SceneDialogSave
-            ? "This file already exists. Confirm to replace it."
-            : "Opening replaces the current authored scene. Save any edits first, or confirm to discard them.");
-    }
-    if (IsGameRunning()) ImGui::TextDisabled("Stop Play before changing scene files.");
+    if (!m_SceneIOError.empty()) ImGui::TextWrapped("%s", m_SceneIOError.c_str());
+    if (m_ConfirmSceneAction) ImGui::TextWrapped("This file already exists. Confirm to replace it.");
     ImGui::Separator();
     ImGui::BeginDisabled(IsGameRunning() || !scene);
-    const char* action = m_ConfirmSceneAction ? "Confirm" : (m_SceneDialogSave ? "Save" : "Open");
-    if (ImGui::Button(action, ImVec2(110, 0))) {
+    if (ImGui::Button(m_ConfirmSceneAction ? "Confirm" : (m_SceneDialogSave ? "Save" : "Open"), ImVec2(110, 0))) {
         try {
             m_SceneIOError.clear();
             std::filesystem::path path;
             if (ValidateScenePath(m_ScenePathBuffer, m_SceneDialogSave, path, m_SceneIOError)) {
                 std::error_code ec;
                 const bool exists = std::filesystem::exists(path, ec);
-                if (ec) {
-                    m_SceneIOError = "Cannot inspect the selected file: " + ec.message();
-                } else if (!m_ConfirmSceneAction && (!m_SceneDialogSave || exists)) {
-                    m_ConfirmSceneAction = true;
-                } else {
-                    bool success = false;
-                    if (m_SceneDialogSave) {
-                        const ProjectConfig config{path.stem().string(), "1.0", "MainScene"};
-                        success = ProjectSerializer::SaveProject(path.string(), config, scene);
-                    } else if (auto* app = Application::TryGet()) {
-                        success = app->LoadEditorProject(path.string());
-                    }
-                    if (success) {
-                        m_CurrentScenePath = path.string();
-                        m_SceneIOError.clear();
+                if (ec) m_SceneIOError = "Cannot inspect the selected file: " + ec.message();
+                else if (m_SceneDialogSave && exists && !m_ConfirmSceneAction) m_ConfirmSceneAction = true;
+                else if (m_SceneDialogSave) {
+                    if (SaveSceneTo(scene, path.string())) {
+                        m_SceneDialogOpen = false;
                         m_ConfirmSceneAction = false;
-                        Log(std::string(m_SceneDialogSave ? "[Save] " : "[Open] ") + m_CurrentScenePath);
                         ImGui::CloseCurrentPopup();
-                    } else {
-                        m_SceneIOError = m_SceneDialogSave
-                            ? "Save failed. Check permissions, assets and scene data; the previous file was retained."
-                            : "Open failed. Check the file format and referenced assets; the current scene was retained.";
-                        m_ConfirmSceneAction = false;
-                        Log("[ERROR] " + m_SceneIOError);
-                    }
+                    } else m_ConfirmSceneAction = false;
+                } else {
+                    m_SceneDialogOpen = false;
+                    ImGui::CloseCurrentPopup();
+                    RequestOpenScene(scene, path.string());
                 }
             }
         } catch (const std::exception& error) {
             m_SceneIOError = std::string("Scene operation failed: ") + error.what();
             m_ConfirmSceneAction = false;
-            Log("[ERROR] " + m_SceneIOError);
         }
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(110, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         m_ConfirmSceneAction = false;
+        m_SceneDialogOpen = false;
+        m_Document.Cancel();
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();

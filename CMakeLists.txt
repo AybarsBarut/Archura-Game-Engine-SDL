@@ -519,6 +519,10 @@ if(BUILD_TESTING)
     target_include_directories(ArchuraSceneViewportTests PRIVATE src external/glm)
     add_test(NAME Archura.Editor.SceneViewport COMMAND ArchuraSceneViewportTests)
 
+    add_executable(ArchuraSceneDocumentStateTests tests/SceneDocumentStateTests.cpp)
+    target_include_directories(ArchuraSceneDocumentStateTests PRIVATE src)
+    add_test(NAME Archura.Editor.SceneDocumentState COMMAND ArchuraSceneDocumentStateTests)
+
     add_executable(ArchuraInspectorTextStateTests tests/InspectorTextStateTests.cpp
         src/ecs/Entity.cpp src/ecs/Component.cpp)
     target_include_directories(ArchuraInspectorTextStateTests PRIVATE src external/glm)

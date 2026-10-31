@@ -31,6 +31,8 @@ struct SDL_Window;
 #include "TransformUndoHistory.h"
 #include "ProjectDirectoryCache.h"
 #include "InspectorTextState.h"
+#include "SceneDocumentState.h"
+#include <chrono>
 
 namespace Archura {
 
@@ -46,9 +48,9 @@ class Texture;
  * @brief ImGui Editor – main editor coordinator.
  *
  * Owns the EditorCamera and drives the Edit/Play state machine.
- * All per-frame draw functions are allocation-free on the hot path.
  */
 class Editor {
+    friend class EditorDocumentSmoke;
 public:
     Editor();
     ~Editor();
@@ -130,6 +132,15 @@ public:
     void ClearLogs()                 { m_ConsoleLogs.clear(); }
     void ExecuteCommand(const char* command);
 
+    void ResetDocument(Scene* scene, std::string path = {});
+    void RefreshDocument(Scene* scene, bool force = false);
+    bool IsDocumentDirty() const { return m_Document.IsDirty(); }
+    bool HasPendingDocumentAction() const { return m_Document.HasPending() || m_SceneDialogOpen || m_RequestSceneDialog; }
+    void RequestClose(Scene* scene);
+    void RequestOpenScene(Scene* scene, std::string path, bool legacy = false);
+    void RequestNewScene(Scene* scene);
+    bool ConsumeCloseApproval();
+
 public: // ── Shared State (kept public for minimal refactor surface) ──────────
     Entity*   m_SelectedEntity = nullptr;
     std::vector<Entity*> m_SelectedEntities;
@@ -160,6 +171,9 @@ private:
     void RequestSceneDialog(bool save);
     void DrawSceneDialog(Scene* scene);
     void SaveCurrentScene(Scene* scene);
+    bool SaveSceneTo(Scene* scene, const std::string& path);
+    void DrawDocumentGuard(Scene* scene);
+    void ExecuteDocumentAction(Scene* scene);
 
     // ── Panel Draw ───────────────────────────────────────────────────────────
     void DrawToolbar(Scene* scene);
@@ -185,7 +199,12 @@ private:
     ImDrawList* m_SceneDrawList = nullptr;
     unsigned int m_SceneTexture = 0;
     int m_SceneTextureWidth = 0, m_SceneTextureHeight = 0;
-    std::string m_CurrentScenePath;
+    SceneDocumentState m_Document;
+    Scene* m_DocumentScene = nullptr;
+    std::weak_ptr<Scene*> m_DocumentLifetime;
+    std::chrono::steady_clock::time_point m_NextDocumentCheck{};
+    bool m_CloseApproved = false;
+    bool m_SceneDialogOpen = false;
     char m_ScenePathBuffer[1024] = {};
     std::string m_SceneIOError;
     bool m_SceneDialogSave = false;

@@ -12,6 +12,7 @@
 namespace Archura {
 
     class Application {
+        friend class EditorDocumentSmoke;
     public:
         explicit Application(GraphicsLaunchOptions graphicsOptions = {});
         virtual ~Application();
@@ -24,8 +25,14 @@ namespace Archura {
                  const StartupProgressCallback& progress = {});
         bool JoinNetworkGame(const std::string& host, int port);
         void LeaveNetworkGame();
-        void Quit() { m_Running = false; }
+        void Quit();
+        bool PrepareEditorDocumentAction();
         bool LoadEditorProject(const std::string& path);
+        bool LoadEditorLegacy(const std::string& path);
+        bool NewEditorScene();
+        bool RequestEditorLegacyOpen(const std::string& path);
+        bool SaveEditorLegacy(const std::string& name);
+        bool HasEditor() const { return !m_Standalone && m_Editor != nullptr; }
 
         Window& GetWindow() { return *m_Window; }
 
@@ -34,6 +41,7 @@ namespace Archura {
         void InitializeGame(const GameManifest& game);
         bool PumpNetworkGame();
         bool IsNetworkViewActive() const;
+        void RebindEditorScene();
         void OnEvent(); // Event polling placeholder if needed here
 
 

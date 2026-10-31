@@ -5,6 +5,7 @@
 #include "Editor.h"
 #include "SceneViewport.h"
 #include "../core/DeveloperConsole.h"
+#include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
 #include "../core/Window.h"
 #include "../core/memory/MemoryTracker.h"
@@ -104,6 +105,8 @@ void Editor::Shutdown() {
 }
 
 bool Editor::SetMode(EditorMode mode) {
+  if (mode == EditorMode::Play && HasPendingDocumentAction()) return false;
+  if (mode == EditorMode::Play) RefreshDocument(m_DocumentScene, true);
   const bool changing = GetMode() != mode;
   if (!m_ModeState.Request(mode, mode == EditorMode::Play ? m_OnPlay : m_OnStop)) {
     Log("[Editor] Mode transition rejected; previous mode retained.");
@@ -323,7 +326,7 @@ float Editor::GetSceneAspect(float fallback) const {
 }
 
 bool Editor::CanStartSceneInteraction(glm::vec2 mouse) const {
-  return m_Enabled && m_SceneHovered && m_SceneVisible &&
+  return !HasPendingDocumentAction() && m_Enabled && m_SceneHovered && m_SceneVisible &&
       SceneViewport{m_SceneOrigin, m_SceneSize}.Contains(mouse) &&
       !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 }
@@ -375,7 +378,9 @@ void Editor::DrawSceneViewport() {
 void Editor::DrawEditorUI(Scene *scene) {
   SanitizeSelection(scene);
   if (!m_Enabled) return;
+  RefreshDocument(scene);
   if (m_AssetCacheDirty) RefreshAssetCache();
+  ImGui::BeginDisabled(HasPendingDocumentAction());
   DrawToolbar(scene);
   DrawSceneViewport();
   if (m_ShowSceneHierarchy) DrawSceneHierarchy(scene);
@@ -388,6 +393,8 @@ void Editor::DrawEditorUI(Scene *scene) {
   if (m_ShowGameBuilder) m_GameBuilderPanel.Draw(scene, m_SelectedEntity);
   m_ObjectTool.Draw(scene, nullptr, m_SelectedEntity);
   if (m_ShowTutorial) DrawTutorialPanel();
+  ImGui::EndDisabled();
+  DrawDocumentGuard(scene);
   DrawSceneDialog(scene);
 }
 
@@ -489,12 +496,16 @@ void Editor::DrawToolbar(Scene *scene) {
 
 void Editor::DrawMenuBar(Scene *scene) {
   if (ImGui::BeginMainMenuBar()) {
+    ImGui::BeginDisabled(HasPendingDocumentAction());
     if (ImGui::BeginMenu("File")) {
+      if (ImGui::MenuItem("New Scene", "", false, !IsGameRunning())) RequestNewScene(scene);
       if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, !IsGameRunning())) RequestSceneDialog(false);
       if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !IsGameRunning())) SaveCurrentScene(scene);
       if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, !IsGameRunning())) RequestSceneDialog(true);
       ImGui::Separator();
-      if (ImGui::MenuItem("Exit", "Alt+F4") && m_Window) m_Window->SetShouldClose(true);
+      if (ImGui::MenuItem("Exit", "Alt+F4")) {
+        if (auto* app = Application::TryGet()) app->Quit();
+      }
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
@@ -565,6 +576,8 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::EndMenu();
     }
 
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%s%s", m_Document.Path().empty() ? "Untitled" : std::filesystem::path(m_Document.Path()).filename().string().c_str(), IsDocumentDirty() ? " *" : "");
     ImGui::EndMainMenuBar();
   }
 }
@@ -2030,6 +2043,7 @@ void Editor::DrawTransformGizmo(int screenW, int screenH) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Editor::ProcessGizmoInput(Input *input, int screenW, int screenH) {
+  if (HasPendingDocumentAction()) { m_GizmoActive = GizmoOp::None; return; }
   (void)screenW;
   m_GizmoConsumedClick = false;
   screenH = static_cast<int>(std::max(1.0f, m_SceneSize.y));
@@ -2251,6 +2265,7 @@ void Editor::PasteClipboard(Scene *scene) {
 }
 
 void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
+  if (HasPendingDocumentAction()) return;
   SanitizeSelection(scene);
   if (!input)
     return;

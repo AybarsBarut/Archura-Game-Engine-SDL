@@ -438,8 +438,10 @@ const char* PauseMenu::GetKeyName(int scancode) {
                 std::string name = (strlen(m_ProjectNameBuf) > 0)
                     ? std::string(m_ProjectNameBuf)
                     : "Unnamed";
-                mgr.SaveProject(name, scene);
-                memset(m_ProjectNameBuf, 0, sizeof(m_ProjectNameBuf));
+                auto& app = Application::Get();
+                const bool saved = app.HasEditor()
+                    ? app.SaveEditorLegacy(name) : mgr.SaveProject(name, scene);
+                if (saved) memset(m_ProjectNameBuf, 0, sizeof(m_ProjectNameBuf));
             }
         }
         ImGui::PopStyleColor(2);
@@ -500,9 +502,11 @@ const char* PauseMenu::GetKeyName(int scancode) {
 
                 std::string btnLabel = proj.name + "  [" + std::to_string(proj.entityCount) + " obje]";
                 if (ImGui::Button(btnLabel.c_str(), ImVec2(btnWidth - 50, 48))) {
-                    if (mgr.LoadProject(proj.filePath, scene)) {
-                        m_CurrentState = MenuState::Main;
-                    }
+                    auto& app = Application::Get();
+                    const bool accepted = app.HasEditor()
+                        ? app.RequestEditorLegacyOpen(proj.filePath)
+                        : mgr.LoadProject(proj.filePath, scene);
+                    if (accepted) m_CurrentState = MenuState::Main;
                 }
                 ImGui::PopStyleColor(2);
 

@@ -215,6 +215,11 @@ bool GameSaveManager::SaveProject(const std::string& projectName, Scene* scene) 
 }
 
 bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitSystem) {
+    return WriteEntities(file, scene, omitSystem, true);
+}
+
+bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitSystem, bool diagnostics) {
+    if (!scene) return false;
     const auto& entities = scene->GetEntities();
     bool first = true;
 
@@ -222,17 +227,17 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
         Entity* e = ePtr.get();
         if (omitSystem && e->IsEngineOwned()) {
             if (e->GetParent() && !e->GetParent()->IsEngineOwned()) {
-                std::cerr << "[SaveManager] Saved parent has an excluded system child; save cancelled\n";
+                if (diagnostics) std::cerr << "[SaveManager] Saved parent has an excluded system child; save cancelled\n";
                 return false;
             }
             continue;
         }
         if (!Serialization::HasOnlySupportedComponents(e)) {
-            std::cerr << "[SaveManager] Unsupported component on entity: " << e->GetName() << "; save cancelled\n";
+            if (diagnostics) std::cerr << "[SaveManager] Unsupported component on entity: " << e->GetName() << "; save cancelled\n";
             return false;
         }
         if (omitSystem && e->GetParent() && e->GetParent()->IsEngineOwned()) {
-            std::cerr << "[SaveManager] Parent is excluded system entity; save cancelled: " << e->GetName() << '\n';
+            if (diagnostics) std::cerr << "[SaveManager] Parent is excluded system entity; save cancelled: " << e->GetName() << '\n';
             return false;
         }
 
@@ -244,7 +249,7 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
         auto* bc = e->GetComponent<BoxCollider>();
         auto* lc = e->GetComponent<LightComponent>();
         if (mr && (mr->GetShader() || (mr->GetTexture() && mr->GetTexture()->GetPath().empty()))) {
-            std::cerr << "[SaveManager] Assigned shader or generated texture lacks a serialization source; save cancelled: " << e->GetName() << '\n';
+            if (diagnostics) std::cerr << "[SaveManager] Assigned shader or generated texture lacks a serialization source; save cancelled: " << e->GetName() << '\n';
             return false;
         }
 
@@ -268,7 +273,7 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
                 case MeshSourceType::OBJ: meshType = "obj"; modelPath = source->path; break;
                 case MeshSourceType::FBX: meshType = "fbx"; modelPath = source->path; break;
                 default:
-                    std::cerr << "[SaveManager] Custom mesh has no reconstructible source; save cancelled\n";
+                    if (diagnostics) std::cerr << "[SaveManager] Custom mesh has no reconstructible source; save cancelled\n";
                     return false;
             }
         }
@@ -315,7 +320,7 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
 
         file << "      \"__end\": true";
         if (!Serialization::WriteComponents(file, e)) {
-            std::cerr << "[SaveManager] Invalid component configuration; save cancelled: " << e->GetName() << '\n';
+            if (diagnostics) std::cerr << "[SaveManager] Invalid component configuration; save cancelled: " << e->GetName() << '\n';
             return false;
         }
         file << '\n';
