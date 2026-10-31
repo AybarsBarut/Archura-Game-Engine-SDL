@@ -53,6 +53,7 @@ class Texture;
 class Editor {
     friend class EditorDocumentSmoke;
     friend class EditorProjectSmoke;
+    friend class EditorHistorySmoke;
 public:
     Editor();
     ~Editor();
@@ -282,6 +283,7 @@ private:
     TransformUndoHistory m_UndoHistory;
 
     void UndoLastAction(Scene* scene);
+    void RedoLastAction(Scene* scene);
 
     // ── Clipboard (Copy / Paste) ───────────────────────────────────────────────
     struct EntityClipboard {

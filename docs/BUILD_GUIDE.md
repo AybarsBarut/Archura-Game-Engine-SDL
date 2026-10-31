@@ -550,3 +550,22 @@ writes a scene copy and does not change the descriptor's `start_scene` or reloca
 assets. Loading legacy `.scene` through the console/pause menu detaches the
 explicit project session only after a successful load. Legacy `.gameproj` scene
 schema v1/v2 support remains available without a project descriptor.
+
+## Transform Undo/Redo (M1c first slice)
+
+Edit > Undo Transform and Redo Transform restore position, rotation and scale.
+Use Ctrl+Z for Undo, Ctrl+Shift+Z or Ctrl+Y for Redo. The menu disables unavailable
+operations. These commands run in Edit mode and wait while a document decision is
+pending. Keyboard transform commands are reserved while the mesh manipulation tool
+is open, so its own Ctrl+Z cannot also change an entity transform; use the explicit
+Edit menu for transform history in that context.
+
+History retains up to 50 transform operations plus a pending before-state for an
+active interaction. A continuous Inspector/gizmo gesture is one operation. Merely
+activating a field or resetting to an unchanged value preserves Redo. A new captured
+transform edit starts a new branch. Play-time Inspector changes do not enter the
+authored history; Stop rebinds both history directions to restored persistent IDs.
+New scenes and scene/project loads clear both directions.
+
+This is transform history. Creation, deletion, parenting, component and mesh edits
+are not general Undo/Redo commands yet.
