@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstdio>
 #include <windows.h>
+#include <shellapi.h>
 #include <memory>
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -22,6 +23,21 @@ extern "C" {
 }
 
 namespace {
+
+// Recover only the new project path from Windows' native command line. Narrow
+// CRT argv can lose characters outside the active code page before main runs.
+std::filesystem::path NativeProjectArgument(int index, size_t offset = 0) {
+    int count = 0;
+    struct Arguments {
+        LPWSTR* values = nullptr;
+        ~Arguments() { if (values) LocalFree(values); }
+    } arguments{CommandLineToArgvW(GetCommandLineW(), &count)};
+    if (!arguments.values || index >= count)
+        throw std::invalid_argument("cannot read --project path");
+    const std::wstring_view argument(arguments.values[index]);
+    if (offset >= argument.size()) throw std::invalid_argument("--project requires a descriptor path");
+    return std::filesystem::path(argument.substr(offset));
+}
 
 void PrintSmokeTelemetry(const Archura::Application& app) {
     const auto cpu = app.GetFrameTelemetry().Snapshot();
@@ -193,6 +209,7 @@ int main(int argc, char** argv) {
     bool playStopSmokeTest = false;
     Archura::NetworkLaunchOptions network;
     std::filesystem::path gamePath;
+    std::filesystem::path projectPath;
     try {
     for (int i = 1; i < argc; ++i) {
         const std::string_view option = argv[i] ? argv[i] : "";
@@ -200,6 +217,15 @@ int main(int argc, char** argv) {
             if (++i >= argc || !argv[i] || !argv[i][0]) throw std::invalid_argument("missing argument value");
             return argv[i];
         };
+        if (option == "--project" || option.substr(0, 10) == "--project=") {
+            if (!projectPath.empty()) throw std::invalid_argument("--project may be specified only once");
+            if (option == "--project") {
+                const auto value = next();
+                if (value.compare(0, 2, "--") == 0) throw std::invalid_argument("--project requires a descriptor path");
+                projectPath = NativeProjectArgument(i);
+            } else projectPath = NativeProjectArgument(i, 10);
+            continue;
+        }
         if (option == "--startup-smoke-test") { startupSplashTest = smokeTest = true; continue; }
         if (option == "--startup-cancel-test") { startupCancelTest = true; continue; }
         if (option == "--connect") { network.host = next(); continue; }
@@ -222,6 +248,12 @@ int main(int argc, char** argv) {
         if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
             smokeTest = playStopSmokeTest = true;
     }
+    if (!projectPath.empty()) {
+        if (!gamePath.empty() || !network.host.empty() || network.smoke || playStopSmokeTest || startupSplashTest || startupCancelTest)
+            throw std::invalid_argument("--project supports editor startup or --smoke-test, without game/network/other startup tests");
+        // Capture the caller's identity before changing the bootstrap directory.
+        projectPath = std::filesystem::absolute(projectPath).lexically_normal();
+    }
     if (startupSplashTest && (playStopSmokeTest || !gamePath.empty() || !network.host.empty()))
         throw std::invalid_argument("startup splash smoke requires normal editor startup");
     if (startupCancelTest && (smokeTest || !gamePath.empty() || !network.host.empty()))
@@ -236,6 +268,14 @@ int main(int argc, char** argv) {
     const std::filesystem::path executablePath(executableName);
     if (gamePath.empty() && executablePath.stem() == "ArchuraGame")
         gamePath = executablePath.parent_path() / "game.json";
+    if (!projectPath.empty() && !gamePath.empty()) {
+        std::cerr << "--project requires editor startup, not a standalone game executable\n"; return 1;
+    }
+    if (!projectPath.empty()) {
+        std::error_code directoryError;
+        std::filesystem::current_path(executablePath.parent_path(), directoryError);
+        if (directoryError) { std::cerr << "Cannot enter engine bootstrap directory\n"; return 1; }
+    }
     Archura::GameManifest game;
     const bool standalone = !gamePath.empty();
     if (standalone && (startupCancelTest || startupSplashTest)) {
@@ -281,7 +321,7 @@ int main(int argc, char** argv) {
         app = std::make_unique<Archura::Application>(graphicsOptions);
         try {
             app->Run(smokeTest ? 16 : 0, playStopSmokeTest, standalone ? &game : nullptr,
-                     network.host.empty() ? nullptr : &network, progress);
+                     network.host.empty() ? nullptr : &network, progress, projectPath);
         } catch (const Archura::StartupCancelled&) {
             if (startupSplashTest) throw std::runtime_error("Startup splash smoke was interrupted");
             if (startupCancelTest && (!coreReady || app->GetFrameTelemetry().Snapshot().observedFrames != 0))

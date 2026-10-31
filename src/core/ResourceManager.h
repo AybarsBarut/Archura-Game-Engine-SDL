@@ -22,9 +22,12 @@ public:
     static ResourceManager& Get();
 
     // Project root configuration and canonical asset path resolution
-    void SetProjectRoot(const std::filesystem::path& rootPath);
+    void SetProjectRoot(const std::filesystem::path& rootPath, bool explicitContentRoot = false);
     const std::filesystem::path& GetProjectRoot() const noexcept { return m_ProjectRoot; }
-    void ClearProjectRoot() noexcept { m_ProjectRoot.clear(); }
+    bool HasExplicitContentRoot() const noexcept { return m_ExplicitContentRoot; }
+    void ClearProjectRoot() noexcept { m_ProjectRoot.clear(); m_ExplicitContentRoot = false; }
+    // Owner-thread transactions exchange prepared state without allocating.
+    void SwapProjectRoot(std::filesystem::path& rootPath, bool& explicitContentRoot) noexcept;
 
     static bool IsSafeAssetPath(std::string_view rawPath) noexcept;
 
@@ -80,6 +83,7 @@ private:
 
 private:
     std::filesystem::path m_ProjectRoot;
+    bool m_ExplicitContentRoot = false;
     std::unordered_map<std::string, std::shared_ptr<Shader>> m_Shaders;
     std::unordered_map<std::string, std::shared_ptr<Texture>> m_Textures;
     std::unordered_map<std::string, std::shared_ptr<Texture>> m_TexturesByCanonicalPath;

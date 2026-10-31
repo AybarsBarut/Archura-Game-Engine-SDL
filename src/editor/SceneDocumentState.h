@@ -10,7 +10,7 @@ namespace Archura {
 // scene access and file operations remain with the editor coordinator.
 class SceneDocumentState {
 public:
-    enum class Action { None, Close, OpenProject, OpenLegacy, NewScene };
+    enum class Action { None, Close, OpenProject, OpenLegacy, NewScene, OpenWorkspace, CreateWorkspace };
 
     void Reset(std::optional<std::string> snapshot, std::string path = {}) {
         m_Baseline = std::move(snapshot);

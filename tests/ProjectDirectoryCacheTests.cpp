@@ -85,6 +85,28 @@ int main() {
             cache.Invalidate();
             cache.Update(root, now);
         }
+        {
+            const auto unicodeRoot = root / std::filesystem::u8path(u8"Project_\u65e5\u672c_\u0130stanbul");
+            const auto unicodeFolder = std::filesystem::u8path(u8"Folder_\u65e5\u672c");
+            const auto unicodeFile = std::filesystem::u8path(u8"File_\u65e5\u672c_\u00d6rnek.txt");
+            std::filesystem::create_directories(unicodeRoot / unicodeFolder);
+            std::ofstream(unicodeRoot / unicodeFile) << "unicode fixture";
+            Cache unicodeCache;
+            unicodeCache.Update(unicodeRoot);
+            const auto snapshot = Wait(unicodeCache);
+            Require(snapshot->directory == unicodeRoot && snapshot->error.empty(),
+                    "Unicode project directory retains its native path identity");
+            Require(snapshot->entries.size() == 2 && snapshot->entries[0].isDirectory &&
+                    snapshot->entries[0].name == unicodeFolder.u8string() &&
+                    snapshot->entries[1].name == unicodeFile.u8string() &&
+                    snapshot->entries[1].path == unicodeRoot / unicodeFile,
+                    "Unicode filenames are displayed as UTF-8 without ANSI conversion");
+            const auto missingPath = unicodeRoot / std::filesystem::u8path(u8"Missing_\u65e5\u672c");
+            unicodeCache.Update(missingPath);
+            const auto missing = Wait(unicodeCache, snapshot->revision);
+            Require(missing->entries.empty() && missing->error.find(missingPath.u8string()) != std::string::npos,
+                    "Unicode scan errors preserve a readable UTF-8 directory path");
+        }
         { Cache unused; } // Shutdown also wakes a worker that never scanned.
         std::filesystem::remove_all(root);
         std::cout << "Project directory cache contracts passed\n";

@@ -8,8 +8,10 @@
 #include "../rendering/GraphicsAPI.h"
 #include <cstdint>
 #include <memory>
+#include <filesystem>
 
 namespace Archura {
+    struct ProjectDescriptor;
 
     class Application {
         friend class EditorDocumentSmoke;
@@ -22,12 +24,13 @@ namespace Archura {
 
         void Run(uint32_t frameLimit = 0, bool playStopSmokeTest = false,
                  const struct GameManifest* game = nullptr, const struct NetworkLaunchOptions* network = nullptr,
-                 const StartupProgressCallback& progress = {});
+                 const StartupProgressCallback& progress = {}, const std::filesystem::path& projectPath = {});
         bool JoinNetworkGame(const std::string& host, int port);
         void LeaveNetworkGame();
         void Quit();
         bool PrepareEditorDocumentAction();
         bool LoadEditorProject(const std::string& path);
+        bool LoadEditorWorkspace(const ProjectDescriptor& project);
         bool LoadEditorLegacy(const std::string& path);
         bool NewEditorScene();
         bool RequestEditorLegacyOpen(const std::string& path);

@@ -606,6 +606,80 @@ int main() {
         Archura::ResourceManager::Get().ClearProjectRoot();
     }
 
+    // Explicit project roots must not fall back to unrelated process content.
+    {
+        const auto projectOne = work / "explicit_project_one";
+        const auto projectTwo = work / "explicit_project_two";
+        const auto emptyProject = work / "explicit_empty_project";
+        const auto conflictingCwd = work / "explicit_conflicting_cwd";
+        const auto touch = [](const std::filesystem::path& file) {
+            std::filesystem::create_directories(file.parent_path());
+            std::ofstream(file, std::ios::binary) << "listing fixture";
+        };
+        WriteMinimalOBJ(projectOne / "assets/models/first.obj");
+        WriteMinimalOBJ(projectTwo / "assets/models/second.obj");
+        WriteMinimalOBJ(conflictingCwd / "assets/objects/cwd.obj");
+        touch(projectOne / "assets/textures/first.png");
+        touch(projectOne / "assets/audio/first.wav");
+        touch(projectTwo / "assets/textures/second.png");
+        touch(projectTwo / "assets/audio/second.wav");
+        touch(conflictingCwd / "assets/textures/cwd.png");
+        touch(conflictingCwd / "assets/audio/cwd.wav");
+        std::filesystem::create_directories(emptyProject);
+        std::filesystem::current_path(conflictingCwd);
+        auto& resources = Archura::ResourceManager::Get();
+        resources.SetProjectRoot(projectOne, true);
+        Archura::GameBuilderPanel builder;
+        builder.RefreshModelList();
+        builder.RefreshTextureList();
+        builder.RefreshAudioList();
+        Check(builder.GetModelFiles() == std::vector<std::string>{"first.obj"} &&
+                  builder.GetTextureFiles() == std::vector<std::string>{"first.png"} &&
+                  builder.GetAudioFiles() == std::vector<std::string>{"first.wav"},
+              "GameBuilder lists only the explicit project's assets from unrelated CWD");
+        Check(std::filesystem::path(builder.ResolveModelSpawnPath("first.obj")) ==
+                  projectOne / "assets/models/first.obj",
+              "GameBuilder resolves its model against the explicit project");
+        Check(std::filesystem::path(Archura::AudioSystem::ResolveAudioPath("first.wav")) ==
+                  projectOne / "assets/audio/first.wav" &&
+                  Archura::AudioSystem::ResolveAudioPath("cwd.wav").empty() &&
+                  Archura::AudioSystem::ResolveAudioPath("assets/audio/cwd.wav").empty(),
+              "explicit audio resolution retains project audio and rejects CWD-only fallback");
+
+        resources.SetProjectRoot(projectTwo, true);
+        Check(builder.ResolveModelSpawnPath("first.obj").empty(),
+              "a cached model directory cannot resolve a previous project's model");
+        builder.InvalidateAssets();
+        Check(builder.GetModelFiles().empty() && builder.GetTextureFiles().empty() &&
+                  builder.GetAudioFiles().empty(),
+              "project switch invalidates every GameBuilder asset list");
+        builder.RefreshModelList();
+        builder.RefreshTextureList();
+        builder.RefreshAudioList();
+        Check(builder.GetModelFiles() == std::vector<std::string>{"second.obj"} &&
+                  builder.GetTextureFiles() == std::vector<std::string>{"second.png"} &&
+                  builder.GetAudioFiles() == std::vector<std::string>{"second.wav"},
+              "GameBuilder refresh discovers the next project's assets after invalidation");
+
+        resources.SetProjectRoot(emptyProject, true);
+        builder.InvalidateAssets();
+        builder.RefreshModelList();
+        builder.RefreshTextureList();
+        builder.RefreshAudioList();
+        Check(builder.GetModelFiles().empty() && builder.GetTextureFiles().empty() &&
+                  builder.GetAudioFiles().empty() && builder.ResolveModelSpawnPath("cwd.obj").empty(),
+              "missing explicit project asset folders never scan or resolve CWD fallbacks");
+        resources.ClearProjectRoot();
+        builder.RefreshModelList();
+        builder.RefreshTextureList();
+        builder.RefreshAudioList();
+        Check(builder.GetModelFiles() == std::vector<std::string>{"cwd.obj"} &&
+                  builder.GetTextureFiles() == std::vector<std::string>{"cwd.png"} &&
+                  builder.GetAudioFiles() == std::vector<std::string>{"cwd.wav"},
+              "legacy unbound GameBuilder retains CWD asset discovery");
+        std::filesystem::current_path(work);
+    }
+
     // -----------------------------------------------------------------------
     // GAUNTLET Loop 5: AudioSystem path normalization & runtime alias (AUD-01/02)
     // and Terrain heightmap / non-square / scaled bounds checks (TERR-01)

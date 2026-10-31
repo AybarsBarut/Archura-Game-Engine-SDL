@@ -20,9 +20,8 @@
 namespace Archura::Serialization {
 // Write and validate a sibling file before touching the destination. Retain the
 // preceding successful save as .bak; failures leave the destination intact.
-inline bool AtomicWrite(const std::string& path, const std::string& content) {
-    if (path.empty() || path.find('\0') != std::string::npos) return false;
-    const std::filesystem::path target(path);
+inline bool AtomicWritePath(const std::filesystem::path& target, const std::string& content) {
+    if (target.empty() || target.native().find(std::filesystem::path::value_type{}) != std::filesystem::path::string_type::npos) return false;
     std::error_code ec;
     if (!target.parent_path().empty()) std::filesystem::create_directories(target.parent_path(), ec);
     if (ec) return false;
@@ -46,5 +45,8 @@ inline bool AtomicWrite(const std::string& path, const std::string& content) {
     std::filesystem::rename(temporary, target, ec);
     return !ec;
 #endif
+}
+inline bool AtomicWrite(const std::string& path, const std::string& content) {
+    return AtomicWritePath(std::filesystem::path(path), content);
 }
 } // namespace Archura::Serialization

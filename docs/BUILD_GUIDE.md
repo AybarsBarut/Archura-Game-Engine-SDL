@@ -501,3 +501,52 @@ scene on validation errors. File operations are available in Edit mode. Existing
 `.scene` files remain available through the legacy `load_game` command. Save As is
 not a portable content export. See [editor readiness](EDITOR_READINESS.md) for
 verified flows, exact test results and remaining product work.
+
+## Editor projects (2026-10-31)
+
+File > New Project creates a new folder inside an existing directory. It never
+repurposes an existing folder. The project contains `project.archproj`,
+`scenes/Main.gameproj`, and `assets/{models,textures,audio,scripts}`. The starter
+has Player, Floor and Sun entities and uses no external assets. The scene uses
+the supported v1 migration path; a normal save writes scene schema v2.
+
+`project.archproj` is separate versioned project metadata:
+
+```json
+{
+  "project_version": 1,
+  "name": "My Game",
+  "content_root": ".",
+  "start_scene": "scenes/Main.gameproj"
+}
+```
+
+Content root and start scene must exist inside the descriptor's canonical folder;
+absolute paths, parent traversal and links escaping that folder are rejected.
+File > Open Project and Recent Projects switch project identity through the
+unsaved-scene guard. The Project browser follows the content root. Relative model,
+texture, audio and skybox references use that explicit root rather than an unrelated
+working directory. Existing absolute authored asset references remain supported;
+this is not a sandbox or a portable asset export policy.
+
+To reopen from any caller working directory:
+
+```powershell
+& 'C:/path/to/runtime/ArchuraEngine.exe' --project 'D:/Games/My Game/project.archproj'
+```
+
+The project argument is resolved before engine bootstrap enters the executable
+folder. Native Windows project/scene paths support Unicode. Legacy importer and
+decoder path encodings still limit some asset filenames; unsupported conversions
+are reported, and full Unicode asset import is not claimed.
+
+Recent projects persist in `%LOCALAPPDATA%/Archura/Editor/recent_projects.json`
+(on Windows), bounded to 16 canonical paths. A malformed preferences file is kept
+and reported; it does not prevent opening a project. Startup never automatically
+loads a recent project. Use the menu or an explicit `--project` argument.
+
+Open Scene and Save Scene As keep the active project and its content root. Save As
+writes a scene copy and does not change the descriptor's `start_scene` or relocate
+assets. Loading legacy `.scene` through the console/pause menu detaches the
+explicit project session only after a successful load. Legacy `.gameproj` scene
+schema v1/v2 support remains available without a project descriptor.

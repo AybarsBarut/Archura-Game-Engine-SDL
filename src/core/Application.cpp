@@ -33,6 +33,7 @@
 
 #include "editor/Editor.h"
 #include "editor/EditorDocumentSmoke.h"
+#include "editor/EditorProjectSmoke.h"
 
 #include "core/GameSaveManager.h"
 #include "core/SerializationJson.h"
@@ -117,14 +118,34 @@ Application::Application(GraphicsLaunchOptions graphicsOptions)
 bool Application::LoadEditorProject(const std::string& path) {
   if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
   ProjectConfig config;
-  if (!ProjectSerializer::LoadProject(path, config, m_Scene.get())) return false;
+  const auto* project = m_Editor->GetProjectDescriptor();
+  const bool loaded = project
+      ? ProjectSerializer::LoadProjectPath(std::filesystem::u8path(path), config, m_Scene.get(), project->contentRoot)
+      : ProjectSerializer::LoadProjectPath(std::filesystem::u8path(path), config, m_Scene.get());
+  if (!loaded) return false;
+  RebindEditorScene();
+  return true;
+}
+
+bool Application::LoadEditorWorkspace(const ProjectDescriptor& project) {
+  if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
+  ProjectConfig config;
+  if (!ProjectSerializer::LoadProjectPath(project.startScene, config, m_Scene.get(), project.contentRoot)) return false;
   RebindEditorScene();
   return true;
 }
 
 bool Application::LoadEditorLegacy(const std::string& path) {
   if (!m_Scene || !m_Editor || m_Editor->IsGameRunning() || IsNetworkViewActive()) return false;
-  if (!GameSaveManager::Get().LoadProject(path, m_Scene.get())) return false;
+  auto& resources = ResourceManager::Get();
+  auto previousRoot = resources.GetProjectRoot();
+  bool previousExplicit = resources.HasExplicitContentRoot();
+  const auto legacyRoot = std::filesystem::absolute(std::filesystem::path(path)).parent_path();
+  resources.SetProjectRoot(legacyRoot);
+  bool loaded = false;
+  try { loaded = GameSaveManager::Get().LoadProject(path, m_Scene.get()); }
+  catch (...) { resources.SwapProjectRoot(previousRoot, previousExplicit); throw; }
+  if (!loaded) { resources.SwapProjectRoot(previousRoot, previousExplicit); return false; }
   RebindEditorScene();
   return true;
 }
@@ -627,7 +648,9 @@ void Application::InitializeGame(const GameManifest& game) {
             << "; editor=off\n";
 }
 
-void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network, const StartupProgressCallback& progress) {
+void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network, const StartupProgressCallback& progress, const std::filesystem::path& projectPath) {
+  if (!projectPath.empty() && (game || network || playStopSmokeTest))
+    throw std::invalid_argument("Project startup cannot be combined with standalone, network or Play/Stop smoke mode");
   const auto reportProgress = [&](StartupStage stage) {
     if (progress && !progress(stage)) throw StartupCancelled{};
   };
@@ -920,6 +943,7 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
     if (frameLimit < 16 || !m_Editor)
       throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
     EditorDocumentSmoke::Run(*m_Editor, *this, m_Scene.get());
+    EditorProjectSmoke::Run(*m_Editor, *this, m_Scene.get());
     smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
   }
   std::string networkProbeID;
@@ -931,6 +955,13 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
     networkProbeID = probe->GetPersistentID();
   }
   if (m_Editor) m_Editor->ResetDocument(m_Scene.get());
+  if (!projectPath.empty()) {
+    if (!m_Editor || !m_Editor->OpenStartupProject(m_Scene.get(), projectPath))
+      throw std::runtime_error("Project startup failed: " + projectPath.u8string());
+    const auto* project = m_Editor->GetProjectDescriptor();
+    if (!project) throw std::runtime_error("Project startup did not establish a project session");
+    std::cerr << "[Project] Opened " << project->name << " | content_root=" << project->contentRoot.u8string() << '\n';
+  }
   if (network && !JoinNetworkGame(network->host, network->port)) throw std::runtime_error("Network connection failed");
   reportProgress(StartupStage::WorldReady);
   reportProgress(StartupStage::Ready);
