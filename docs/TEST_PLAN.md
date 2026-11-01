@@ -243,3 +243,14 @@ destroyed targets and identical handles in a different scene. OS pointer/keyboar
 delivery itself is outside the fixture. The GameplayScroll test retains lightweight
 stubs for the new holding API and continues checking scroll timing independently.
 GRAB-01 final edge cases also verify trigger volumes do not occlude acquisition/holding and mismatched Physics/Scene bindings cannot acquire an identically numbered entity.
+
+
+Local Windows validation: `python tools/validate_local.py` runs dependency preflight,
+all-target Debug/Release builds and full CTest through existing desktop presets.
+`--profile contracts`, `loop`, or `all` select other existing local presets.
+Logs, JUnit, source identity and final status live in a unique ignored
+`build/local-validation/<UTC-id>/report.json` directory. Hosted/Linux and static
+analysis are separate gates. `Archura.Build.LocalValidation` verifies that build
+errors, missing tools, timeouts, interrupts, missing/zero/malformed/failed/all-skipped
+JUnit, changing source and existing locks cannot produce PASS. No GitHub API or
+branch-protection settings are modified by the runner.
