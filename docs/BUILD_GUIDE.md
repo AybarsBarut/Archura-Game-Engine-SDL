@@ -209,8 +209,8 @@ It intentionally fails until a vetted runtime is reproducibly provisioned. No
 replacement DLL is downloaded or committed by this change. The runtime option is
 not switched off automatically to hide a missing dependency. Full graphical
 acceptance still uses `windows-validation` on a provisioned desktop/OpenGL host.
-The dormant `cmake/HeadlessRuntime.cmake` remains unwired and invalid; neither
-these workflows nor loop-only Linux tests certify a Linux server/runtime build.
+The obsolete, unwired headless CMake fragment has been removed. Neither the
+current workflows nor loop-only Linux tests certify a Linux server/runtime build.
 
 ## Dedicated server configuration
 
@@ -721,3 +721,29 @@ face-path configuration; it does not store cubemap pixels or historical file byt
 Projectile gravity and other runtime-only projectile values remain outside the
 authored journal and scene codec. Other component fields, mesh history integration
 and autosave/recovery remain later work.
+
+## Repository structure and Windows entrypoints
+
+`Build.bat`, `build_all.bat`, `DebugRun.bat`, `StartGame_Dev.bat`,
+`StartGame_Release.bat` and `Publish_Release.bat` delegate to
+`tools/windows/engine.ps1`. Normal builds use `windows-x64` and build the engine,
+server and launcher with startup fixtures disabled. Run actions build first unless
+`-SkipBuild` is explicit, then launch from `build/windows-x64/bin/<configuration>`.
+They do not increment versions, download dependencies or restore archived EXEs.
+
+```powershell
+.\Build.bat -Configuration Debug -WhatIf
+.\StartGame_Dev.bat -SkipBuild -Graphics opengl
+.\StartGame_Release.bat -ProjectPath "C:\Projects\My Game\project.archproj"
+.\Publish_Release.bat -Manifest .\samples\standalone\game.json -Output .\build\packages\MyGame
+```
+
+`Publish_Release.bat` now requires explicit named manifest/output arguments and
+uses the atomic, no-overwrite packager. It does not reset an existing distribution
+folder. Preview any action with `-WhatIf`.
+
+Editor smoke fixtures live in `tests/support/editor` and are linked only when
+`ARCHURA_BUILD_STARTUP_TESTS=ON` (the `windows-validation` profile). Normal builds
+reject `--play-stop-smoke-test` with a clear message; ordinary `--smoke-test`
+remains available. Native contract/benchmark/startup registration lives in
+`cmake/NativeValidation.cmake`; the SDK-free loop remains before SDK discovery.

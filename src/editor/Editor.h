@@ -11,7 +11,6 @@
 #undef far
 #endif
 
-#include <deque>
 #include <imgui.h>
 #include <filesystem>
 #include <functional>
@@ -154,7 +153,7 @@ public:
     void RequestWorkspace(Scene* scene, std::string path, bool create = false, std::string name = {});
     bool OpenStartupProject(Scene* scene, const std::filesystem::path& path);
 
-public: // ── Shared State (kept public for minimal refactor surface) ──────────
+private: // Editor-owned state; callers use selection/document/history APIs.
     Entity*   m_SelectedEntity = nullptr;
     std::vector<Entity*> m_SelectedEntities;
     Entity*   m_LastClickedEntity = nullptr;
@@ -325,30 +324,6 @@ private:
 
     void CopySelected();
     void PasteClipboard(Scene* scene);
-};
-
-// ── cout redirect streambuf ──────────────────────────────────────────────────
-class EditorStreamBuf : public std::streambuf {
-public:
-    explicit EditorStreamBuf(Editor* editor) : m_Editor(editor) {}
-
-protected:
-    int_type overflow(int_type c) override {
-        if (c != EOF) {
-            char ch = static_cast<char>(c);
-            if (ch == '\n') {
-                m_Editor->Log(m_Buffer);
-                m_Buffer.clear();
-            } else {
-                m_Buffer += ch;
-            }
-        }
-        return c;
-    }
-
-private:
-    Editor*     m_Editor;
-    std::string m_Buffer;
 };
 
 } // namespace Archura

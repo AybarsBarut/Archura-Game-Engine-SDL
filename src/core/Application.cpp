@@ -32,9 +32,9 @@
 #include "ecs/Entity.h"
 
 #include "editor/Editor.h"
-#include "editor/EditorDocumentSmoke.h"
-#include "editor/EditorProjectSmoke.h"
-#include "editor/EditorHistorySmoke.h"
+#if defined(ARCHURA_ENABLE_EDITOR_STARTUP_CHECKS)
+#include "core/StartupProbeSupport.h"
+#endif
 
 #include "core/GameSaveManager.h"
 #include "core/SerializationJson.h"
@@ -650,6 +650,9 @@ void Application::InitializeGame(const GameManifest& game) {
 }
 
 void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameManifest* game, const NetworkLaunchOptions* network, const StartupProgressCallback& progress, const std::filesystem::path& projectPath) {
+#if !defined(ARCHURA_ENABLE_EDITOR_STARTUP_CHECKS)
+  if (playStopSmokeTest) throw std::invalid_argument("Editor startup checks require ARCHURA_BUILD_STARTUP_TESTS=ON");
+#endif
   if (!projectPath.empty() && (game || network || playStopSmokeTest))
     throw std::invalid_argument("Project startup cannot be combined with standalone, network or Play/Stop smoke mode");
   const auto reportProgress = [&](StartupStage stage) {
@@ -943,9 +946,9 @@ void Application::Run(uint32_t frameLimit, bool playStopSmokeTest, const GameMan
   if (playStopSmokeTest) {
     if (frameLimit < 16 || !m_Editor)
       throw std::runtime_error("Play/Stop smoke requires editor and 16 frames");
-    EditorDocumentSmoke::Run(*m_Editor, *this, m_Scene.get());
-    EditorProjectSmoke::Run(*m_Editor, *this, m_Scene.get());
-    EditorHistorySmoke::Run(*m_Editor, *this, m_Scene.get());
+#if defined(ARCHURA_ENABLE_EDITOR_STARTUP_CHECKS)
+    RunEditorStartupChecks(*m_Editor, *this, m_Scene.get());
+#endif
     smokeProbeID = m_Scene->CreateEntity("PlayStopSmokeProbe")->GetPersistentID();
   }
   std::string networkProbeID;

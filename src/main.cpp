@@ -248,6 +248,9 @@ int main(int argc, char** argv) {
         if (argv[i] && std::string_view(argv[i]) == "--play-stop-smoke-test")
             smokeTest = playStopSmokeTest = true;
     }
+#if !defined(ARCHURA_ENABLE_EDITOR_STARTUP_CHECKS)
+    if (playStopSmokeTest) throw std::invalid_argument("--play-stop-smoke-test requires ARCHURA_BUILD_STARTUP_TESTS=ON");
+#endif
     if (!projectPath.empty()) {
         if (!gamePath.empty() || !network.host.empty() || network.smoke || playStopSmokeTest || startupSplashTest || startupCancelTest)
             throw std::invalid_argument("--project supports editor startup or --smoke-test, without game/network/other startup tests");

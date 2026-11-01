@@ -1,36 +1,68 @@
 # Archura Game Engine SDL
 
-![type](https://img.shields.io/badge/type-game%20engine-blue) ![tech](https://img.shields.io/badge/tech-C%2B%2B%20%2F%20SDL2%20%2F%20OpenGL-black) ![status](https://img.shields.io/badge/status-active-green)
+A C++17 game engine and scene editor using SDL2, OpenGL, ImGui and ECS-style
+entities, with a separate dedicated server and optional Mono scripting runtime.
 
-**Archura Game Engine SDL** is a custom C++ 2D/3D game engine built with SDL2 and OpenGL, focused on modular architecture, deterministic runtime structure, and performance-oriented game systems.
+## Build and run on Windows
 
-Designed for game engine programmers, C++ developers, graphics programmers, SDL2 learners, and developers exploring ECS, rendering, editor tooling, and client/server foundations.
+Use Visual Studio 2022 C++ tools, CMake 3.21+ and Python 3.9+. SDK inputs are
+bundled under `external/`; the full runtime also needs the locally provisioned
+Mono DLL described in the [build guide](docs/BUILD_GUIDE.md).
 
-## Features
+```powershell
+.\Build.bat -Configuration Release
+.\StartGame_Dev.bat
+.\StartGame_Release.bat
+```
 
-- Layered architecture separating game logic, runtime systems, and engine core.
-- Fixed-timestep simulation with variable-rate rendering and interpolation.
-- SDL2/OpenGL rendering foundation with terrain, shadows, and post-processing concepts.
-- Entity Component System architecture for decoupled gameplay systems.
-- ImGui-based editor overlay concepts for scene and entity inspection.
-- Client and dedicated server direction for networked gameplay experiments.
+The root scripts delegate to [one Windows entrypoint](tools/windows/engine.ps1).
+They use current CMake presets and matching runtime directories; archived EXEs
+are never copied into a live build. `-WhatIf` previews the commands, and `-SkipBuild`
+is an explicit opt-out for run/package actions. `build_all.bat` builds both
+configurations. Native contract tests are run separately through validation.
 
-## Installation
+## Validate locally
 
-Install a C++17 toolchain, CMake, and the required bundled/linked dependencies such as SDL2, OpenGL loader libraries, ImGui, glm, and Mono SDK as used by the project.
+```powershell
+python tools/validate_local.py
+python tools/validate_local.py --profile contracts
+python tools/validate_local.py --profile loop
+```
 
-## Usage
+The desktop profile builds all targets and runs the full Debug/Release graph.
+Contracts checks tracked SDK inputs without the graphical runtime; loop uses the
+SDK-free graph. Logs, JUnit and a source-fingerprinted JSON report are written to
+`build/local-validation/`. These are local Windows checks, not hosted/Linux results.
 
-Open the project in your preferred C++ IDE or build through the provided build scripts/CMake workflow, then run the client or engine executable.
+## Package a game
 
-## SEO Keywords
+```powershell
+.\Publish_Release.bat -Manifest .\samples\standalone\game.json -Output .\build\packages\MyGame
+```
 
-C++ game engine, SDL2 game engine, OpenGL game engine, custom game engine, ECS game engine, graphics programming, Archura Engine
+Packaging uses the [validated manifest packager](tools/package_game.py). The output
+must be a new directory. See the [standalone sample](samples/standalone/game.json)
+and [build guide](docs/BUILD_GUIDE.md) for the manifest and runtime prerequisites.
 
-## GitHub Topics
+## Repository layout
 
-`cpp`, `sdl2`, `opengl`, `game-engine`, `ecs`, `graphics-programming`, `gamedev`
+| Directory | Responsibility |
+| --- | --- |
+| `src/core` | Application composition, lifecycle, services and persistence |
+| `src/ecs` | Entity identity, components, hierarchy and scene ownership |
+| `src/editor` | Editor UI, selection, authoring commands and document/project sessions |
+| `src/game`, `src/network` | Gameplay systems and networking |
+| `src/rendering`, `src/audio`, `src/input`, `src/scripting` | Runtime platform systems |
+| `src/server`, `src/launcher` | Separate application entrypoints |
+| `tests`, `tests/support/editor` | Contracts, process fixtures and opt-in editor startup checks |
+| `cmake` | Dependency inventory and native validation target registration |
+| `tools`, `tools/windows` | Validation, packaging and build/run entrypoints |
+| `assets`, `Resources`, `ScriptCore` | Runtime content and managed scripting inputs |
+| `benchmarks`, `examples`, `samples` | Opt-in measurements, API examples and sample game data |
+| `docs` | Architecture, current guides and explicitly historical material |
+| `external` | Third-party dependencies and required runtime SDK inputs |
 
-## Repository
-
-[View on GitHub](https://github.com/AybarsBarut/Archura-Game-Engine-SDL)
+[Architecture and maintenance boundaries](docs/ARCHITECTURE.md) ·
+[Editor readiness](docs/EDITOR_READINESS.md) · [Test plan](docs/TEST_PLAN.md) ·
+[Server configuration](docs/BUILD_GUIDE.md#dedicated-server-configuration) ·
+[Release history](docs/releases/1.0.20.md)

@@ -1,3 +1,7 @@
+Historical design notes preserved during the 2026-11-01 structure audit.
+These are not the current backlog: scene persistence and frame pacing now exist.
+See docs/EDITOR_READINESS.md and docs/ARCHITECTURE.md for current status.
+
 serverside files will be splitted to another repo
 Map save system doesnt exist yet, i need to figure out how can i save a map and how can i send map files to every player in the server and also if any user creates a map to play with his friends or make their own game how they gonna pack their own games
 Needs a user id system to admin commands 

@@ -22,6 +22,12 @@ int main() {
 #endif
     ImGui::CreateContext();
     try {
+        Archura::ConsoleVariable number("contract.number", "12.5", Archura::ConsoleVariable::Type::Float);
+        Require(number.GetAsFloat() == 12.5f && number.GetAsInt() == 12, "ConsoleVariable conversion implementation was not linked correctly");
+        number.SetValue("invalid");
+        Require(number.GetAsFloat() == 0.0f && number.GetAsInt() == 0, "legacy invalid numeric conversion changed");
+        Archura::ConsoleVariable enabled("contract.enabled", "true", Archura::ConsoleVariable::Type::Bool);
+        Require(enabled.GetAsBool(), "ConsoleVariable bool implementation was not linked correctly");
         auto& io = ImGui::GetIO();
         io.IniFilename = nullptr;
         io.DisplaySize = ImVec2(1280, 720);
