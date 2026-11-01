@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Editor.h"
-#include "SceneDocumentSnapshot.h"
-#include "../core/Application.h"
-#include "../core/ProjectSerializer.h"
-#include "../core/ResourceManager.h"
-#include "../rendering/Mesh.h"
+#include "editor/Editor.h"
+#include "editor/SceneDocumentSnapshot.h"
+#include "core/Application.h"
+#include "core/ProjectSerializer.h"
+#include "core/ResourceManager.h"
+#include "rendering/Mesh.h"
 
 #include <chrono>
 #include <filesystem>

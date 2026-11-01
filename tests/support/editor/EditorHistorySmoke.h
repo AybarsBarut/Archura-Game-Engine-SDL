@@ -1,13 +1,13 @@
 #pragma once
 
-#include "Editor.h"
-#include "ComponentEditCommand.h"
-#include "SceneDocumentSnapshot.h"
-#include "../core/Application.h"
-#include "../core/ProjectSerializer.h"
-#include "../core/ResourceManager.h"
-#include "../rendering/Texture.h"
-#include "../game/Weapon.h"
+#include "editor/Editor.h"
+#include "editor/ComponentEditCommand.h"
+#include "editor/SceneDocumentSnapshot.h"
+#include "core/Application.h"
+#include "core/ProjectSerializer.h"
+#include "core/ResourceManager.h"
+#include "rendering/Texture.h"
+#include "game/Weapon.h"
 #include <array>
 #include <fstream>
 
