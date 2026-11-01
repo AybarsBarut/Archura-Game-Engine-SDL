@@ -38,6 +38,9 @@ public:
         m_CreationHandler = std::move(handler);
     }
 
+    void SetTextureHandler(std::function<bool(class Entity*, const std::string&)> handler) {
+        m_TextureHandler = std::move(handler);
+    }
     const std::vector<std::string>& GetTextureFiles() const noexcept { return m_TextureFiles; }
     const std::vector<std::string>& GetAudioFiles() const noexcept { return m_AudioFiles; }
     const std::vector<std::string>& GetModelFiles() const noexcept { return m_ModelFiles; }
@@ -55,6 +58,8 @@ private:
 
     bool m_Open = false;
     std::function<void(Scene*, const std::function<void()>&)> m_CreationHandler;
+
+    std::function<bool(class Entity*, const std::string&)> m_TextureHandler;
 
     // Cached asset lists
     std::vector<std::string> m_TextureFiles;

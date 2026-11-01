@@ -36,6 +36,9 @@ public:
     int GetHeight() const { return m_Height; }
     int GetChannels() const { return m_Channels; }
 
+    bool GeneratesMipmaps() const noexcept { return m_GenerateMipmaps; }
+    bool IsSrgb() const noexcept { return m_Srgb; }
+
     bool IsLoaded() const { return m_TextureID != 0; }
     const std::string& GetPath() const { return m_Path; }
     const std::string& GetCanonicalPath() const { return m_CanonicalPath; }
@@ -49,6 +52,7 @@ private:
     int m_Width = 0;
     int m_Height = 0;
     int m_Channels = 0;
+    bool m_GenerateMipmaps = true, m_Srgb = false;
     std::string m_Path;
     std::string m_CanonicalPath;
 };

@@ -7,6 +7,8 @@
 #include "EntityEditCommand.h"
 #include "ComponentEditCommand.h"
 #include "EntityNameEditCommand.h"
+#include "MeshColorEditCommand.h"
+#include "TextureEditCommand.h"
 #include "HierarchyEditCommand.h"
 #include "../core/SerializationJson.h"
 #include "../core/DeveloperConsole.h"
@@ -97,6 +99,9 @@ bool Editor::Init(Window *window) {
     ExecuteCreation(scene, action);
   });
 
+  m_GameBuilderPanel.SetTextureHandler([this](Entity* entity, const std::string& path) {
+    return entity && ChangeTexture(entity->GetScene(), entity->GetHandle(), path, !IsGameRunning());
+  });
   ApplyDarkTheme();
 
   m_AssetCacheDirty = true;
@@ -104,6 +109,7 @@ bool Editor::Init(Window *window) {
 }
 
 void Editor::Shutdown() {
+  m_TexturePreviewOwners.clear();
   ClearSelection();
   if (m_SceneTexture) {
     glDeleteTextures(1, &m_SceneTexture);
@@ -393,6 +399,9 @@ void Editor::DrawSceneViewport() {
 }
 
 void Editor::DrawEditorUI(Scene *scene) {
+  // Last frame's ImGui draw data has now been submitted. A later Inspector or
+  // Game Builder action may replace this frame's preview after Image queued it.
+  m_TexturePreviewOwners.clear();
   SanitizeSelection(scene);
   if (!m_Enabled) return;
   RefreshDocument(scene);
@@ -935,6 +944,32 @@ void Editor::DrawInspector(Scene *scene) {
     DragVec3WithReset("Scale", tf->scale, 1.0f, 0.05f);
   }
 
+  auto TrackProperty = [&](bool changed, auto apply) {
+    const auto widget = ImGui::GetItemID();
+    const bool activated = ImGui::IsItemActivated(), deactivated = ImGui::IsItemDeactivated();
+    if (activated || (changed && (!m_PropertyGesture || m_PropertyGestureWidget != widget))) {
+      if (++m_PropertyGestureSerial == 0) ++m_PropertyGestureSerial;
+      m_PropertyGesture = m_PropertyGestureSerial;
+      m_PropertyGestureWidget = widget;
+    }
+    if (changed) apply(m_PropertyGesture);
+    if (deactivated && m_PropertyGestureWidget == widget) {
+      m_UndoHistory.EndGesture(*scene, m_PropertyGesture);
+      m_PropertyGestureWidget = 0;
+      m_PropertyGesture = 0;
+      RefreshDocument(scene, true);
+    }
+  };
+  auto EditProperty = [&](auto& component, auto draw) {
+    using T = std::decay_t<decltype(component)>;
+    T desired = component;
+    const bool changed = draw(desired);
+    if (IsGameRunning()) { if (changed) component = std::move(desired); }
+    else TrackProperty(changed, [&](uint64_t key) {
+      SetComponentValue<T>(scene, m_SelectedEntity->GetHandle(), std::move(desired), key);
+    });
+  };
+
   // ── Mesh Renderer ──────────────────────────────────────────────────────
   auto *mr = m_SelectedEntity->GetComponent<MeshRenderer>();
   if (mr) {
@@ -944,7 +979,10 @@ void Editor::DrawInspector(Scene *scene) {
   }
   if (mr && ImGui::CollapsingHeader("Mesh Renderer")) {
     ImGui::Text("Mesh: %s", mr->mesh ? "Loaded" : "None");
-    ImGui::ColorEdit3("Color", &mr->color.x);
+    glm::vec3 desired = mr->color;
+    const bool changed = ImGui::ColorEdit3("Color##Mesh", &desired.x);
+    if (IsGameRunning()) { if (changed) mr->color = desired; }
+    else TrackProperty(changed, [&](uint64_t key) { SetMeshColorValue(scene, m_SelectedEntity->GetHandle(), desired, key); });
   }
 
   // ── Texture ────────────────────────────────────────────────────────────
@@ -961,13 +999,7 @@ void Editor::DrawInspector(Scene *scene) {
         if (ImGui::Selectable(m_CachedTextureFiles[i].c_str(), isSel)) {
           selTex = i;
           try {
-            std::string p = ResourceManager::Get().ResolveAssetPath("assets/textures/" + m_CachedTextureFiles[i]).string();
-            std::string nm = std::filesystem::path(p).stem().string();
-            auto tex = TextureManager::Get().LoadShared(nm, p);
-            if (tex) {
-              mr->SetTextureAsset(std::move(tex));
-              Log("Texture: " + p);
-            }
+            ChangeTexture(scene, m_SelectedEntity->GetHandle(), "assets/textures/" + m_CachedTextureFiles[i], !IsGameRunning());
           } catch (const std::exception& error) {
             Log(std::string("[Assets] Texture import failed: ") + error.what());
           }
@@ -978,37 +1010,16 @@ void Editor::DrawInspector(Scene *scene) {
       ImGui::EndListBox();
     }
     if (mr->texture) {
+      if (mr->textureAsset) m_TexturePreviewOwners.push_back(mr->textureAsset);
       ImGui::Image((void *)(intptr_t)mr->texture->GetID(), ImVec2(80, 80));
       ImGui::SameLine();
       ImGui::BeginGroup();
       ImGui::Text("ID %u", mr->texture->GetID());
-      if (ImGui::SmallButton("Remove"))
-        mr->ClearTextureAsset();
+      if (ImGui::SmallButton("Remove##Texture"))
+        ChangeTexture(scene, m_SelectedEntity->GetHandle(), {}, !IsGameRunning());
       ImGui::EndGroup();
     }
   }
-
-  auto EditProperty = [&](auto& component, auto draw) {
-    using T = std::decay_t<decltype(component)>;
-    T desired = component;
-    const bool changed = draw(desired);
-    const auto widget = ImGui::GetItemID();
-    const bool activated = ImGui::IsItemActivated(), deactivated = ImGui::IsItemDeactivated();
-    if (!IsGameRunning()) {
-      if (activated || (changed && (!m_PropertyGesture || m_PropertyGestureWidget != widget))) {
-        if (++m_PropertyGestureSerial == 0) ++m_PropertyGestureSerial;
-        m_PropertyGesture = m_PropertyGestureSerial;
-        m_PropertyGestureWidget = widget;
-      }
-      if (changed) SetComponentValue<T>(scene, m_SelectedEntity->GetHandle(), std::move(desired), m_PropertyGesture);
-      if (deactivated && m_PropertyGestureWidget == widget) {
-        m_UndoHistory.EndGesture(*scene, m_PropertyGesture);
-        m_PropertyGestureWidget = 0;
-        m_PropertyGesture = 0;
-        RefreshDocument(scene, true);
-      }
-    } else if (changed) component = std::move(desired);
-  };
 
   // Collider configuration is separate from body motion: no body means static.
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
@@ -2326,6 +2337,30 @@ bool Editor::ReparentEntities(Scene* scene, const std::vector<EntityHandle>& chi
   const auto result = m_UndoHistory.Execute(*scene, command);
   ApplyHistorySelection(scene, result);
   if (result.status == ActionResult::Status::Blocked) Log("[Hierarchy] Invalid or changed hierarchy; scene and history retained.");
+  return result.status == ActionResult::Status::Applied;
+}
+
+bool Editor::SetTextureValue(Scene* scene, EntityHandle handle, const std::string& path) {
+  return ChangeTexture(scene, handle, path, true);
+}
+bool Editor::ChangeTexture(Scene* scene, EntityHandle handle, const std::string& path, bool record) {
+  if (!scene || HasPendingDocumentAction() || record == IsGameRunning()) return false;
+  if (record) RefreshDocument(scene, true);
+  std::string error;
+  auto command = TextureEditCommand::Create(*scene, handle, path, std::filesystem::u8path(m_Document.Path()).parent_path(), error);
+  if (!command) { if (!error.empty()) Log("[Texture] " + error); return false; }
+  const auto result = record ? m_UndoHistory.Execute(*scene, command) : command->Apply(*scene, false);
+  if (record) ApplyHistorySelection(scene, result);
+  if (result.status == ActionResult::Status::Blocked) Log("[Texture] " + command->Error());
+  return result.status == ActionResult::Status::Applied;
+}
+bool Editor::SetMeshColorValue(Scene* scene, EntityHandle handle, const glm::vec3& color, uint64_t gesture) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
+  if (!gesture) RefreshDocument(scene, true);
+  auto command = MeshColorEditCommand::Create(*scene, handle, color);
+  if (!command) return false;
+  const auto result = gesture ? m_UndoHistory.ExecuteGesture(*scene, command, gesture) : m_UndoHistory.Execute(*scene, command);
+  if (gesture) RefreshDocument(scene); else ApplyHistorySelection(scene, result);
   return result.status == ActionResult::Status::Applied;
 }
 

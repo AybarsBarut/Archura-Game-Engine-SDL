@@ -291,3 +291,37 @@ tests were rebuilt and passed in both configurations afterward. Evidence: ignore
 `build/m1c-properties-*` build/test logs and JUnit. The previously pushed structural
 slice's hosted run 41291327614 never started jobs because of the account billing
 lock; no hosted acceptance is claimed.
+
+## Mesh color and texture history — M1c fifth slice, 2026-11-01
+
+Mesh diffuse color joins the pending CPU gesture journal without retaining or
+modifying mesh/shader/texture owners. Inspector texture assignment/removal and
+Game Builder assignment share file-recipe commands. Commands pin source paths and
+project context, stage private textures before committing, preserve authored
+aliases and mipmap/sRGB settings, and block/retry on missing/corrupt files or
+resource budgets. Generated/fileless and borrowed raw textures cannot be replaced
+by these authoring commands. Play-time edits stay outside authored history.
+
+Commands retain no GPU assets. Preview owners are retained only until the ImGui
+frame that references their raw GL IDs has rendered. Optional typed boolean scene
+fields preserve mipmap/sRGB settings through delete/restore and save/load; old
+files default to the original settings. File history reconstructs current disk
+content, without snapshotting historical image bytes.
+
+Pure color regressions cover grouping, return-to-origin, independent texture
+state, stale values and missing renderers. Headless codec/material tests cover
+Inspector-equivalent assignment/removal, Game Builder routing, missing/corrupt
+file retry, file/decoded budgets, cache alias isolation, weak texture lifetime,
+flags/moves, legacy defaults, ill-typed flags, restored persistent IDs and root
+guards. Native Startup.PlayStop exercises actual GPU texture upload, Game Builder,
+color grouping, missing-file retention/retry, pending/Play authoring guards,
+runtime texture removal, Stop/Redo, deletion reconstruction and complete rewind
+to the clean baseline. No separate mouse/keyboard UI acceptance is claimed.
+
+Weapon/Projectile and Skybox values, other property types, shared scene mesh
+history and M1d autosave/recovery remain later slices.
+
+Final Windows all-target Debug/Release builds passed. Full CTest passed **57/57**
+in Debug (38.44 s) and Release (35.15 s), including the final preview-lifetime fix.
+Evidence is under ignored `build/m1c-material-final-*` logs and JUnit outputs.
+Hosted/Linux and separate pointer/keyboard UI acceptance are not claimed.

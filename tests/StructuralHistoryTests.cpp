@@ -1,6 +1,7 @@
 #include "editor/HierarchyEditCommand.h"
 #include "editor/ComponentEditCommand.h"
 #include "editor/EntityNameEditCommand.h"
+#include "editor/MeshColorEditCommand.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -223,6 +224,31 @@ void GestureAllocationFailures() {
     }
     CHECK(blocked > 0 && success > 0);
 }
+void MeshColorHistory() {
+    Scene scene;
+    auto* entity = scene.CreateEntity("colored");
+    auto* renderer = entity->AddComponent<MeshRenderer>();
+    auto* transform = entity->GetComponent<Transform>();
+    TransformUndoHistory history;
+    const auto delta = [&](const glm::vec3& color, uint64_t key) {
+        return history.ExecuteGesture(scene, MeshColorEditCommand::Create(scene, entity->GetHandle(), color), key);
+    };
+    CHECK(Applied(delta({0.8f,0.7f,0.6f}, 1)) && Applied(delta({0.2f,0.3f,0.4f}, 1)));
+    CHECK(Applied(history.UndoAction(scene)) && renderer->color == glm::vec3(1));
+    CHECK(history.UndoAction(scene).status == ActionResult::Status::Empty && history.CanRedo(scene));
+    CHECK(Applied(delta({0.1f,0.2f,0.3f}, 2)) && Applied(delta({1,1,1}, 2)) && history.EndGesture(scene, 2) && history.CanRedo(scene));
+    CHECK(Applied(history.RedoAction(scene)) && renderer->color == glm::vec3(0.2f,0.3f,0.4f));
+    CHECK(entity->GetComponent<MeshRenderer>() == renderer && entity->GetComponent<Transform>() == transform);
+    renderer->color = {8,8,8};
+    CHECK(!history.CanUndo(scene));
+    renderer->color = {0.2f,0.3f,0.4f};
+    CHECK(Applied(history.UndoAction(scene)));
+    auto command = MeshColorEditCommand::Create(scene, entity->GetHandle(), {0,0,0});
+    Scene foreign;
+    CHECK(!command->CanApply(foreign, false));
+    entity->RemoveComponent<MeshRenderer>();
+    CHECK(!command->CanApply(scene, false));
+}
 void LifetimeAndBounds() {
     alignas(Scene) unsigned char storage[sizeof(Scene)];
     Scene* scene = new (storage) Scene;
@@ -275,6 +301,6 @@ int main() {
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
-    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); GestureHistory(); GestureAllocationFailures(); LifetimeAndBounds(); ComponentAllocationFailures();
+    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); GestureHistory(); GestureAllocationFailures(); MeshColorHistory(); LifetimeAndBounds(); ComponentAllocationFailures();
     return failures ? 1 : 0;
 }

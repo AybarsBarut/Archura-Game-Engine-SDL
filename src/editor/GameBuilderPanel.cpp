@@ -295,6 +295,7 @@ bool GameBuilderPanel::AssignTextureToEntity(Entity* selectedEntity,
         return false;
     }
     const std::string relativePath = "assets/textures/" + textureFile;
+    if (m_TextureHandler) return m_TextureHandler(selectedEntity, relativePath);
     const std::filesystem::path resolvedPath =
         ResourceManager::Get().ResolveAssetPath(relativePath);
     if (resolvedPath.empty()) {
@@ -303,10 +304,11 @@ bool GameBuilderPanel::AssignTextureToEntity(Entity* selectedEntity,
     const std::string resolvedStr = resolvedPath.string();
     const std::string canonicalKey =
         ResourceManager::Get().CanonicalAssetKey(resolvedStr);
-    auto tex = TextureManager::Get().LoadShared(canonicalKey, resolvedStr);
-    if (!tex) {
+    auto tex = std::make_shared<Texture>();
+    if (!tex->LoadFromFile(resolvedStr)) {
         return false;
     }
+    tex->SetCanonicalPath(canonicalKey);
     tex->SetPath(relativePath);
     mr->SetTextureAsset(std::move(tex));
     std::cout << "[GameBuilder] Texture atandi: " << relativePath << std::endl;

@@ -579,8 +579,8 @@ shared scene history while that tool is open.
 Reconstruction failure (for example a missing model/texture) retains the current
 scene and command so the operation can be retried after restoring the asset.
 Changes to affected entity values, hierarchy or project context outside history
-can block a command to protect current work. Continuous component/property edits, material assignment, mesh edits and
-autosave/recovery are later slices.
+can block a command to protect current work. Mesh edits, other component/property types and autosave/recovery remain later
+slices; supported Inspector values and file textures are described below.
 
 ## Hierarchy and component operations (M1c)
 
@@ -603,9 +603,8 @@ Play-time Inspector component changes remain runtime-only.
 Hierarchy commands accept at most 2048 moved children and 8 MiB of accounted
 retained data; component commands accept at most 1 MiB. Both also share the global
 50-entry / 32 MiB history budget. Component commands cover Collider, RigidBody and
-Script; other component types are outside this slice. Continuous property drags,
-class-name typing and other direct edits have not become gesture history yet.
-If they change a component outside the journal, an older command for that component
+Script. Supported continuous property and text edits are described below.
+Direct edits outside the journal can change a component so an older command
 can be blocked until the conflicting values are restored.
 
 ## Inspector property gestures and text (M1c)
@@ -630,5 +629,36 @@ even when longer than the 127 displayed characters. Unchanged truncated text is
 preserved. Successful commits acknowledge the draft so Undo before the next
 render cannot accidentally reapply it. Play-time edits remain runtime-only.
 
-Material/texture assignment, mesh geometry, Weapon/Projectile values, Skybox
-fields and other property/component types remain outside this shared history.
+Mesh geometry, Weapon/Projectile values, Skybox fields and other unsupported
+property/component types remain outside this shared history.
+
+## Mesh color and file texture history (M1c)
+
+Inspector Mesh Renderer color uses the same gesture history: a continuous color
+edit is one Undo operation, and returning to the original color preserves Redo.
+Color commands affect only diffuse color and leave texture, mesh and shader
+assignments intact. Inspector texture selection/removal and Game Builder texture
+assignment now share the scene Undo/Redo journal. Play-time Inspector/Game Builder
+texture edits remain runtime-only.
+
+Texture commands store CPU file recipes, authored paths, pinned source paths,
+project context and mipmap/sRGB settings. They reconstruct a private texture before
+replacing the live assignment, preserving unrelated cache aliases and entity
+handles. History retains no Texture/GPU owners. ImGui preview resources stay alive
+for their render frame independently of history. Commands follow persistent IDs
+after Play/Stop and entity deletion/restoration; scene/project loads still clear
+history.
+
+Missing/corrupt files, file/decoded-image budget failures, stale texture metadata
+or a changed project context block the operation and retain the scene/history.
+Restore the file/context and retry. File recipes reload the current disk content;
+they are not image-content version snapshots. Generated textures without a file
+source and borrowed raw textures are retained with an explanatory message rather
+than replaced by an operation that cannot be undone. File recipes share the
+1 MiB command payload limit and scene history's 50-entry/32 MiB bounds. Texture
+reconstruction uses the existing source-file and decoded-texture resource budgets.
+
+Scene JSON now writes optional boolean `texture_mipmaps` and `texture_srgb` fields.
+Old saves load with the existing defaults (mipmaps on, sRGB off). Custom settings
+survive texture Undo, entity reconstruction and save/load; ill-typed fields are
+rejected before scene mutation. No format-version bump is required.

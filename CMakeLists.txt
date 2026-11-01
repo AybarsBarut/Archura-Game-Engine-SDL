@@ -670,7 +670,7 @@ if(BUILD_TESTING)
     add_test(NAME Archura.Core.ProjectSerializer COMMAND ArchuraProjectSerializerTests)
 
     add_executable(ArchuraGameSaveManagerTests
-        tests/GameSaveManagerTests.cpp src/editor/EntityEditCommand.cpp src/core/GameSaveManager.cpp
+        tests/GameSaveManagerTests.cpp src/editor/TextureEditCommand.cpp src/editor/EntityEditCommand.cpp src/core/GameSaveManager.cpp
         src/rendering/Mesh.cpp src/rendering/Texture.cpp
         src/rendering/Shader.cpp src/core/Logger.cpp
         src/ecs/Component.cpp src/ecs/Entity.cpp src/core/ResourceManager.cpp src/rendering/Camera.cpp src/rendering/Terrain.cpp src/core/AudioSystem.cpp src/editor/GameBuilderPanel.cpp)
