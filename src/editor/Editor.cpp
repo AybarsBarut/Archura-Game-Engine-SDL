@@ -5,6 +5,8 @@
 #include "Editor.h"
 #include "SceneViewport.h"
 #include "EntityEditCommand.h"
+#include "ComponentEditCommand.h"
+#include "HierarchyEditCommand.h"
 #include "../core/SerializationJson.h"
 #include "../core/DeveloperConsole.h"
 #include "../core/Application.h"
@@ -697,7 +699,8 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
 
   std::vector<Entity*> flatList;
   Entity* pendingShiftSelect = nullptr;
-  std::vector<EntityHandle> pendingDeleteHandles;
+  std::vector<EntityHandle> pendingDeleteHandles, pendingParentHandles;
+  EntityHandle pendingParent;
 
   std::function<void(Entity *)> DrawNode = [&](Entity *entity) {
     flatList.push_back(entity);
@@ -774,8 +777,10 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
               ImGui::AcceptDragDropPayload("ENTITY_DRAG")) {
         EntityID did = *(const EntityID *)pl->Data;
         Entity *de = scene->GetEntity(did);
-        if (de && de != entity)
-          de->SetParent(entity);
+        if (de && de != entity) {
+          pendingParentHandles = {de->GetHandle()};
+          pendingParent = entity->GetHandle();
+        }
       }
       ImGui::EndDragDropTarget();
     }
@@ -785,11 +790,11 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
       bool inSelection = std::find(m_SelectedEntities.begin(), m_SelectedEntities.end(), entity) != m_SelectedEntities.end();
       if (ImGui::MenuItem("Unparent")) {
         if (inSelection) {
-            for (auto* e : m_SelectedEntities) {
-                if (e) e->SetParent(nullptr);
-            }
+            pendingParentHandles = m_SelectionState.GetSelectedHandles();
+            pendingParent = {};
         } else {
-            entity->SetParent(nullptr);
+            pendingParentHandles = {entity->GetHandle()};
+            pendingParent = {};
         }
       }
       if (ImGui::MenuItem("Delete")) {
@@ -847,12 +852,16 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
   if (ImGui::BeginDragDropTarget()) {
     if (const ImGuiPayload *pl = ImGui::AcceptDragDropPayload("ENTITY_DRAG")) {
       EntityID did = *(const EntityID *)pl->Data;
-      if (Entity *de = scene->GetEntity(did))
-        de->SetParent(nullptr);
+      if (Entity *de = scene->GetEntity(did)) {
+        pendingParentHandles = {de->GetHandle()};
+        pendingParent = {};
+      }
     }
     ImGui::EndDragDropTarget();
   }
 
+  if (pendingDeleteHandles.empty() && !pendingParentHandles.empty())
+    ReparentEntities(scene, pendingParentHandles, pendingParent);
   ImGui::End();
 }
 
@@ -981,8 +990,11 @@ void Editor::DrawInspector(Scene *scene) {
   // Collider configuration is separate from body motion: no body means static.
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
   if (!bc && ImGui::Button("Add Collider")) {
-    bc = m_SelectedEntity->AddComponent<BoxCollider>();
-    FitPrimitiveCollider(*bc, mr ? mr->mesh : nullptr);
+    BoxCollider desired;
+    FitPrimitiveCollider(desired, mr ? mr->GetMesh() : nullptr);
+    if (IsGameRunning()) *m_SelectedEntity->AddComponent<BoxCollider>() = desired;
+    else SetComponentValue<BoxCollider>(scene, m_SelectedEntity->GetHandle(), desired);
+    bc = m_SelectedEntity->GetComponent<BoxCollider>();
   }
   if (bc && ImGui::CollapsingHeader("Collider")) {
     const char *shapeNames[] = {"Box", "Ramp", "Sphere"};
@@ -1000,9 +1012,19 @@ void Editor::DrawInspector(Scene *scene) {
     if (mr && mr->mesh) {
       const auto type = mr->mesh->GetSource().type;
       if ((type == MeshSourceType::Cube || type == MeshSourceType::Sphere || type == MeshSourceType::Ramp) &&
-          ImGui::Button("Fit Primitive Collider"))
-        FitPrimitiveCollider(*bc, mr->mesh);
+          ImGui::Button("Fit Primitive Collider")) {
+        BoxCollider desired = *bc;
+        FitPrimitiveCollider(desired, mr->GetMesh());
+        if (IsGameRunning()) *bc = desired;
+        else SetComponentValue<BoxCollider>(scene, m_SelectedEntity->GetHandle(), desired);
+      }
     }
+  }
+
+  if (bc && ImGui::Button("Remove Collider")) {
+    if (IsGameRunning()) m_SelectedEntity->RemoveComponent<BoxCollider>();
+    else SetComponentValue<BoxCollider>(scene, m_SelectedEntity->GetHandle(), std::nullopt);
+    bc = m_SelectedEntity->GetComponent<BoxCollider>();
   }
 
   if (ImGui::CollapsingHeader("Physics")) {
@@ -1010,15 +1032,18 @@ void Editor::DrawInspector(Scene *scene) {
     int motion = !body ? 0 : (body->isKinematic ? 2 : 1);
     const char* motionNames[] = {"Static", "Dynamic", "Kinematic"};
     if (ImGui::Combo("Motion", &motion, motionNames, 3)) {
-      if (motion == 0) {
-        m_SelectedEntity->RemoveComponent<RigidBody>();
-        body = nullptr;
-      } else {
-        if (!body) body = m_SelectedEntity->AddComponent<RigidBody>();
-        body->isKinematic = motion == 2;
-        if (!(body->mass > 0.0f)) body->mass = 1.0f;
-        body->velocity = body->force = body->angularVelocity = glm::vec3(0.0f);
+      std::optional<RigidBody> desired;
+      if (motion != 0) {
+        desired = body ? *body : RigidBody{};
+        desired->isKinematic = motion == 2;
+        if (!(desired->mass > 0.0f)) desired->mass = 1.0f;
+        desired->velocity = desired->force = desired->angularVelocity = glm::vec3(0.0f);
       }
+      if (IsGameRunning()) {
+        if (desired) *m_SelectedEntity->AddComponent<RigidBody>() = *desired;
+        else m_SelectedEntity->RemoveComponent<RigidBody>();
+      } else SetComponentValue<RigidBody>(scene, m_SelectedEntity->GetHandle(), std::move(desired));
+      body = m_SelectedEntity->GetComponent<RigidBody>();
     }
     if (!bc) ImGui::TextWrapped("Add a Collider for solid contacts and player pushing.");
     if (body) {
@@ -1036,8 +1061,10 @@ void Editor::DrawInspector(Scene *scene) {
       ImGui::Checkbox("Continuous Collision", &body->continuous);
     }
     if (bc && bc->shape == BoxCollider::Shape::Sphere && ImGui::Button("Apply Ball Physics")) {
-      if (!body) body = m_SelectedEntity->AddComponent<RigidBody>();
-      ConfigureBall(*body);
+      RigidBody desired = body ? *body : RigidBody{};
+      ConfigureBall(desired);
+      if (IsGameRunning()) *m_SelectedEntity->AddComponent<RigidBody>() = desired;
+      else SetComponentValue<RigidBody>(scene, m_SelectedEntity->GetHandle(), desired);
     }
   }
 
@@ -1113,8 +1140,10 @@ void Editor::DrawInspector(Scene *scene) {
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.15f, 0.15f, 1.0f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                             ImVec4(0.75f, 0.22f, 0.22f, 1.0f));
-      if (ImGui::SmallButton("X##RemSC"))
-        m_SelectedEntity->RemoveComponent<ScriptComponent>();
+      if (ImGui::SmallButton("X##RemSC")) {
+        if (IsGameRunning()) m_SelectedEntity->RemoveComponent<ScriptComponent>();
+        else SetComponentValue<ScriptComponent>(scene, m_SelectedEntity->GetHandle(), std::nullopt);
+      }
       ImGui::PopStyleColor(2);
     } else {
       auto& newScBuf = m_InspectorText.newScript;
@@ -1125,8 +1154,10 @@ void Editor::DrawInspector(Scene *scene) {
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                             ImVec4(0.22f, 0.60f, 0.22f, 1.0f));
       if (ImGui::SmallButton("+ Script") && strlen(newScBuf) > 0) {
-        auto *ns = m_SelectedEntity->AddComponent<ScriptComponent>();
-        ns->className = newScBuf;
+        ScriptComponent desired;
+        desired.className = newScBuf;
+        if (IsGameRunning()) *m_SelectedEntity->AddComponent<ScriptComponent>() = std::move(desired);
+        else SetComponentValue<ScriptComponent>(scene, m_SelectedEntity->GetHandle(), std::move(desired));
         newScBuf[0] = '\0';
       }
       ImGui::PopStyleColor(2);
@@ -2254,6 +2285,37 @@ bool Editor::DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handl
   ApplyHistorySelection(scene, result);
   return true;
 }
+
+bool Editor::ReparentEntities(Scene* scene, const std::vector<EntityHandle>& children, EntityHandle parent) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
+  RefreshDocument(scene, true);
+  SanitizeSelection(scene);
+  const auto selection = m_SelectionState.CapturePersistentSnapshot();
+  auto command = HierarchyEditCommand::Create(*scene, children, parent,
+      selection.selectedPersistentIDs, selection.primaryPersistentID);
+  if (!command) return false; // Includes a no-op: keep the existing Redo branch.
+  const auto result = m_UndoHistory.Execute(*scene, command);
+  ApplyHistorySelection(scene, result);
+  if (result.status == ActionResult::Status::Blocked) Log("[Hierarchy] Invalid or changed hierarchy; scene and history retained.");
+  return result.status == ActionResult::Status::Applied;
+}
+
+template<class T> bool Editor::SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
+  RefreshDocument(scene, true);
+  SanitizeSelection(scene);
+  const auto selection = m_SelectionState.CapturePersistentSnapshot();
+  auto command = ComponentEditCommand<T>::Create(*scene, handle, std::move(desired),
+      selection.selectedPersistentIDs, selection.primaryPersistentID);
+  if (!command) return false;
+  const auto result = m_UndoHistory.Execute(*scene, command);
+  ApplyHistorySelection(scene, result);
+  if (result.status == ActionResult::Status::Blocked) Log("[Component] Component changed; scene and history retained.");
+  return result.status == ActionResult::Status::Applied;
+}
+template bool Editor::SetComponentValue<BoxCollider>(Scene*, EntityHandle, std::optional<BoxCollider>);
+template bool Editor::SetComponentValue<RigidBody>(Scene*, EntityHandle, std::optional<RigidBody>);
+template bool Editor::SetComponentValue<ScriptComponent>(Scene*, EntityHandle, std::optional<ScriptComponent>);
 
 void Editor::UndoLastAction(Scene *scene) {
   if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;

@@ -546,6 +546,11 @@ if(BUILD_TESTING)
     target_include_directories(ArchuraEntityEditCommitTests PRIVATE src external/glm)
     add_test(NAME Archura.ECS.EntityEditCommit COMMAND ArchuraEntityEditCommitTests)
 
+    add_executable(ArchuraStructuralHistoryTests
+        tests/StructuralHistoryTests.cpp src/editor/HierarchyEditCommand.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
+    target_include_directories(ArchuraStructuralHistoryTests PRIVATE src external/glm)
+    add_test(NAME Archura.Editor.StructuralHistory COMMAND ArchuraStructuralHistoryTests)
+
     add_executable(ArchuraTransformUndoTests
         tests/TransformUndoHistoryTests.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
     target_include_directories(ArchuraTransformUndoTests PRIVATE src external/glm)

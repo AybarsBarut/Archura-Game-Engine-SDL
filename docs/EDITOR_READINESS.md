@@ -227,3 +227,37 @@ Final Windows all-target builds passed for Debug and Release. Full CTest passed
 **56/56** in Debug (40.49 s) and Release (35.92 s). Evidence is retained under
 ignored `build/m1c-entity-*` build/test logs and JUnit files. Hosted CI and Linux
 execution were outside this local Windows acceptance.
+
+## Hierarchy and component commands — M1c third slice, 2026-11-01
+
+Hierarchy drag/drop and context Unparent now publish one chronological command,
+after drawing the tree. Group unparent restores all original parents and sibling
+positions atomically through the existing prepared ECS graph commit. Local TRS and
+entity handles remain unchanged. Only affected sibling groups are captured;
+unrelated hierarchy edits remain intact. Cycles/depth/stale identities reject
+without consuming history. Captured groups detect external sibling changes.
+
+Collider add/remove/fit, Physics Motion/Apply Ball Physics, and Script add/remove
+now use restricted CPU-value commands. They preserve the entity generation and
+unrelated components. Complete Script class names are retained, runtime instance
+IDs are excluded. Both command types bind Scene lifetime/persistent IDs, work after
+delete reconstruction and Play/Stop, preserve selection and dirty baselines,
+and reject authoring while Play or a document decision owns input. Existing
+Play-time Inspector component changes still affect only runtime values.
+
+A new StructuralHistory contract covers multiple parent groups, exact siblings,
+nested group unparent, cycles, external changes, foreign/reused Scene addresses,
+iteration rejection, mixed transform history, component values/no-ops/bounds and
+allocation-failure rollback. Native Startup.PlayStop extends the coordinator with
+mixed create/reparent/add/remove/delete history through Stop and restored entity
+generations, long Script names, selection and clean baseline restoration. Mouse
+and keyboard UI acceptance is not claimed for this slice.
+
+This covers the exposed structural operations for Collider, RigidBody and Script.
+Continuous property edits, Script class typing, material/texture assignment,
+other component types, mesh histories and M1d autosave/recovery remain later work.
+
+Final all-target Windows builds passed in Debug and Release; full CTest passed
+**57/57** in Debug (38.46 s) and Release (36.59 s). Logs/JUnit are under ignored
+`build/m1c-structural-*`. Hosted CI and Linux execution were outside this local
+Windows gate.
