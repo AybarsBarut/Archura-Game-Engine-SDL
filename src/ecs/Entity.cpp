@@ -187,6 +187,151 @@ bool Scene::CommitEntityReplacement(const std::vector<EntityHandle>& replaced,
   return true;
 }
 
+bool Scene::CommitEntityEdit(const std::vector<EntityHandle>& replaced,
+                             const std::vector<EntityHandle>& staged,
+                             const std::vector<std::string>& persistentIDs,
+                             const std::vector<EntityParentLink>& links,
+                             const std::vector<std::string>& entityOrder) {
+  AssertOwnerThread();
+  if (IsIterating() || persistentIDs.size() != staged.size()) return false;
+
+  std::unordered_set<EntityID> removedIDs, stagedIDs;
+  for (const auto handle : replaced)
+    if (!GetEntity(handle) || !removedIDs.insert(handle.id).second) return false;
+  for (const auto handle : staged)
+    if (!GetEntity(handle) || removedIDs.count(handle.id) ||
+        !stagedIDs.insert(handle.id).second) return false;
+
+  struct Node {
+    Entity* entity;
+    Entity* parent = nullptr;
+    std::vector<Entity*> children;
+  };
+  std::vector<Node> nodes;
+  nodes.reserve(m_Entities.size() - removedIDs.size());
+  std::unordered_map<std::string, size_t> identities;
+  std::unordered_map<Entity*, size_t> indices;
+  identities.reserve(m_Entities.size() - removedIDs.size());
+  indices.reserve(m_Entities.size() - removedIDs.size());
+  const auto add = [&](Entity* entity, const std::string& identity) {
+    if (!Entity::IsValidPersistentID(identity) || !identities.emplace(identity, nodes.size()).second)
+      return false;
+    indices.emplace(entity, nodes.size());
+    nodes.push_back(Node{entity});
+    return true;
+  };
+  for (const auto& entity : m_Entities)
+    if (!removedIDs.count(entity->GetID()) && !stagedIDs.count(entity->GetID()) &&
+        !add(entity.get(), entity->GetPersistentID())) return false;
+  for (size_t index = 0; index < staged.size(); ++index) {
+    auto* entity = GetEntity(staged[index]);
+    const auto& identity = persistentIDs[index].empty() ? entity->GetPersistentID() : persistentIDs[index];
+    if (!add(entity, identity)) return false;
+  }
+  if (entityOrder.size() != nodes.size()) return false;
+
+  std::vector<size_t> slots(nodes.size());
+  std::vector<bool> ordered(nodes.size(), false);
+  for (size_t slot = 0; slot < entityOrder.size(); ++slot) {
+    const auto found = identities.find(entityOrder[slot]);
+    if (found == identities.end() || ordered[found->second]) return false;
+    ordered[found->second] = true;
+    slots[found->second] = slot;
+  }
+
+  // A deleted parent detaches its retained children unless an explicit final
+  // relationship restores them. Staged nodes can already have internal links.
+  for (auto& node : nodes)
+    if (indices.count(node.entity->m_Parent)) node.parent = node.entity->m_Parent;
+  std::vector<bool> overridden(nodes.size(), false);
+  struct PositionedLink { size_t child, parent, position; };
+  std::vector<PositionedLink> positioned;
+  positioned.reserve(links.size());
+  const size_t noParent = std::numeric_limits<size_t>::max();
+  for (const auto& link : links) {
+    const auto child = identities.find(link.childPersistentID);
+    if (child == identities.end() || overridden[child->second]) return false;
+    size_t parent = noParent;
+    if (!link.parentPersistentID.empty()) {
+      const auto found = identities.find(link.parentPersistentID);
+      if (found == identities.end()) return false;
+      parent = found->second;
+    }
+    overridden[child->second] = true;
+    nodes[child->second].parent = parent == noParent ? nullptr : nodes[parent].entity;
+    if (parent != noParent) positioned.push_back({child->second, parent, link.siblingIndex});
+  }
+  for (const auto& node : nodes) {
+    const Entity* cursor = node.entity;
+    for (unsigned depth = 0; cursor; ++depth) {
+      if (depth >= 128) return false;
+      const auto found = indices.find(const_cast<Entity*>(cursor));
+      if (found == indices.end()) return false;
+      cursor = nodes[found->second].parent;
+    }
+  }
+
+  std::vector<size_t> childCounts(nodes.size(), 0);
+  for (const auto& node : nodes)
+    if (node.parent) ++childCounts[indices.find(node.parent)->second];
+  for (size_t index = 0; index < nodes.size(); ++index)
+    nodes[index].children.reserve(childCounts[index]);
+  std::vector<bool> placed(nodes.size(), false);
+  for (auto& node : nodes) {
+    // Preserve retained siblings' actual order rather than deriving it from
+    // entity creation order, which can differ after earlier reparenting.
+    for (auto* child : node.entity->m_Children) {
+      const auto found = indices.find(child);
+      if (found == indices.end() || overridden[found->second] || nodes[found->second].parent != node.entity)
+        continue;
+      if (placed[found->second]) return false;
+      node.children.push_back(child);
+      placed[found->second] = true;
+    }
+  }
+  for (size_t index = 0; index < nodes.size(); ++index) {
+    if (nodes[index].parent && !overridden[index] && !placed[index]) {
+      nodes[indices.find(nodes[index].parent)->second].children.push_back(nodes[index].entity);
+      placed[index] = true;
+    }
+  }
+  std::stable_sort(positioned.begin(), positioned.end(), [](const auto& a, const auto& b) {
+    return a.parent != b.parent ? a.parent < b.parent : a.position < b.position;
+  });
+  size_t lastParent = noParent, lastPosition = 0;
+  bool hasPosition = false;
+  for (const auto& link : positioned) {
+    if (link.position != noParent && link.position >= childCounts[link.parent]) return false;
+    auto& children = nodes[link.parent].children;
+    size_t position = children.size();
+    if (link.position != noParent) {
+      position = link.position;
+      if (hasPosition && lastParent == link.parent) position = std::max(position, lastPosition + 1);
+      position = std::min(position, children.size());
+    }
+    children.insert(children.begin() + static_cast<std::ptrdiff_t>(position), nodes[link.child].entity);
+    lastParent = link.parent;
+    lastPosition = position;
+    hasPosition = true;
+  }
+  std::vector<std::unique_ptr<Entity>> orderedEntities(nodes.size());
+
+  // The existing commit performs its own identity preflight. Nothing prepared
+  // above changes live hierarchy/order, even if that final preflight throws.
+  if (!CommitEntityReplacement(replaced, staged, persistentIDs)) return false;
+
+  // After destruction starts there is no allocation, validation or failure path.
+  for (auto& node : nodes) node.entity->m_Parent = node.parent;
+  for (auto& node : nodes) node.entity->m_Children.swap(node.children);
+  for (auto& entity : m_Entities) {
+    const auto found = indices.find(entity.get());
+    assert(found != indices.end());
+    orderedEntities[slots[found->second]] = std::move(entity);
+  }
+  m_Entities.swap(orderedEntities);
+  return true;
+}
+
 bool Scene::DestroyEntity(EntityHandle handle) {
   AssertOwnerThread();
   Entity *entity = GetEntity(handle);

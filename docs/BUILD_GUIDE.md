@@ -551,21 +551,33 @@ assets. Loading legacy `.scene` through the console/pause menu detaches the
 explicit project session only after a successful load. Legacy `.gameproj` scene
 schema v1/v2 support remains available without a project descriptor.
 
-## Transform Undo/Redo (M1c first slice)
+## Editor Undo/Redo (M1c)
 
-Edit > Undo Transform and Redo Transform restore position, rotation and scale.
-Use Ctrl+Z for Undo, Ctrl+Shift+Z or Ctrl+Y for Redo. The menu disables unavailable
-operations. These commands run in Edit mode and wait while a document decision is
-pending. Keyboard transform commands are reserved while the mesh manipulation tool
-is open, so its own Ctrl+Z cannot also change an entity transform; use the explicit
-Edit menu for transform history in that context.
+Edit > Undo / Redo displays the next operation's label. Ctrl+Z undoes;
+Ctrl+Shift+Z or Ctrl+Y redoes. Transform gestures, entity creation, paste/duplicate
+and deletion share one chronological history. Creation includes the scene menus,
+model browser and Game Builder objects/models. Inspector, hierarchy context menu
+and Delete-key deletion use the same command. Deleting a parent detaches surviving
+children; Undo restores their original parent and sibling positions.
 
-History retains up to 50 transform operations plus a pending before-state for an
-active interaction. A continuous Inspector/gizmo gesture is one operation. Merely
-activating a field or resetting to an unchanged value preserves Redo. A new captured
-transform edit starts a new branch. Play-time Inspector changes do not enter the
-authored history; Stop rebinds both history directions to restored persistent IDs.
-New scenes and scene/project loads clear both directions.
+History retains at most 50 completed operations and 32 MiB of accounted CPU
+payload, plus a pending transform within that budget. One entity command is
+limited to 2048 targets, 4 MiB of serialized entities and 8 MiB of retained command
+data. Unsupported or oversized operations are rejected before deletion; failed
+creation removes its partial new entities. History owns recipes and persistent
+IDs, without retaining entity or GPU resources. Reconstructed entities receive
+fresh runtime generations while unrelated entities keep their handles.
 
-This is transform history. Creation, deletion, parenting, component and mesh edits
-are not general Undo/Redo commands yet.
+A continuous Inspector/gizmo gesture is one transform operation. Merely activating
+a field or resetting an unchanged value preserves Redo. Successful new edits
+start a new branch. Commands run in Edit mode and wait while a document decision
+is pending. Play changes stay outside authored history. Stop rebinds transforms
+and entity commands use persistent IDs. New scenes and scene/project loads clear
+history. The mesh tool reserves its own keyboard Undo; use the Edit menu for the
+shared scene history while that tool is open.
+
+Reconstruction failure (for example a missing model/texture) retains the current
+scene and command so the operation can be retried after restoring the asset.
+Changes to affected entity values, hierarchy or project context outside history
+can block a command to protect current work. Parenting, standalone component/value
+edits, material assignment, mesh edits and autosave/recovery are later slices.

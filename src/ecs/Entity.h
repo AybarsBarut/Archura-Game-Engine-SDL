@@ -3,6 +3,7 @@
 #include "Component.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -21,6 +22,14 @@ using EntityID = uint32_t;
 using EntityGeneration = uint32_t;
 
 class Scene;
+
+// Persistent identities describe the final graph, including entities staged
+// with temporary identities. An unspecified sibling position appends the child.
+struct EntityParentLink {
+  std::string childPersistentID;
+  std::string parentPersistentID;
+  size_t siblingIndex = std::numeric_limits<size_t>::max();
+};
 
 // Ownership is independent of display names. Scene content is authored unless
 // the application explicitly marks a bootstrap/runtime service entity.
@@ -187,6 +196,11 @@ public:
   bool CommitEntityReplacement(const std::vector<EntityHandle>& replaced,
                                const std::vector<EntityHandle>& staged,
                                const std::vector<std::string>& persistentIDs);
+  bool CommitEntityEdit(const std::vector<EntityHandle>& replaced,
+                        const std::vector<EntityHandle>& staged,
+                        const std::vector<std::string>& persistentIDs,
+                        const std::vector<EntityParentLink>& links,
+                        const std::vector<std::string>& entityOrder);
   Entity* GetEntityByPersistentID(const std::string& id) noexcept;
   const Entity* GetEntityByPersistentID(const std::string& id) const noexcept;
   bool IsIterating() const noexcept { return m_IterationDepth != 0; }

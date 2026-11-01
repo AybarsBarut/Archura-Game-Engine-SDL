@@ -21,6 +21,7 @@
 #include <system_error>
 #include <cmath>
 #include <cstdlib>
+#include <unordered_set>
 
 namespace Archura {
 
@@ -219,12 +220,29 @@ bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitS
 }
 
 bool GameSaveManager::WriteEntities(std::ostream& file, Scene* scene, bool omitSystem, bool diagnostics) {
+    return WriteEntitiesImpl(file, scene, omitSystem, diagnostics, nullptr);
+}
+
+bool GameSaveManager::WriteEntityBatch(std::ostream& file, Scene* scene,
+                                      const std::vector<EntityHandle>& handles, bool diagnostics) {
+    return WriteEntitiesImpl(file, scene, false, diagnostics, &handles) && static_cast<bool>(file);
+}
+
+bool GameSaveManager::WriteEntitiesImpl(std::ostream& file, Scene* scene, bool omitSystem,
+                                       bool diagnostics, const std::vector<EntityHandle>* handles) {
     if (!scene) return false;
+    std::unordered_set<uint64_t> selected;
+    if (handles) {
+        selected.reserve(handles->size());
+        for (const auto handle : *handles)
+            if (!scene->GetEntity(handle) || !selected.insert(handle.Value()).second) return false;
+    }
     const auto& entities = scene->GetEntities();
     bool first = true;
 
     for (const auto& ePtr : entities) {
         Entity* e = ePtr.get();
+        if (handles && !selected.count(e->GetHandle().Value())) continue;
         if (omitSystem && e->IsEngineOwned()) {
             if (e->GetParent() && !e->GetParent()->IsEngineOwned()) {
                 if (diagnostics) std::cerr << "[SaveManager] Saved parent has an excluded system child; save cancelled\n";
@@ -383,6 +401,24 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
                                    bool keepSystem,
                                    bool validateOnly,
                                    const std::filesystem::path& documentRoot) {
+    return LoadEntitiesImpl(root, scene, keepSystem, validateOnly, documentRoot, nullptr, nullptr, nullptr);
+}
+
+bool GameSaveManager::LoadEntityBatch(const Serialization::Json& root, Scene* scene,
+                                      const std::vector<EntityHandle>& replaced,
+                                      const std::vector<EntityParentLink>& links,
+                                      const std::vector<std::string>& entityOrder,
+                                      const std::filesystem::path& documentRoot) {
+    return LoadEntitiesImpl(root, scene, false, false, documentRoot, &replaced, &links, &entityOrder);
+}
+
+bool GameSaveManager::LoadEntitiesImpl(const Serialization::Json& root, Scene* scene,
+                                      bool keepSystem, bool validateOnly,
+                                      const std::filesystem::path& documentRoot,
+                                      const std::vector<EntityHandle>* replaced,
+                                      const std::vector<EntityParentLink>* links,
+                                      const std::vector<std::string>* entityOrder) {
+    const bool batch = replaced != nullptr;
     const SceneReconstructionBudget budget = GetReconstructionBudget();
     if (budget.maxEntities == 0 || budget.maxTotalMeshVertices == 0 ||
         budget.maxTotalMeshIndices == 0 || budget.maxTotalMeshBytes == 0 ||
@@ -395,7 +431,15 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
     const auto* entities = root.Find("entities");
     if (!scene || (!validateOnly && scene->IsIterating()) || !entities ||
         entities->kind != Serialization::Json::Kind::Array ||
-        entities->array.size() > budget.maxEntities) return false;
+        entities->array.size() > budget.maxEntities || (batch && formatVersion != 2)) return false;
+    std::unordered_set<uint64_t> replacedValues;
+    if (batch) {
+        replacedValues.reserve(replaced->size());
+        for (const auto handle : *replaced)
+            if (!scene->GetEntity(handle) || !replacedValues.insert(handle.Value()).second) return false;
+        const auto retainedCount = scene->GetEntities().size() - replaced->size();
+        if (retainedCount > budget.maxEntities || entities->array.size() > budget.maxEntities - retainedCount) return false;
+    }
     std::error_code ec;
     struct LoadedEntity {
         Serialization::EntityData extra;
@@ -563,13 +607,45 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
         loaded.push_back(std::move(current));
     }
 
-    if (!Serialization::ValidateHierarchy(loaded)) return false;
+    std::vector<EntityParentLink> batchLinks;
+    if (batch) {
+        // Validate against the prospective retained-plus-staged identity set,
+        // not the live old objects that this transaction is about to replace.
+        std::unordered_set<std::string> finalIDs;
+        finalIDs.reserve(scene->GetEntities().size() - replaced->size() + loaded.size());
+        for (const auto& entity : scene->GetEntities())
+            if (!replacedValues.count(entity->GetHandle().Value())) finalIDs.insert(entity->GetPersistentID());
+        for (const auto& data : loaded)
+            if (!finalIDs.insert(data.extra.persistentID).second) return false;
+        batchLinks = *links;
+        std::unordered_map<std::string, size_t> overridden;
+        overridden.reserve(batchLinks.size() + loaded.size());
+        for (size_t index = 0; index < batchLinks.size(); ++index) {
+            const auto& link = batchLinks[index];
+            if (!finalIDs.count(link.childPersistentID) ||
+                (!link.parentPersistentID.empty() && !finalIDs.count(link.parentPersistentID)) ||
+                !overridden.emplace(link.childPersistentID, index).second) return false;
+        }
+        for (const auto& data : loaded) {
+            const auto& id = data.extra.persistentID;
+            const auto& parent = data.extra.parentPersistentID;
+            if (!parent.empty() && !finalIDs.count(parent)) return false;
+            const auto existing = overridden.find(id);
+            if (existing != overridden.end()) {
+                if (batchLinks[existing->second].parentPersistentID != parent) return false;
+            } else {
+                overridden.emplace(id, batchLinks.size());
+                batchLinks.push_back({id, parent});
+            }
+        }
+    } else if (!Serialization::ValidateHierarchy(loaded)) return false;
     if (validateOnly) return true;
 
     // Only mutate the scene after the complete file has been read and
     // validated. A malformed save can no longer erase the current scene.
     std::vector<EntityHandle> toDelete;
-    for (const auto& ePtr : scene->GetEntities()) {
+    if (batch) toDelete = *replaced;
+    else for (const auto& ePtr : scene->GetEntities()) {
         if (!keepSystem || !ePtr->IsEngineOwned()) toDelete.push_back(ePtr->GetHandle());
     }
 
@@ -614,7 +690,15 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
                 if (!data.texturePath.empty()) {
                     const std::string& loadTexPath = data.resolvedTexturePath.empty() ? data.texturePath : data.resolvedTexturePath;
                     const std::string assetKey = ResourceManager::Get().CanonicalAssetKey(loadTexPath, documentRoot);
-                    auto tex = TextureManager::Get().LoadShared(assetKey, loadTexPath);
+                    std::shared_ptr<Texture> tex;
+                    if (batch) {
+                        // Cached texture objects may belong to retained entities.
+                        // Keep authored-path metadata private to this staging
+                        // transaction, including when a later commit fails.
+                        tex = std::make_shared<Texture>();
+                        if (!tex->LoadFromFile(loadTexPath)) throw std::runtime_error("Texture reconstruction failed");
+                        tex->SetCanonicalPath(assetKey);
+                    } else tex = TextureManager::Get().LoadShared(assetKey, loadTexPath);
                     if (!tex) throw std::runtime_error("Texture reconstruction failed");
                     tex->SetPath(data.texturePath);
                     const size_t texBytes =
@@ -649,12 +733,16 @@ bool GameSaveManager::LoadEntities(const Serialization::Json& root,
             }
             Serialization::ApplyComponents(e, data.extra);
         }
-        if (!Serialization::LinkHierarchy(scene, loaded, created)) throw std::runtime_error("Invalid hierarchy");
+        // Batch hierarchy is prepared by CommitEntityEdit. Linking a retained
+        // parent here would expose a changed backlink before the commit.
+        if (!batch && !Serialization::LinkHierarchy(scene, loaded, created)) throw std::runtime_error("Invalid hierarchy");
         std::vector<std::string> persistentIDs;
         persistentIDs.reserve(loaded.size());
         for (const auto& data : loaded) persistentIDs.push_back(data.extra.persistentID);
-        if (!scene->CommitEntityReplacement(toDelete, created, persistentIDs))
-            throw std::runtime_error("Persistent identity collision or invalid replacement");
+        const bool committed = batch
+            ? scene->CommitEntityEdit(toDelete, created, persistentIDs, batchLinks, *entityOrder)
+            : scene->CommitEntityReplacement(toDelete, created, persistentIDs);
+        if (!committed) throw std::runtime_error("Persistent identity collision or invalid replacement");
     } catch (...) {
         for (EntityHandle handle : created) scene->DestroyEntity(handle);
         std::cerr << "[SaveManager] Component/resource/hierarchy reconstruction failed; previous scene retained\n";

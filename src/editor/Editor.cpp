@@ -4,6 +4,8 @@
 
 #include "Editor.h"
 #include "SceneViewport.h"
+#include "EntityEditCommand.h"
+#include "../core/SerializationJson.h"
 #include "../core/DeveloperConsole.h"
 #include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
@@ -88,6 +90,9 @@ bool Editor::Init(Window *window) {
   m_CurrentProjectDir = m_BaseProjectDir;
   m_EngineAssetDir = m_BaseProjectDir;
   InitProjectSession();
+  m_GameBuilderPanel.SetCreationHandler([this](Scene* scene, const std::function<void()>& action) {
+    ExecuteCreation(scene, action);
+  });
 
   ApplyDarkTheme();
 
@@ -528,9 +533,9 @@ void Editor::DrawMenuBar(Scene *scene) {
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
-      if (ImGui::MenuItem("Undo Transform", "Ctrl+Z", false,
+      if (ImGui::MenuItem((std::string("Undo ") + (scene ? m_UndoHistory.UndoLabel(*scene) : "")).c_str(), "Ctrl+Z", false,
                           !IsGameRunning() && scene && m_UndoHistory.CanUndo(*scene))) UndoLastAction(scene);
-      if (ImGui::MenuItem("Redo Transform", "Ctrl+Shift+Z / Ctrl+Y", false,
+      if (ImGui::MenuItem((std::string("Redo ") + (scene ? m_UndoHistory.RedoLabel(*scene) : "")).c_str(), "Ctrl+Shift+Z / Ctrl+Y", false,
                           !IsGameRunning() && scene && m_UndoHistory.CanRedo(*scene))) RedoLastAction(scene);
       ImGui::Separator();
       if (ImGui::MenuItem("Copy Entity", "Ctrl+C", false, m_SelectedEntity != nullptr)) CopySelected();
@@ -811,10 +816,7 @@ void Editor::DrawSceneHierarchy(Scene *scene) {
       DrawNode(ePtr.get());
 
   if (!pendingDeleteHandles.empty()) {
-      for (const EntityHandle handle : pendingDeleteHandles) {
-          scene->DestroyEntity(handle);
-      }
-      SanitizeSelection(scene);
+      DeleteEntities(scene, pendingDeleteHandles);
   } else if (pendingShiftSelect && m_LastClickedEntity) {
       auto it1 = std::find(flatList.begin(), flatList.end(), m_LastClickedEntity);
       auto it2 = std::find(flatList.begin(), flatList.end(), pendingShiftSelect);
@@ -1144,8 +1146,7 @@ void Editor::DrawInspector(Scene *scene) {
                         ImVec4(0.50f, 0.10f, 0.10f, 1.0f));
   if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) {
     if (scene && m_SelectedEntity) {
-      scene->DestroyEntity(m_SelectedEntity->GetHandle());
-      SanitizeSelection(scene);
+      DeleteEntities(scene, {m_SelectedEntity->GetHandle()});
     }
   }
   ImGui::PopStyleColor(3);
@@ -1504,7 +1505,7 @@ void Editor::DrawTutorialPanel() {
                          "Keyboard Shortcuts");
       ImGui::Separator();
       ImGui::Spacing();
-      Row("Ctrl + Z", "Undo last transform");
+      Row("Ctrl + Z", "Undo last action");
       Row("Ctrl + C", "Copy selected entity");
       Row("Ctrl + V", "Paste entity");
       Row("Ctrl + D", "Duplicate selected entity");
@@ -1738,6 +1739,7 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
 
   static int counter = 0;
   std::string name = type + "_" + std::to_string(++counter);
+  ExecuteCreation(scene, [&] {
   Entity *e = scene->CreateEntity(name);
 
   auto *tf = e->GetComponent<Transform>();
@@ -1784,12 +1786,13 @@ void Editor::SpawnEntity(Scene *scene, const std::string &type,
       mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f));
       mr->color = glm::vec3(1.0f, 0.0f, 1.0f);
     }
+    if (!mr->GetMesh()) throw std::runtime_error("Model loading failed.");
     if (name.find("Model_") == 0)
       e->SetName(std::filesystem::path(path).stem().string());
   }
 
   Log("Spawned " + type);
-  SetSelectedEntity(e);
+  });
   m_AssetCacheDirty = false; // spawn doesn't invalidate asset cache
 }
 
@@ -2196,32 +2199,76 @@ void Editor::PushUndoSnapshot(Entity *entity) {
   if (entity && !IsGameRunning() && !HasPendingDocumentAction()) m_UndoHistory.Capture(*entity);
 }
 
-void Editor::UndoLastAction(Scene *scene) {
-  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;
+void Editor::ApplyHistorySelection(Scene* scene, const ActionResult& result) {
+  if (result.status != ActionResult::Status::Applied) return;
   m_GizmoActive = GizmoOp::None;
   m_GizmoHovered = GizmoOp::None;
   if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
-  Entity* restored = scene ? m_UndoHistory.Undo(*scene) : nullptr;
-  if (restored) {
-    SetSelectedEntity(restored);
-    Log("[Undo] Geri alindi: " + restored->GetName());
-  } else {
-    Log("[Undo] No live transform to restore.");
+  if (result.selectionIDs) {
+    ClearSelection();
+    std::vector<Entity*> selection;
+    for (const auto& id : *result.selectionIDs)
+      if (auto* entity = scene->GetEntityByPersistentID(id)) selection.push_back(entity);
+    m_SelectionState.SetSelectionList(selection, result.selectedEntity);
+    m_SelectedEntity = m_SelectionState.GetSelectedEntity();
+    m_SelectedEntities = m_SelectionState.GetSelectedEntities();
+    SanitizeSelection(scene);
+  } else SetSelectedEntity(result.selectedEntity);
+  RefreshDocument(scene, true);
+}
+
+bool Editor::ExecuteCreation(Scene* scene, const std::function<void()>& create) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
+  RefreshDocument(scene, true);
+  SanitizeSelection(scene);
+  const auto selection = m_SelectionState.CapturePersistentSnapshot();
+  std::string error;
+  auto command = EntityEditCommand::Creation(*scene, create, selection.selectedPersistentIDs,
+      selection.primaryPersistentID, std::filesystem::u8path(m_Document.Path()).parent_path(), error);
+  const auto result = m_UndoHistory.Execute(*scene, command);
+  if (result.status != ActionResult::Status::Applied) {
+    SanitizeSelection(scene);
+    Log("[Create] " + (error.empty() ? "Creation failed; scene and history retained." : error));
+    return false;
   }
+  ApplyHistorySelection(scene, result);
+  return true;
+}
+
+bool Editor::DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handles) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
+  RefreshDocument(scene, true);
+  SanitizeSelection(scene);
+  const auto selection = m_SelectionState.CapturePersistentSnapshot();
+  std::vector<EntityHandle> unique;
+  for (const auto handle : handles)
+    if (scene->IsAlive(handle) && std::find(unique.begin(), unique.end(), handle) == unique.end()) unique.push_back(handle);
+  std::string error;
+  auto command = EntityEditCommand::Deletion(*scene, unique, selection.selectedPersistentIDs,
+      selection.primaryPersistentID, std::filesystem::u8path(m_Document.Path()).parent_path(), error);
+  const auto result = m_UndoHistory.Execute(*scene, command);
+  if (result.status != ActionResult::Status::Applied) {
+    Log("[Delete] " + (!error.empty() ? error : command ? command->Error() : "Deletion unavailable."));
+    return false;
+  }
+  ApplyHistorySelection(scene, result);
+  return true;
+}
+
+void Editor::UndoLastAction(Scene *scene) {
+  if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;
+  RefreshDocument(scene, true);
+  const auto result = m_UndoHistory.UndoAction(*scene);
+  ApplyHistorySelection(scene, result);
+  if (result.status == ActionResult::Status::Blocked) Log("[Undo] Entity data or assets changed; history retained.");
 }
 
 void Editor::RedoLastAction(Scene *scene) {
   if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;
-  m_GizmoActive = GizmoOp::None;
-  m_GizmoHovered = GizmoOp::None;
-  if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
-  Entity* restored = m_UndoHistory.Redo(*scene);
-  if (restored) {
-    SetSelectedEntity(restored);
-    Log("[Redo] Restored transform: " + restored->GetName());
-  } else {
-    Log("[Redo] No live transform to restore.");
-  }
+  RefreshDocument(scene, true);
+  const auto result = m_UndoHistory.RedoAction(*scene);
+  ApplyHistorySelection(scene, result);
+  if (result.status == ActionResult::Status::Blocked) Log("[Redo] Entity data or assets changed; history retained.");
 }
 
 void Editor::CopySelected() {
@@ -2280,6 +2327,7 @@ void Editor::CopySelected() {
 void Editor::PasteClipboard(Scene *scene) {
   if (!scene || !m_Clipboard.valid)
     return;
+  ExecuteCreation(scene, [&] {
   Entity *e = scene->CreateEntity(m_Clipboard.name);
   auto *tf = e->GetComponent<Transform>();
   if (tf) {
@@ -2321,7 +2369,7 @@ void Editor::PasteClipboard(Scene *scene) {
     auto *ns = e->AddComponent<ScriptComponent>();
     ns->className = m_Clipboard.scriptClass;
   }
-  SetSelectedEntity(e);
+  });
   Log("[Yapistir] " + m_Clipboard.name);
 }
 
@@ -2373,10 +2421,7 @@ void Editor::ProcessEditorShortcuts(Input *input, Scene *scene) {
   if (!ctrl && input->IsKeyJustPressed(SDL_SCANCODE_DELETE) && scene) {
     const std::vector<EntityHandle> handles = m_SelectionState.GetSelectedHandles();
     if (!handles.empty()) {
-      for (const EntityHandle handle : handles) {
-        scene->DestroyEntity(handle);
-      }
-      SanitizeSelection(scene);
+      DeleteEntities(scene, handles);
       Log(handles.size() > 1 ? "[Sil] Secili varliklar silindi."
                              : "[Sil] Varlik silindi.");
     }

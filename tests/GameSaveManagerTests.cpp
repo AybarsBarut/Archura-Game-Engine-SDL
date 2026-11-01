@@ -1,7 +1,9 @@
 #include "core/GameSaveManager.h"
 #include "core/ResourceManager.h"
 #include "core/AudioSystem.h"
+#include "core/SerializationJson.h"
 #include "editor/GameBuilderPanel.h"
+#include "editor/EntityEditCommand.h"
 #include "editor/SceneDocumentSnapshot.h"
 #include "ecs/Entity.h"
 #include "rendering/Camera.h"
@@ -19,6 +21,8 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <iomanip>
+#include <locale>
 #include <vector>
 
 namespace {
@@ -28,6 +32,76 @@ void Check(bool condition, const char* message) {
         ++failures;
         std::cerr << "FAIL: " << message << '\n';
     }
+}
+
+void TestEntityCommands() {
+    using namespace Archura;
+    Scene scene;
+    TransformUndoHistory history;
+    auto* parent = scene.CreateEntity("retained parent");
+    auto* sibling = scene.CreateEntity("retained sibling");
+    auto* child = scene.CreateEntity("retained child");
+    const auto parentHandle = parent->GetHandle(), siblingHandle = sibling->GetHandle(), childHandle = child->GetHandle();
+    const auto parentID = parent->GetPersistentID(), siblingID = sibling->GetPersistentID();
+    std::string error, createdID;
+    auto create = EntityEditCommand::Creation(scene, [&] {
+        auto* entity = scene.CreateEntity("created");
+        createdID = entity->GetPersistentID();
+        entity->TrySetParent(parent);
+        entity->AddComponent<BoxCollider>()->size = {2,3,4};
+        entity->AddComponent<RigidBody>()->mass = 7;
+    }, {parentID}, parentID, {}, error);
+    Check(history.Execute(scene, create).status == ActionResult::Status::Applied, "create command executes");
+    auto* created = scene.GetEntityByPersistentID(createdID);
+    Check(created != nullptr, "create records persistent identity");
+    if (!created) return;
+    const auto oldHandle = created->GetHandle();
+    sibling->TrySetParent(parent);
+    child->TrySetParent(created);
+    // External hierarchy edits deliberately block undo until restored.
+    Check(!history.CanUndo(scene), "creation undo refuses newly attached retained child");
+    child->TrySetParent(nullptr);
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied && !scene.IsAlive(oldHandle), "undo creation removes created generation");
+    auto result = history.RedoAction(scene);
+    created = scene.GetEntityByPersistentID(createdID);
+    Check(result.status == ActionResult::Status::Applied && created && created->GetHandle() != oldHandle, "redo creation reconstructs same identity with fresh generation");
+    if (!created) return;
+    Check(created->GetParent() == parent && parent->GetChildren()[0] == created && parent->GetChildren()[1] == sibling,
+          "redo preserves sibling position");
+    Check(created->GetComponent<RigidBody>()->mass == 7 && created->GetComponent<BoxCollider>()->size == glm::vec3(2,3,4), "redo restores component values");
+    history.Capture(*created);
+    created->GetComponent<Transform>()->position.x = 13;
+    child->TrySetParent(created);
+    auto deletion = EntityEditCommand::Deletion(scene, {created->GetHandle()}, {createdID, siblingID}, createdID, {}, error);
+    Check(history.Execute(scene, deletion).status == ActionResult::Status::Applied && !child->GetParent(), "delete detaches retained child atomically");
+    result = history.UndoAction(scene);
+    created = scene.GetEntityByPersistentID(createdID);
+    Check(created && child->GetParent() == created && result.selectionIDs && result.selectionIDs->size() == 2, "undo deletion restores links and selection recipe");
+    Check(scene.GetEntity(parentHandle) == parent && scene.GetEntity(siblingHandle) == sibling && scene.GetEntity(childHandle) == child,
+          "entity commands preserve unrelated handles");
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied && created->GetComponent<Transform>()->position.x == 0,
+          "transform history rebinds after entity reconstruction");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied && created->GetComponent<Transform>()->position.x == 13,
+          "transform and entity commands share chronological redo");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied && !scene.GetEntityByPersistentID(createdID), "redo deletes restored entity");
+    const auto bytes = history.RetainedBytes();
+    const auto count = scene.GetEntities().size();
+    auto failing = EntityEditCommand::Creation(scene, [&] {
+        scene.CreateEntity("partial creation");
+        throw std::runtime_error("injected creator failure");
+    }, {}, {}, {}, error);
+    Check(history.Execute(scene, failing).status == ActionResult::Status::Blocked && scene.GetEntities().size() == count && history.RetainedBytes() == bytes,
+          "throwing creation rolls back without consuming history");
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied, "failed creation leaves prior undo usable");
+    created = scene.GetEntityByPersistentID(createdID);
+    if (!created) return;
+    created->SetName("external modification");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Blocked && scene.GetEntityByPersistentID(createdID) == created,
+          "changed values block deletion without consuming redo");
+    created->SetName("created");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied, "blocked redo can be retried after correcting external values");
+    Scene foreign;
+    Check(!create->CanApply(foreign, true), "foreign scene rejects command");
 }
 
 void WriteMinimalOBJ(const std::filesystem::path& path) {
@@ -159,15 +233,254 @@ void TestSceneDocumentSnapshot() {
     Check(!editedMesh, "invalidated mesh recipe snapshot remains unknown");
     Check(diagnostics.str().empty(), "document polling does not spam codec diagnostics");
 }
+
+void TestEntityBatchCodec() {
+    using namespace Archura;
+    Scene scene;
+    auto* parent = scene.CreateEntity("retained parent");
+    auto* target = scene.CreateEntity("batch target");
+    auto* sibling = scene.CreateEntity("retained sibling");
+    auto* child = scene.CreateEntity("retained child");
+    target->SetOwnership(EntityOwnership::Engine);
+    target->GetComponent<Transform>()->position = {3, 4, 5};
+    target->AddComponent<MeshRenderer>()->SetMeshAsset(Mesh::CreateCubeShared(2.5f));
+    Check(target->TrySetParent(parent) && sibling->TrySetParent(parent) && child->TrySetParent(target),
+          "batch fixture hierarchy is valid");
+    const auto parentHandle = parent->GetHandle(), oldTargetHandle = target->GetHandle();
+    const auto siblingHandle = sibling->GetHandle(), childHandle = child->GetHandle();
+    const std::string parentID = parent->GetPersistentID(), targetID = target->GetPersistentID();
+    const std::string siblingID = sibling->GetPersistentID(), childID = child->GetPersistentID();
+    const std::vector<std::string> originalOrder{parentID, targetID, siblingID, childID};
+    const std::vector<std::string> deletedOrder{parentID, siblingID, childID};
+    const auto original = CaptureSceneDocument(&scene);
+    Check(original.has_value(), "batch fixture has a supported document snapshot");
+
+    Serialization::Json saved;
+    {
+        // An unrelated unsupported entity must not prevent capturing the target.
+        struct Unsupported final : Component {};
+        sibling->AddComponent<Unsupported>();
+        std::ostringstream stream;
+        stream.imbue(std::locale::classic());
+        stream << std::setprecision(std::numeric_limits<float>::max_digits10);
+        stream << "{\"format_version\":2,\"entities\":[";
+        const bool written = GameSaveManager::WriteEntityBatch(stream, &scene, {oldTargetHandle});
+        stream << "]}";
+        Check(written && Serialization::JsonParser(stream.str()).Parse(saved),
+              "batch capture serializes only selected supported entities");
+        Check(saved.Find("entities") && saved.Find("entities")->array.size() == 1,
+              "batch capture excludes unrelated entities");
+        std::ostringstream unsupported;
+        Check(!GameSaveManager::WriteEntityBatch(unsupported, &scene, {siblingHandle}, false),
+              "batch capture rejects a selected unsupported component");
+        sibling->RemoveComponent<Unsupported>();
+    }
+    {
+        std::ostringstream invalid;
+        Check(!GameSaveManager::WriteEntityBatch(invalid, &scene, {parentHandle, parentHandle}) && invalid.str().empty(),
+              "duplicate selected handles reject before serialization");
+    }
+    Serialization::Json empty;
+    Check(Serialization::JsonParser("{\"format_version\":2,\"entities\":[]}").Parse(empty),
+          "empty batch fixture parses");
+    Check(GameSaveManager::LoadEntityBatch(empty, &scene, {oldTargetHandle}, {}, deletedOrder),
+          "empty batch transaction deletes exactly the selected entity");
+    Check(!scene.IsAlive(oldTargetHandle) && scene.GetEntity(parentHandle) == parent &&
+              scene.GetEntity(siblingHandle) == sibling && scene.GetEntity(childHandle) == child,
+          "batch delete invalidates only the removed handle");
+    Check(!child->GetParent() && sibling->GetParent() == parent,
+          "batch delete preserves existing detach-children semantics");
+    {
+        std::ostringstream stale;
+        Check(!GameSaveManager::WriteEntityBatch(stale, &scene, {oldTargetHandle}),
+              "batch capture rejects a stale generation handle");
+    }
+    const std::vector<EntityParentLink> links{{targetID, parentID, 0}, {childID, targetID, 0}};
+    Check(GameSaveManager::LoadEntityBatch(saved, &scene, {}, links, originalOrder),
+          "batch restore reconstructs a selected recipe and retained child links");
+    target = scene.GetEntityByPersistentID(targetID);
+    Check(target && target->GetHandle() != oldTargetHandle && target->IsEngineOwned(),
+          "batch restore uses a fresh handle and preserves persistent identity and ownership");
+    Check(target && target->GetParent() == parent && child->GetParent() == target &&
+              parent->GetChildren().size() == 2 && parent->GetChildren()[0] == target && parent->GetChildren()[1] == sibling,
+          "batch restore retains external parents and exact sibling positions");
+    Check(target && target->GetComponent<MeshRenderer>()->GetMesh()->GetSource().size == 2.5f &&
+              target->GetComponent<Transform>()->position == glm::vec3(3, 4, 5),
+          "batch restore uses actual primitive recipe and transform values");
+    Check(scene.GetEntity(parentHandle) == parent && scene.GetEntity(siblingHandle) == sibling &&
+              scene.GetEntity(childHandle) == child && CaptureSceneDocument(&scene) == original,
+          "batch restore leaves unrelated handles valid and restores exact document order/content");
+    if (!target) return;
+    const auto currentTargetHandle = target->GetHandle();
+    const auto beforeFailure = CaptureSceneDocument(&scene);
+    const auto countBeforeFailure = scene.GetEntities().size();
+    const auto retained = [&] {
+        return scene.GetEntities().size() == countBeforeFailure && scene.GetEntity(currentTargetHandle) == target &&
+            scene.GetEntity(parentHandle) == parent && scene.GetEntity(siblingHandle) == sibling &&
+            scene.GetEntity(childHandle) == child && CaptureSceneDocument(&scene) == beforeFailure;
+    };
+    auto setString = [](Serialization::Json& json, const char* name, const std::string& value) {
+        auto& field = json.object[name]; field.kind = Serialization::Json::Kind::String; field.string = value;
+    };
+    {
+        auto invalid = saved;
+        setString(invalid.object["entities"].array[0], "persistent_id", parentID);
+        Check(!GameSaveManager::LoadEntityBatch(invalid, &scene, {currentTargetHandle}, {}, originalOrder) && retained(),
+              "batch retained-ID collision preserves all live scene state");
+    }
+    {
+        auto invalid = saved;
+        setString(invalid.object["entities"].array[0], "mesh_type", "obj");
+        const auto missing = std::filesystem::temp_directory_path() /
+            ("archura_missing_batch_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".obj");
+        setString(invalid.object["entities"].array[0], "model_path", missing.string());
+        Check(!GameSaveManager::LoadEntityBatch(invalid, &scene, {currentTargetHandle}, links, originalOrder) && retained(),
+              "batch missing asset rejects without touching old entities");
+    }
+    {
+        const auto missingID = std::string(32, 'f') == parentID ? std::string(32, 'e') : std::string(32, 'f');
+        auto invalid = saved;
+        setString(invalid.object["entities"].array[0], "parent_persistent_id", missingID);
+        Check(!GameSaveManager::LoadEntityBatch(invalid, &scene, {currentTargetHandle}, {}, originalOrder) && retained(),
+              "batch missing final parent rejects without mutation");
+        Check(!GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle}, {{targetID, siblingID, 0}}, originalOrder) && retained(),
+              "batch sidecar cannot silently replace a serialized entity parent");
+    }
+    Check(!GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle}, links, {}) && retained(),
+          "batch invalid order rolls back reconstructed staged entities");
+    Check(!GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle},
+              {{targetID, parentID, 0}, {parentID, targetID, 0}}, originalOrder) && retained(),
+          "batch final hierarchy cycle rolls back reconstructed staged entities");
+    {
+        const auto budget = GameSaveManager::GetReconstructionBudget();
+        auto limited = budget;
+        limited.maxTotalMeshVertices = 1;
+        GameSaveManager::SetReconstructionBudget(limited);
+        const bool rejected = !GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle}, links, originalOrder);
+        GameSaveManager::SetReconstructionBudget(budget);
+        Check(rejected && retained(), "batch reconstruction enforces existing mesh expansion budgets");
+        limited = budget; limited.maxEntities = countBeforeFailure - 1;
+        GameSaveManager::SetReconstructionBudget(limited);
+        const bool finalCountRejected = !GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle}, links, originalOrder);
+        GameSaveManager::SetReconstructionBudget(budget);
+        Check(finalCountRejected && retained(), "batch entity budget includes retained entities");
+    }
+    {
+        auto invalid = saved;
+        invalid.object["format_version"].number = 1;
+        Check(!GameSaveManager::LoadEntityBatch(invalid, &scene, {currentTargetHandle}, links, originalOrder) && retained(),
+              "batch reconstruction requires current persistent-identity schema");
+        Check(!GameSaveManager::LoadEntityBatch(saved, &scene, {currentTargetHandle, currentTargetHandle}, links, originalOrder) && retained(),
+              "batch duplicate replacement handles reject before staging");
+    }
+}
+
+void TestBatchTextureMetadataIsolation() {
+    using namespace Archura;
+    namespace fs = std::filesystem;
+    struct TemporaryDirectory {
+        fs::path path;
+        fs::path parent = fs::canonical(fs::temp_directory_path());
+        TemporaryDirectory() {
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+            for (unsigned attempt = 0; attempt != 64; ++attempt) {
+                const auto candidate = parent / ("archura-batch-texture-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+                if (fs::create_directory(candidate)) { path = candidate; return; }
+            }
+            throw std::runtime_error("Cannot create batch texture fixture");
+        }
+        ~TemporaryDirectory() {
+            std::error_code error;
+            const auto canonical = fs::canonical(path, error);
+            if (!error && !path.empty() && path.parent_path() == parent && canonical == path) fs::remove_all(path, error);
+        }
+    } temporary;
+    const auto image = temporary.path / "assets" / "textures" / "tile.bmp";
+    WriteGrayscaleBMP(image, 2, 2, {0, 64, 128, 255});
+    auto retainedTexture = TextureManager::Get().LoadShared(image.string(), image.string());
+    Check(retainedTexture != nullptr, "batch texture fixture loads the existing cached texture");
+    if (!retainedTexture) return;
+    Scene scene;
+    auto* retained = scene.CreateEntity("cached texture owner");
+    retained->AddComponent<MeshRenderer>()->SetTextureAsset(retainedTexture);
+    auto* target = scene.CreateEntity("replaced texture target");
+    const auto retainedHandle = retained->GetHandle(), targetHandle = target->GetHandle();
+    const auto targetID = target->GetPersistentID();
+    std::ostringstream stream;
+    stream << "{\"format_version\":2,\"entities\":[";
+    const bool written = GameSaveManager::WriteEntityBatch(stream, &scene, {targetHandle});
+    stream << "]}";
+    Serialization::Json replacement;
+    Check(written && Serialization::JsonParser(stream.str()).Parse(replacement), "batch texture replacement fixture parses");
+    if (!written || !replacement.Find("entities") || replacement.Find("entities")->array.empty()) return;
+    auto& record = replacement.object["entities"].array[0];
+    record.object["has_mesh_renderer"].boolean = true;
+    const auto alias = temporary.path / "." / "assets" / "textures" / "tile.bmp";
+    record.object["texture"].kind = Serialization::Json::Kind::String;
+    record.object["texture"].string = alias.string();
+    const std::string originalPath = retainedTexture->GetPath();
+    const auto before = CaptureSceneDocument(&scene);
+    Check(!GameSaveManager::LoadEntityBatch(replacement, &scene, {targetHandle}, {}, {}),
+          "batch texture fixture rejects an invalid final order after staging");
+    Check(retainedTexture->GetPath() == originalPath && CaptureSceneDocument(&scene) == before &&
+              scene.GetEntity(retainedHandle) == retained && scene.GetEntity(targetHandle) == target && scene.GetEntities().size() == 2,
+          "failed batch never changes a retained cached texture's authored path");
+    Check(GameSaveManager::LoadEntityBatch(replacement, &scene, {targetHandle}, {}, {retained->GetPersistentID(), targetID}),
+          "valid texture batch reconstructs using private texture metadata");
+    auto* restored = scene.GetEntityByPersistentID(targetID);
+    auto* renderer = restored ? restored->GetComponent<MeshRenderer>() : nullptr;
+    Check(renderer && renderer->GetTexture() && renderer->GetTexture() != retainedTexture.get() &&
+              renderer->GetTexture()->GetPath() == alias.string() && retainedTexture->GetPath() == originalPath,
+          "successful batch preserves distinct authored aliases without rewriting retained texture metadata");
+}
+void TestEntityAssetRetry(const std::filesystem::path& work) {
+    using namespace Archura;
+    const auto path = work / "history-model.obj";
+    WriteMinimalOBJ(path);
+    Scene scene;
+    auto* retained = scene.CreateEntity("retained");
+    const auto retainedHandle = retained->GetHandle();
+    TransformUndoHistory history;
+    std::string error, identity;
+    auto command = EntityEditCommand::Creation(scene, [&] {
+        auto* entity = scene.CreateEntity("asset command");
+        identity = entity->GetPersistentID();
+        entity->AddComponent<MeshRenderer>()->SetMeshAsset(Mesh::LoadFromOBJShared(path.string()));
+    }, {}, {}, work, error);
+    Check(history.Execute(scene, command).status == ActionResult::Status::Applied, "asset-backed creation executes");
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied, "asset-backed creation undo executes");
+    std::filesystem::remove(path);
+    const auto bytes = history.RetainedBytes();
+    Check(history.RedoAction(scene).status == ActionResult::Status::Blocked && !scene.GetEntityByPersistentID(identity) &&
+          scene.GetEntity(retainedHandle) == retained && history.RetainedBytes() == bytes, "missing asset redo retains scene and command");
+    WriteMinimalOBJ(path);
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied && scene.GetEntityByPersistentID(identity), "restored asset allows redo retry");
+    auto root = ResourceManager::Get().GetProjectRoot();
+    bool explicitRoot = ResourceManager::Get().HasExplicitContentRoot();
+    ResourceManager::Get().SetProjectRoot(work / "different-project", true);
+    Check(!history.CanUndo(scene) && history.UndoAction(scene).status == ActionResult::Status::Blocked, "project context change blocks retained command");
+    ResourceManager::Get().SwapProjectRoot(root, explicitRoot);
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied, "restoring project context allows undo retry");
+    struct Unsupported final : Component {};
+    auto unsupported = EntityEditCommand::Creation(scene, [&] {
+        scene.CreateEntity("unsupported")->AddComponent<Unsupported>();
+    }, {}, {}, work, error);
+    Check(history.Execute(scene, unsupported).status == ActionResult::Status::Blocked && scene.GetEntities().size() == 1 && history.CanRedo(scene),
+          "unsupported creation rolls back and preserves redo");
+}
 } // namespace
 
 int main() {
+    TestEntityCommands();
     TestSceneDocumentSnapshot();
+    TestEntityBatchCodec();
+    TestBatchTextureMetadataIsolation();
     const auto original = std::filesystem::current_path();
     const auto work = std::filesystem::temp_directory_path() /
                       ("archura_save_tests_" +
                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(work);
+    TestEntityAssetRetry(work);
     std::filesystem::current_path(work);
     auto& saves = Archura::GameSaveManager::Get();
     saves.ResetReconstructionBudget();
@@ -574,6 +887,33 @@ int main() {
                   spawnedModel->GetComponent<Archura::MeshRenderer>() != nullptr &&
                   spawnedModel->GetComponent<Archura::MeshRenderer>()->GetMesh() != nullptr,
               "GameBuilderPanel spawns OBJ model from assets/models fallback directory");
+
+        {
+            Archura::Scene handledScene;
+            int calls = 0;
+            builder.SetCreationHandler([&](Archura::Scene* owner, const std::function<void()>& action) {
+                ++calls;
+                Check(owner == &handledScene, "GameBuilder routes the correct scene to creation history");
+                action();
+            });
+            auto* accepted = builder.SpawnModelEntity(&handledScene, "crate.obj");
+            Check(accepted && calls == 1 && handledScene.GetEntities().size() == 1,
+                  "GameBuilder model creation executes through the transaction handler");
+            const auto acceptedHandle = accepted ? accepted->GetHandle() : Archura::EntityHandle{};
+            builder.SetCreationHandler([&](Archura::Scene*, const std::function<void()>&) { ++calls; });
+            Check(!builder.SpawnModelEntity(&handledScene, "crate.obj") && calls == 2 && handledScene.GetEntities().size() == 1,
+                  "a rejected creation handler returns no entity and leaves the scene unchanged");
+            builder.SetCreationHandler([&](Archura::Scene* owner, const std::function<void()>& action) {
+                ++calls;
+                action();
+                const auto created = owner->GetEntities().back()->GetHandle();
+                owner->DestroyEntity(created);
+            });
+            Check(!builder.SpawnModelEntity(&handledScene, "crate.obj") && calls == 3 &&
+                      handledScene.GetEntities().size() == 1 && handledScene.GetEntity(acceptedHandle) == accepted,
+                  "rolled-back GameBuilder creation never returns a stale entity pointer");
+            builder.SetCreationHandler({});
+        }
 
         // Save and reload a scene in relocatedProject while CWD is unrelatedCwd
         if (spawnedModel) {

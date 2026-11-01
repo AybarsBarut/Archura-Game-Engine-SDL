@@ -541,6 +541,11 @@ if(BUILD_TESTING)
     target_include_directories(ArchuraLauncherDiscoveryTests PRIVATE src/launcher)
     add_test(NAME Archura.Launcher.RuntimeDiscovery COMMAND ArchuraLauncherDiscoveryTests)
 
+    add_executable(ArchuraEntityEditCommitTests
+        tests/EntityEditCommitTests.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
+    target_include_directories(ArchuraEntityEditCommitTests PRIVATE src external/glm)
+    add_test(NAME Archura.ECS.EntityEditCommit COMMAND ArchuraEntityEditCommitTests)
+
     add_executable(ArchuraTransformUndoTests
         tests/TransformUndoHistoryTests.cpp src/ecs/Component.cpp src/ecs/Entity.cpp)
     target_include_directories(ArchuraTransformUndoTests PRIVATE src external/glm)
@@ -660,7 +665,7 @@ if(BUILD_TESTING)
     add_test(NAME Archura.Core.ProjectSerializer COMMAND ArchuraProjectSerializerTests)
 
     add_executable(ArchuraGameSaveManagerTests
-        tests/GameSaveManagerTests.cpp src/core/GameSaveManager.cpp
+        tests/GameSaveManagerTests.cpp src/editor/EntityEditCommand.cpp src/core/GameSaveManager.cpp
         src/rendering/Mesh.cpp src/rendering/Texture.cpp
         src/rendering/Shader.cpp src/core/Logger.cpp
         src/ecs/Component.cpp src/ecs/Entity.cpp src/core/ResourceManager.cpp src/rendering/Camera.cpp src/rendering/Terrain.cpp src/core/AudioSystem.cpp src/editor/GameBuilderPanel.cpp)
