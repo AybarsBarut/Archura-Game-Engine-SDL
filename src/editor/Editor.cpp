@@ -6,6 +6,7 @@
 #include "SceneViewport.h"
 #include "EntityEditCommand.h"
 #include "ComponentEditCommand.h"
+#include "EntityNameEditCommand.h"
 #include "HierarchyEditCommand.h"
 #include "../core/SerializationJson.h"
 #include "../core/DeveloperConsole.h"
@@ -875,6 +876,7 @@ void Editor::DrawInspector(Scene *scene) {
   ImGui::Begin("Inspector", nullptr, window_flags);
 
   if (!m_SelectedEntity) {
+    CommitInspectorDrafts(scene);
     ImGui::Spacing();
     ImGui::TextUnformatted("Select an object");
     ImGui::TextWrapped("Choose an entity in the Hierarchy or click it in the Scene to inspect its components.");
@@ -887,17 +889,16 @@ void Editor::DrawInspector(Scene *scene) {
   }
 
   auto *sc = m_SelectedEntity->GetComponent<ScriptComponent>();
+  if (!m_InspectorText.IsBoundTo(scene, m_SelectedEntity->GetHandle())) CommitInspectorDrafts(scene);
   m_InspectorText.Sync(scene, m_SelectedEntity->GetHandle(), m_SelectedEntity->GetName(), sc ? &sc->className : nullptr);
   auto& nameBuf = m_InspectorText.name;
   ImGui::SetNextItemWidth(-1);
   if (ImGui::InputText("##Name", nameBuf, sizeof(nameBuf),
                        ImGuiInputTextFlags_EnterReturnsTrue |
                            ImGuiInputTextFlags_AutoSelectAll))
-    if (strlen(nameBuf) > 0)
-      m_SelectedEntity->SetName(nameBuf);
+    CommitInspectorDrafts(scene);
   if (ImGui::IsItemDeactivatedAfterEdit())
-    if (strlen(nameBuf) > 0)
-      m_SelectedEntity->SetName(nameBuf);
+    CommitInspectorDrafts(scene);
 
   ImGui::TextDisabled("ID: %u", m_SelectedEntity->GetID());
   ImGui::Separator();
@@ -987,6 +988,28 @@ void Editor::DrawInspector(Scene *scene) {
     }
   }
 
+  auto EditProperty = [&](auto& component, auto draw) {
+    using T = std::decay_t<decltype(component)>;
+    T desired = component;
+    const bool changed = draw(desired);
+    const auto widget = ImGui::GetItemID();
+    const bool activated = ImGui::IsItemActivated(), deactivated = ImGui::IsItemDeactivated();
+    if (!IsGameRunning()) {
+      if (activated || (changed && (!m_PropertyGesture || m_PropertyGestureWidget != widget))) {
+        if (++m_PropertyGestureSerial == 0) ++m_PropertyGestureSerial;
+        m_PropertyGesture = m_PropertyGestureSerial;
+        m_PropertyGestureWidget = widget;
+      }
+      if (changed) SetComponentValue<T>(scene, m_SelectedEntity->GetHandle(), std::move(desired), m_PropertyGesture);
+      if (deactivated && m_PropertyGestureWidget == widget) {
+        m_UndoHistory.EndGesture(*scene, m_PropertyGesture);
+        m_PropertyGestureWidget = 0;
+        m_PropertyGesture = 0;
+        RefreshDocument(scene, true);
+      }
+    } else if (changed) component = std::move(desired);
+  };
+
   // Collider configuration is separate from body motion: no body means static.
   auto *bc = m_SelectedEntity->GetComponent<BoxCollider>();
   if (!bc && ImGui::Button("Add Collider")) {
@@ -998,17 +1021,20 @@ void Editor::DrawInspector(Scene *scene) {
   }
   if (bc && ImGui::CollapsingHeader("Collider")) {
     const char *shapeNames[] = {"Box", "Ramp", "Sphere"};
-    int shape = static_cast<int>(bc->shape);
-    if (ImGui::Combo("Shape", &shape, shapeNames, 3))
-      bc->shape = static_cast<BoxCollider::Shape>(shape);
+    EditProperty(*bc, [&](BoxCollider& value) {
+      int shape = static_cast<int>(value.shape);
+      if (!ImGui::Combo("Shape", &shape, shapeNames, 3)) return false;
+      value.shape = static_cast<BoxCollider::Shape>(shape);
+      return true;
+    });
     if (bc->shape == BoxCollider::Shape::Sphere) {
-      ImGui::DragFloat("Radius", &bc->radius, 0.01f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+      EditProperty(*bc, [&](BoxCollider& value) { return ImGui::DragFloat("Radius", &value.radius, 0.01f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
       ImGui::TextDisabled("World radius uses the largest scale axis.");
     } else {
-      ImGui::DragFloat3("Size", &bc->size.x, 0.05f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+      EditProperty(*bc, [&](BoxCollider& value) { return ImGui::DragFloat3("Size", &value.size.x, 0.05f, 0.001f, 10000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
     }
-    ImGui::DragFloat3("Center", &bc->center.x, 0.05f);
-    ImGui::Checkbox("Is Trigger", &bc->isTrigger);
+    EditProperty(*bc, [&](BoxCollider& value) { return ImGui::DragFloat3("Center", &value.center.x, 0.05f); });
+    EditProperty(*bc, [&](BoxCollider& value) { return ImGui::Checkbox("Is Trigger", &value.isTrigger); });
     if (mr && mr->mesh) {
       const auto type = mr->mesh->GetSource().type;
       if ((type == MeshSourceType::Cube || type == MeshSourceType::Sphere || type == MeshSourceType::Ramp) &&
@@ -1049,16 +1075,16 @@ void Editor::DrawInspector(Scene *scene) {
     if (body) {
       if (body->isKinematic) ImGui::TextDisabled("Moved by gameplay; infinite collision mass.");
       else {
-        ImGui::DragFloat("Mass (kg)", &body->mass, 0.1f, 0.001f, 1000000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::Checkbox("Use Gravity", &body->useGravity);
-        ImGui::Checkbox("Pushable by Player", &body->canBePushed);
+        EditProperty(*body, [&](RigidBody& value) { return ImGui::DragFloat("Mass (kg)", &value.mass, 0.1f, 0.001f, 1000000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
+        EditProperty(*body, [&](RigidBody& value) { return ImGui::Checkbox("Use Gravity", &value.useGravity); });
+        EditProperty(*body, [&](RigidBody& value) { return ImGui::Checkbox("Pushable by Player", &value.canBePushed); });
       }
-      ImGui::DragFloat("Bounce", &body->restitution, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::DragFloat("Friction", &body->friction, 0.01f, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::DragFloat("Linear Drag", &body->drag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      EditProperty(*body, [&](RigidBody& value) { return ImGui::DragFloat("Bounce", &value.restitution, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp); });
+      EditProperty(*body, [&](RigidBody& value) { return ImGui::DragFloat("Friction", &value.friction, 0.01f, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp); });
+      EditProperty(*body, [&](RigidBody& value) { return ImGui::DragFloat("Linear Drag", &value.drag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp); });
       if (bc && bc->shape == BoxCollider::Shape::Sphere)
-        ImGui::DragFloat("Angular Drag", &body->angularDrag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::Checkbox("Continuous Collision", &body->continuous);
+        EditProperty(*body, [&](RigidBody& value) { return ImGui::DragFloat("Angular Drag", &value.angularDrag, 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp); });
+      EditProperty(*body, [&](RigidBody& value) { return ImGui::Checkbox("Continuous Collision", &value.continuous); });
     }
     if (bc && bc->shape == BoxCollider::Shape::Sphere && ImGui::Button("Apply Ball Physics")) {
       RigidBody desired = body ? *body : RigidBody{};
@@ -1096,13 +1122,16 @@ void Editor::DrawInspector(Scene *scene) {
   auto *lc = m_SelectedEntity->GetComponent<LightComponent>();
   if (lc && ImGui::CollapsingHeader("Light")) {
     const char *ltypes[] = {"Directional", "Point", "Ambient"};
-    int lt = (int)lc->type;
-    if (ImGui::Combo("Type", &lt, ltypes, 3))
-      lc->type = (LightComponent::Type)lt;
-    ImGui::ColorEdit3("Color", &lc->color.x);
-    ImGui::DragFloat("Intensity", &lc->intensity, 0.05f, 0.0f, 100.0f);
+    EditProperty(*lc, [&](LightComponent& value) {
+      int type = static_cast<int>(value.type);
+      if (!ImGui::Combo("Type", &type, ltypes, 3)) return false;
+      value.type = static_cast<LightComponent::Type>(type);
+      return true;
+    });
+    EditProperty(*lc, [&](LightComponent& value) { return ImGui::ColorEdit3("Color", &value.color.x); });
+    EditProperty(*lc, [&](LightComponent& value) { return ImGui::DragFloat("Intensity", &value.intensity, 0.05f, 0.0f, 100.0f); });
     if (lc->type == LightComponent::Type::Point)
-      ImGui::DragFloat("Range", &lc->range, 0.5f, 0.0f, 1000.0f);
+      EditProperty(*lc, [&](LightComponent& value) { return ImGui::DragFloat("Range", &value.range, 0.5f, 0.0f, 1000.0f); });
   }
 
   // ── Skybox ─────────────────────────────────────────────────────────────
@@ -1132,9 +1161,9 @@ void Editor::DrawInspector(Scene *scene) {
                             ImVec4(0.12f, 0.22f, 0.12f, 1.0f));
       if (ImGui::InputText("Class##SC", scBuf, sizeof(scBuf),
                            ImGuiInputTextFlags_EnterReturnsTrue))
-        sc->className = scBuf;
+        CommitInspectorDrafts(scene);
       if (ImGui::IsItemDeactivatedAfterEdit())
-        sc->className = scBuf;
+        CommitInspectorDrafts(scene);
       ImGui::PopStyleColor();
       ImGui::SameLine();
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.15f, 0.15f, 1.0f));
@@ -2300,22 +2329,41 @@ bool Editor::ReparentEntities(Scene* scene, const std::vector<EntityHandle>& chi
   return result.status == ActionResult::Status::Applied;
 }
 
-template<class T> bool Editor::SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired) {
+void Editor::CommitInspectorDrafts(Scene* scene) {
+  if (!scene) return;
+  if (IsGameRunning()) { m_InspectorText.CommitPending(scene); return; }
+  if (HasPendingDocumentAction()) return;
+  m_InspectorText.CommitPending(scene,
+      [&](Entity& entity, const char* value) {
+        auto command = EntityNameEditCommand::Create(*scene, entity.GetHandle(), value);
+        if (command) m_UndoHistory.Execute(*scene, command);
+      },
+      [&](Entity& entity, const char* value) {
+        ScriptComponent desired = *entity.GetComponent<ScriptComponent>();
+        desired.className = value;
+        auto command = ComponentEditCommand<ScriptComponent>::Create(*scene, entity.GetHandle(), desired);
+        if (command) m_UndoHistory.Execute(*scene, command);
+      });
+}
+
+template<class T> bool Editor::SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired, uint64_t gesture) {
   if (!scene || IsGameRunning() || HasPendingDocumentAction()) return false;
-  RefreshDocument(scene, true);
+  if (!gesture) RefreshDocument(scene, true);
   SanitizeSelection(scene);
   const auto selection = m_SelectionState.CapturePersistentSnapshot();
   auto command = ComponentEditCommand<T>::Create(*scene, handle, std::move(desired),
       selection.selectedPersistentIDs, selection.primaryPersistentID);
   if (!command) return false;
-  const auto result = m_UndoHistory.Execute(*scene, command);
-  ApplyHistorySelection(scene, result);
+  const auto result = gesture ? m_UndoHistory.ExecuteGesture(*scene, command, gesture) : m_UndoHistory.Execute(*scene, command);
+  if (gesture) RefreshDocument(scene);
+  else ApplyHistorySelection(scene, result);
   if (result.status == ActionResult::Status::Blocked) Log("[Component] Component changed; scene and history retained.");
   return result.status == ActionResult::Status::Applied;
 }
-template bool Editor::SetComponentValue<BoxCollider>(Scene*, EntityHandle, std::optional<BoxCollider>);
-template bool Editor::SetComponentValue<RigidBody>(Scene*, EntityHandle, std::optional<RigidBody>);
-template bool Editor::SetComponentValue<ScriptComponent>(Scene*, EntityHandle, std::optional<ScriptComponent>);
+template bool Editor::SetComponentValue<BoxCollider>(Scene*, EntityHandle, std::optional<BoxCollider>, uint64_t);
+template bool Editor::SetComponentValue<RigidBody>(Scene*, EntityHandle, std::optional<RigidBody>, uint64_t);
+template bool Editor::SetComponentValue<ScriptComponent>(Scene*, EntityHandle, std::optional<ScriptComponent>, uint64_t);
+template bool Editor::SetComponentValue<LightComponent>(Scene*, EntityHandle, std::optional<LightComponent>, uint64_t);
 
 void Editor::UndoLastAction(Scene *scene) {
   if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;

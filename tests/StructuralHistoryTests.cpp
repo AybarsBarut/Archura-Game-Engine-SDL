@@ -1,5 +1,6 @@
 #include "editor/HierarchyEditCommand.h"
 #include "editor/ComponentEditCommand.h"
+#include "editor/EntityNameEditCommand.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -150,6 +151,78 @@ void ComponentsRoundTrip() {
     scene.DestroyEntity(handle);
     CHECK(!history.CanUndo(scene));
 }
+void GestureHistory() {
+    Scene scene;
+    auto* entity = scene.CreateEntity("initial name");
+    auto* body = entity->AddComponent<RigidBody>();
+    TransformUndoHistory history;
+    history.Capture(*entity); entity->GetComponent<Transform>()->position.x = 10;
+    CHECK(Applied(history.UndoAction(scene)) && history.CanRedo(scene));
+    const auto delta = [&](float mass, uint64_t key) {
+        RigidBody desired = *body; desired.mass = mass;
+        return history.ExecuteGesture(scene, ComponentEditCommand<RigidBody>::Create(scene, entity->GetHandle(), desired), key);
+    };
+    CHECK(Applied(delta(2, 1)) && Applied(delta(3, 1)) && Applied(delta(4, 1)));
+    CHECK(body->mass == 4 && history.CanUndo(scene) && !history.CanRedo(scene));
+    CHECK(history.EndGesture(scene, 1));
+    CHECK(Applied(history.UndoAction(scene)) && body->mass == 1);
+    CHECK(history.UndoAction(scene).status == ActionResult::Status::Empty); // One gesture, not three frames.
+    CHECK(Applied(history.RedoAction(scene)) && body->mass == 4);
+    CHECK(Applied(history.UndoAction(scene)) && history.CanRedo(scene));
+    CHECK(Applied(delta(8, 2)) && Applied(delta(1, 2))); // Returned to initial value.
+    CHECK(!history.CanUndo(scene) && history.CanRedo(scene) && history.EndGesture(scene, 2));
+    CHECK(Applied(history.RedoAction(scene)) && body->mass == 4);
+    // A new widget's key closes the previous interaction; one Undo per widget.
+    CHECK(Applied(delta(5, 3)) && Applied(delta(6, 4)));
+    CHECK(Applied(history.UndoAction(scene)) && body->mass == 5);
+    CHECK(Applied(history.UndoAction(scene)) && body->mass == 4);
+    CHECK(history.RetainedBytes() <= TransformUndoHistory::MaxHistoryBytes);
+    CHECK(Applied(delta(7, 5)));
+    auto rename = EntityNameEditCommand::Create(scene, entity->GetHandle(), "changed name");
+    CHECK(Applied(history.Execute(scene, rename)) && entity->GetName() == "changed name");
+    CHECK(Applied(history.UndoAction(scene)) && entity->GetName() == "initial name" && body->mass == 7);
+    CHECK(Applied(history.UndoAction(scene)) && body->mass == 4);
+    // Refuse cross-component, cross-entity and noncontinuous merge attempts.
+    CHECK(Applied(delta(9, 6)));
+    auto* other = scene.CreateEntity("other"); other->AddComponent<RigidBody>();
+    RigidBody otherDesired; otherDesired.mass = 2;
+    CHECK(history.ExecuteGesture(scene, ComponentEditCommand<RigidBody>::Create(scene, other->GetHandle(), otherDesired), 6).status == ActionResult::Status::Blocked);
+    CHECK(history.ExecuteGesture(scene, ComponentEditCommand<BoxCollider>::Create(scene, entity->GetHandle(), BoxCollider{}), 6).status == ActionResult::Status::Blocked && !entity->HasComponent<BoxCollider>());
+    body->mass = 99;
+    CHECK(history.ExecuteGesture(scene, ComponentEditCommand<RigidBody>::Create(scene, entity->GetHandle(), RigidBody{}), 6).status == ActionResult::Status::Blocked);
+    CHECK(body->mass == 99 && !history.CanUndo(scene));
+    body->mass = 9;
+    CHECK(Applied(history.UndoAction(scene)) && body->mass == 4);
+    // Light color/intensity values use the same CPU-only gesture path.
+    auto* light = entity->AddComponent<LightComponent>();
+    LightComponent desired = *light; desired.intensity = 5; desired.color = {0.2f,0.3f,0.4f};
+    CHECK(Applied(history.ExecuteGesture(scene, ComponentEditCommand<LightComponent>::Create(scene, entity->GetHandle(), desired), 7)));
+    CHECK(Applied(history.UndoAction(scene)) && light->intensity == 1 && light->color == glm::vec3(1));
+    Scene foreign;
+    CHECK(!rename->CanApply(foreign, false));
+}
+void GestureAllocationFailures() {
+    int blocked = 0, success = 0;
+    for (int allocation = 0; allocation < 110; ++allocation) {
+        Scene scene;
+        auto* entity = scene.CreateEntity("entity");
+        entity->AddComponent<ScriptComponent>()->className = std::string(300, 'A');
+        TransformUndoHistory history;
+        ScriptComponent desired; desired.className = std::string(300, 'B');
+        CHECK(Applied(history.ExecuteGesture(scene, ComponentEditCommand<ScriptComponent>::Create(scene, entity->GetHandle(), desired), 1)));
+        desired.className = std::string(300, 'C');
+        auto delta = ComponentEditCommand<ScriptComponent>::Create(scene, entity->GetHandle(), desired);
+        AllocationFailure::after = allocation;
+        const auto result = history.ExecuteGesture(scene, delta, 1);
+        AllocationFailure::after = -1;
+        if (result.status == ActionResult::Status::Blocked) {
+            ++blocked;
+            CHECK(entity->GetComponent<ScriptComponent>()->className == std::string(300, 'B'));
+        } else { ++success; CHECK(Applied(result)); }
+        CHECK(Applied(history.UndoAction(scene)) && entity->GetComponent<ScriptComponent>()->className == std::string(300, 'A'));
+    }
+    CHECK(blocked > 0 && success > 0);
+}
 void LifetimeAndBounds() {
     alignas(Scene) unsigned char storage[sizeof(Scene)];
     Scene* scene = new (storage) Scene;
@@ -202,6 +275,6 @@ int main() {
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
-    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); LifetimeAndBounds(); ComponentAllocationFailures();
+    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); GestureHistory(); GestureAllocationFailures(); LifetimeAndBounds(); ComponentAllocationFailures();
     return failures ? 1 : 0;
 }

@@ -7,6 +7,7 @@
 #include "../core/ResourceManager.h"
 
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -261,6 +262,52 @@ public:
         editor.UndoLastAction(scene); // Create
         require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "mixed structural journal did not restore baseline");
         probe = scene->GetEntityByPersistentID(persistentID);
+
+        editor.m_UndoHistory.Clear();
+        const auto propertyHandle = probe->GetHandle();
+        RigidBody propertyBody;
+        require(editor.SetComponentValue<RigidBody>(scene, propertyHandle, propertyBody), "property fixture add body failed");
+        for (float mass : {2.0f, 4.0f, 6.0f}) {
+            propertyBody.mass = mass;
+            require(editor.SetComponentValue<RigidBody>(scene, propertyHandle, propertyBody, 10001), "property delta failed");
+        }
+        require(editor.m_UndoHistory.EndGesture(*scene, 10001), "property gesture did not finalize");
+        editor.UndoLastAction(scene);
+        require(probe->GetComponent<RigidBody>()->mass == 1, "continuous mass gesture did not undo in one step");
+        editor.RedoLastAction(scene);
+        require(probe->GetComponent<RigidBody>()->mass == 6, "continuous mass gesture did not redo full value");
+        editor.UndoLastAction(scene);
+        propertyBody.mass = 9;
+        require(editor.SetComponentValue<RigidBody>(scene, propertyHandle, propertyBody, 10002), "cancelled property delta failed");
+        propertyBody.mass = 1;
+        require(editor.SetComponentValue<RigidBody>(scene, propertyHandle, propertyBody, 10002) &&
+                editor.m_UndoHistory.EndGesture(*scene, 10002) && editor.m_UndoHistory.CanRedo(*scene), "return-to-origin gesture consumed Redo");
+        editor.UndoLastAction(scene); // Add body
+        require(!probe->HasComponent<RigidBody>() && CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(),
+                "property history did not restore baseline");
+        editor.m_UndoHistory.Clear();
+        editor.m_InspectorText.Sync(scene, propertyHandle, probe->GetName(), nullptr);
+        std::strcpy(editor.m_InspectorText.name, "HistoryRenamedProbe");
+        editor.RefreshDocument(scene, true);
+        require(probe->GetName() == "HistoryRenamedProbe" && editor.IsDocumentDirty(), "forced name draft did not enter journal");
+        editor.UndoLastAction(scene);
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "name Undo replayed stale draft");
+        editor.RedoLastAction(scene);
+        require(probe->GetName() == "HistoryRenamedProbe", "name Redo failed");
+        editor.UndoLastAction(scene);
+        ScriptComponent textScript;
+        textScript.className = std::string(400, 'L');
+        require(editor.SetComponentValue<ScriptComponent>(scene, propertyHandle, textScript), "text fixture script add failed");
+        auto* textComponent = probe->GetComponent<ScriptComponent>();
+        editor.m_InspectorText.Sync(scene, propertyHandle, probe->GetName(), &textComponent->className);
+        std::strcpy(editor.m_InspectorText.script, "ChangedScript");
+        editor.RefreshDocument(scene, true);
+        require(textComponent->className == "ChangedScript", "script draft commit failed");
+        editor.UndoLastAction(scene);
+        require(textComponent->className == textScript.className && textComponent->scriptInstanceID == -1,
+                "script Undo truncated original text or replayed draft");
+        editor.UndoLastAction(scene); // Add script
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "text history did not restore baseline");
 
         editor.m_UndoHistory.Clear();
         editor.PushUndoSnapshot(probe);

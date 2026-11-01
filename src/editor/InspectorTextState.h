@@ -16,16 +16,30 @@ public:
 
     // Save/close may arrive before ImGui deactivates the field this frame.
     void CommitPending(Scene* scene) {
+        CommitPending(scene, [](Entity& entity, const char* value) { entity.SetName(value); },
+            [](Entity& entity, const char* value) { entity.GetComponent<ScriptComponent>()->className = value; });
+    }
+    bool IsBoundTo(const Scene* scene, EntityHandle handle) const {
+        return m_Scene == scene && m_Handle == handle && scene && m_Lifetime.lock() == scene->GetLifetimeToken().lock();
+    }
+    template<class NameSink, class ScriptSink>
+    void CommitPending(Scene* scene, NameSink&& nameSink, ScriptSink&& scriptSink) {
         const auto owner = m_Lifetime.lock();
         if (!owner || *owner != scene || m_Scene != scene) return;
         auto* entity = scene->GetEntity(m_Handle);
         if (!entity) return;
-        if (entity->GetName() == m_SourceName && name[0] && !MatchesDisplayedSource(name, m_SourceName))
-            entity->SetName(name);
+        if (entity->GetName() == m_SourceName && name[0] && !MatchesDisplayedSource(name, m_SourceName)) {
+            std::string prepared(name);
+            nameSink(*entity, name);
+            if (entity->GetName() == prepared) m_SourceName.swap(prepared);
+        }
         auto* component = entity->GetComponent<ScriptComponent>();
         if (m_HasScript && component && component->className == m_SourceScript &&
-            !MatchesDisplayedSource(script, m_SourceScript))
-            component->className = script;
+            !MatchesDisplayedSource(script, m_SourceScript)) {
+            std::string prepared(script);
+            scriptSink(*entity, script);
+            if (component->className == prepared) m_SourceScript.swap(prepared);
+        }
     }
 
     void Sync(const Scene* scene, EntityHandle handle,

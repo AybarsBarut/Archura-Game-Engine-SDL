@@ -97,6 +97,27 @@ void TestSceneAddressReuseAndBounds() {
     state.Sync(nullptr, {}, "", nullptr);
 }
 
+void TestCommandSinksAndAcknowledgement() {
+    Archura::Scene scene;
+    auto* entity = scene.CreateEntity("before");
+    auto* component = entity->AddComponent<Archura::ScriptComponent>(); component->className = "Before";
+    Archura::InspectorTextState state;
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    std::strcpy(state.name, "after"); std::strcpy(state.script, "After");
+    int names = 0, scripts = 0;
+    state.CommitPending(&scene, [&](Archura::Entity& value, const char* text) { ++names; value.SetName(text); },
+        [&](Archura::Entity&, const char* text) { ++scripts; component->className = text; });
+    CHECK(names == 1 && scripts == 1 && entity->GetName() == "after" && component->className == "After");
+    entity->SetName("before"); component->className = "Before"; // Simulate Undo before the next Sync.
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == "before" && component->className == "Before");
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), &component->className);
+    std::strcpy(state.name, "rejected");
+    state.CommitPending(&scene, [](Archura::Entity&, const char*) {}, [](Archura::Entity&, const char*) {});
+    CHECK(entity->GetName() == "before");
+    state.CommitPending(&scene);
+    CHECK(entity->GetName() == "rejected"); // Rejected command leaves a retryable draft.
+}
 void TestCommitPendingDrafts() {
     Archura::Scene scene;
     auto* entity = scene.CreateEntity("Authored");
@@ -180,6 +201,7 @@ int main() {
     TestSelectionAndEntityLifetime();
     TestSceneAddressReuseAndBounds();
     TestCommitPendingDrafts();
+    TestCommandSinksAndAcknowledgement();
     TestCommitPreservesUntouchedLongSources();
     if (failures) return 1;
     std::cout << "Inspector text: drafts, external edits, components and scene/entity lifetime passed\n";

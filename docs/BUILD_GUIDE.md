@@ -607,3 +607,28 @@ Script; other component types are outside this slice. Continuous property drags,
 class-name typing and other direct edits have not become gesture history yet.
 If they change a component outside the journal, an older command for that component
 can be blocked until the conflicting values are restored.
+
+## Inspector property gestures and text (M1c)
+
+Collider shape/size/radius/center/trigger, RigidBody mass/drag/friction/bounce/
+gravity/pushable/continuous flags, and Light type/color/intensity/range now use
+Undo/Redo. One continuous widget interaction is one operation, independent of
+frame count. Changes are prepared on CPU copies before publication. A gesture
+that returns to its initial value preserves the existing Redo branch; activating
+an unchanged widget also preserves it. A different widget, transform, structural
+command or Undo/Redo closes the previous gesture in chronological order.
+
+The 32 MiB total history budget now reserves 1 MiB for the pending component
+gesture and 1 KiB for the pending transform; completed entries share the rest.
+The 50 completed-entry cap remains. Light recipes contain only authoring values;
+completed commands retain no renderer/asset owners.
+
+Entity name and Script class drafts enter history on Enter, deactivation,
+selection change when Inspector is drawn, or a forced document snapshot (Save,
+close, Play and other document commands). The complete prior strings are kept,
+even when longer than the 127 displayed characters. Unchanged truncated text is
+preserved. Successful commits acknowledge the draft so Undo before the next
+render cannot accidentally reapply it. Play-time edits remain runtime-only.
+
+Material/texture assignment, mesh geometry, Weapon/Projectile values, Skybox
+fields and other property/component types remain outside this shared history.

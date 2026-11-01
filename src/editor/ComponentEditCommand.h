@@ -17,6 +17,10 @@ inline bool Equal(const RigidBody& a, const RigidBody& b) {
            a.angularVelocity == b.angularVelocity && a.angularDrag == b.angularDrag;
 }
 inline bool Equal(const ScriptComponent& a, const ScriptComponent& b) { return a.className == b.className; }
+inline bool Equal(const LightComponent& a, const LightComponent& b) {
+    return a.type == b.type && a.color == b.color && a.intensity == b.intensity && a.range == b.range;
+}
+inline void Normalize(LightComponent&) {}
 inline void Normalize(BoxCollider&) {}
 inline void Normalize(RigidBody&) {}
 inline void Normalize(ScriptComponent& value) { value.scriptInstanceID = -1; }
@@ -31,7 +35,7 @@ template<> inline size_t Bytes(const std::optional<ScriptComponent>& value) noex
 template<class T>
 class ComponentEditCommand final : public EditorHistoryCommand {
     static_assert(std::is_same_v<T, BoxCollider> || std::is_same_v<T, RigidBody> ||
-                  std::is_same_v<T, ScriptComponent>, "Unsupported component recipe");
+                  std::is_same_v<T, ScriptComponent> || std::is_same_v<T, LightComponent>, "Unsupported component recipe");
 public:
     static std::shared_ptr<ComponentEditCommand> Create(Scene& scene, EntityHandle handle,
         std::optional<T> desired, std::vector<std::string> selection = {}, std::string primary = {}) {
@@ -74,6 +78,15 @@ public:
         } else entity->RemoveComponent<T>();
         return {ActionResult::Status::Applied, scene.GetEntityByPersistentID(m_Primary), m_Selection};
     }
+    bool HasChanges() const noexcept override { return !Same(m_Before ? &*m_Before : nullptr, m_After); }
+    std::shared_ptr<EditorHistoryCommand> MergeWith(const EditorHistoryCommand& next) const override {
+        const auto* delta = dynamic_cast<const ComponentEditCommand*>(&next);
+        if (!delta || m_Scene != delta->m_Scene || m_Lifetime.lock() != delta->m_Lifetime.lock() ||
+            m_ID != delta->m_ID || !Same(m_After ? &*m_After : nullptr, delta->m_Before)) return {};
+        auto combined = std::make_shared<ComponentEditCommand>(*this);
+        combined->m_After = delta->m_After;
+        return combined;
+    }
     size_t ByteSize() const noexcept override {
         size_t bytes = sizeof(*this) + m_ID.capacity() + m_Primary.capacity() +
                        ComponentHistory::Bytes(m_Before) + ComponentHistory::Bytes(m_After);
@@ -88,6 +101,7 @@ public:
             return !m_Before ? "Add Collider" : !m_After ? "Remove Collider" : "Change Collider";
         else if constexpr (std::is_same_v<T, RigidBody>)
             return !m_Before ? "Add RigidBody" : !m_After ? "Remove RigidBody" : "Change RigidBody";
+        else if constexpr (std::is_same_v<T, LightComponent>) return "Change Light";
         else return !m_Before ? "Add Script" : !m_After ? "Remove Script" : "Change Script";
     }
 private:
