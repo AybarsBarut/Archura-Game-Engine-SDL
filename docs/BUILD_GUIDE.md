@@ -125,11 +125,11 @@ audio, script-callback or editor Play/Stop acceptance.
 The existing ignored build directory was reused:
 
 ```powershell
-cmake -S . -B build-codex-graphics-api -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DARCHURA_BUILD_ECS_TESTS=ON -DARCHURA_BUILD_PHYSICS_TESTS=ON -DARCHURA_BUILD_RENDERER_TESTS=ON -DARCHURA_BUILD_STARTUP_TESTS=ON
-cmake --build build-codex-graphics-api --config Debug --parallel 4
-ctest --test-dir build-codex-graphics-api -C Debug --output-on-failure
-cmake --build build-codex-graphics-api --config Release --parallel 4
-ctest --test-dir build-codex-graphics-api -C Release --output-on-failure
+cmake -S . -B build-graphics-api -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DARCHURA_BUILD_ECS_TESTS=ON -DARCHURA_BUILD_PHYSICS_TESTS=ON -DARCHURA_BUILD_RENDERER_TESTS=ON -DARCHURA_BUILD_STARTUP_TESTS=ON
+cmake --build build-graphics-api --config Debug --parallel 4
+ctest --test-dir build-graphics-api -C Debug --output-on-failure
+cmake --build build-graphics-api --config Release --parallel 4
+ctest --test-dir build-graphics-api -C Release --output-on-failure
 ```
 
 Build and CTest results are recorded in `.gauntlet/METRICS.md`. Logs reside in

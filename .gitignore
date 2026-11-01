@@ -38,7 +38,7 @@ builds/release/*.dll
 !external/imgui/ARCHURA_VENDOR.md
 build_latest/
 build_latest_release/
-/build-codex-graphics-api/
+/build-*/
 build_*/
 build_memory/
 build_memory_msvc/
