@@ -96,6 +96,8 @@ public:
     bool ExecuteCreation(Scene* scene, const std::function<void()>& create);
     bool DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handles);
     void ApplyHistorySelection(Scene* scene, const ActionResult& result);
+    bool ReparentEntities(Scene* scene, const std::vector<EntityHandle>& children, EntityHandle parent = {});
+    template<class T> bool SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired);
 
     // ── Visibility ──────────────────────────────────────────────────────────
     void SetEnabled(bool enabled) { m_Enabled = enabled; }

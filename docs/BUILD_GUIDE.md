@@ -579,5 +579,31 @@ shared scene history while that tool is open.
 Reconstruction failure (for example a missing model/texture) retains the current
 scene and command so the operation can be retried after restoring the asset.
 Changes to affected entity values, hierarchy or project context outside history
-can block a command to protect current work. Parenting, standalone component/value
-edits, material assignment, mesh edits and autosave/recovery are later slices.
+can block a command to protect current work. Continuous component/property edits, material assignment, mesh edits and
+autosave/recovery are later slices.
+
+## Hierarchy and component operations (M1c)
+
+Dragging an entity onto another in Hierarchy reparents it. Dropping onto empty
+space or choosing Unparent detaches it; Unparent acts on the selected group when
+the context entity is selected. The change is one Undo/Redo command applied after
+tree drawing. Local position/rotation/scale stay unchanged. Undo restores original
+parents and sibling positions; cycles, stale handles and depth violations are
+rejected atomically. Other hierarchy changes outside history in an affected
+sibling group block restoration instead of overwriting that group.
+
+Inspector Add/Remove Collider, Fit Primitive Collider, Physics Motion
+(Static/Dynamic/Kinematic), Apply Ball Physics and Script add/remove are commands
+in the same journal. Component operations update the existing entity and preserve
+unrelated component pointers. Script history stores the complete class name and
+resets runtime instance IDs. Undo works after entity delete/restore and Play/Stop.
+A no-op operation keeps Redo. Pending document decisions block authoring commands;
+Play-time Inspector component changes remain runtime-only.
+
+Hierarchy commands accept at most 2048 moved children and 8 MiB of accounted
+retained data; component commands accept at most 1 MiB. Both also share the global
+50-entry / 32 MiB history budget. Component commands cover Collider, RigidBody and
+Script; other component types are outside this slice. Continuous property drags,
+class-name typing and other direct edits have not become gesture history yet.
+If they change a component outside the journal, an older command for that component
+can be blocked until the conflicting values are restored.

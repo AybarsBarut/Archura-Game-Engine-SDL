@@ -198,6 +198,71 @@ public:
         require(probe && editor.m_SelectedEntity == probe, "creation undo did not restore the original selection after Stop");
 
         editor.m_UndoHistory.Clear();
+        std::string parentID, childID;
+        require(editor.ExecuteCreation(scene, [&] {
+            parentID = scene->CreateEntity("HierarchyHistoryParent")->GetPersistentID();
+            childID = scene->CreateEntity("ComponentHistoryChild")->GetPersistentID();
+        }), "structural fixture creation failed");
+        auto* structuralParent = scene->GetEntityByPersistentID(parentID);
+        auto* structuralChild = scene->GetEntityByPersistentID(childID);
+        const auto childHandle = structuralChild->GetHandle();
+        auto* childTransform = structuralChild->GetComponent<Transform>();
+        require(editor.ReparentEntities(scene, {childHandle}, structuralParent->GetHandle()) && structuralChild->GetParent() == structuralParent,
+                "editor reparent failed");
+        BoxCollider collider;
+        collider.shape = BoxCollider::Shape::Sphere;
+        collider.radius = 2.5f;
+        require(editor.SetComponentValue<BoxCollider>(scene, childHandle, collider), "editor add collider failed");
+        RigidBody body;
+        body.mass = 8; body.isKinematic = true;
+        require(editor.SetComponentValue<RigidBody>(scene, childHandle, body), "editor add body failed");
+        ScriptComponent script;
+        script.className = std::string(300, 'S');
+        script.scriptInstanceID = 123;
+        require(editor.SetComponentValue<ScriptComponent>(scene, childHandle, script) &&
+                structuralChild->GetComponent<ScriptComponent>()->scriptInstanceID == -1, "editor add script failed");
+        require(scene->GetEntity(childHandle) == structuralChild && structuralChild->GetComponent<Transform>() == childTransform,
+                "component command replaced entity or unrelated component");
+        require(editor.SetComponentValue<ScriptComponent>(scene, childHandle, std::nullopt), "editor remove script failed");
+        editor.UndoLastAction(scene);
+        require(structuralChild->GetComponent<ScriptComponent>()->className == script.className, "script undo lost full class name");
+        require(!editor.SetComponentValue<ScriptComponent>(scene, childHandle, script) && editor.m_UndoHistory.CanRedo(*scene),
+                "no-op component edit consumed Redo");
+        editor.RequestClose(scene);
+        require(editor.HasPendingDocumentAction() &&
+                !editor.ReparentEntities(scene, {childHandle}) &&
+                !editor.SetComponentValue<BoxCollider>(scene, childHandle, std::nullopt), "pending decision allowed structural edit");
+        editor.m_Document.Cancel();
+        require(editor.SetMode(EditorMode::Play), "structural fixture Play failed");
+        structuralChild = scene->GetEntityByPersistentID(childID);
+        require(!editor.ReparentEntities(scene, {structuralChild->GetHandle()}) &&
+                !editor.SetComponentValue<BoxCollider>(scene, structuralChild->GetHandle(), std::nullopt), "Play accepted authored structural command");
+        require(editor.SetMode(EditorMode::Edit), "structural fixture Stop failed");
+        editor.RedoLastAction(scene);
+        structuralChild = scene->GetEntityByPersistentID(childID);
+        structuralParent = scene->GetEntityByPersistentID(parentID);
+        require(!structuralChild->HasComponent<ScriptComponent>() && structuralChild->GetParent() == structuralParent,
+                "component redo after Stop failed");
+        require(editor.DeleteEntities(scene, {structuralParent->GetHandle(), structuralChild->GetHandle()}) &&
+                CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "structural fixture deletion did not restore baseline");
+        editor.UndoLastAction(scene); // Restore deleted entities with fresh generations.
+        editor.UndoLastAction(scene); // Restore removed Script.
+        structuralChild = scene->GetEntityByPersistentID(childID);
+        require(structuralChild && structuralChild->GetComponent<ScriptComponent>()->className == script.className,
+                "component command failed after deletion reconstruction");
+        editor.UndoLastAction(scene); // Add Script
+        editor.UndoLastAction(scene); // Add RigidBody
+        editor.UndoLastAction(scene); // Add Collider
+        structuralChild = scene->GetEntityByPersistentID(childID);
+        require(!structuralChild->HasComponent<ScriptComponent>() && !structuralChild->HasComponent<RigidBody>() &&
+                !structuralChild->HasComponent<BoxCollider>(), "component rollback left added values");
+        editor.UndoLastAction(scene); // Reparent
+        require(!structuralChild->GetParent(), "hierarchy command failed after deletion reconstruction");
+        editor.UndoLastAction(scene); // Create
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "mixed structural journal did not restore baseline");
+        probe = scene->GetEntityByPersistentID(persistentID);
+
+        editor.m_UndoHistory.Clear();
         editor.PushUndoSnapshot(probe);
         getTransform()->position = {11, 12, 13};
         require(editor.m_UndoHistory.CanUndo(*scene), "deleted-target fixture did not capture a change");
@@ -223,7 +288,7 @@ public:
         editor.m_Document = originalDocument;
         editor.m_UndoHistory.Clear();
         require(CaptureSceneDocument(scene) == originalContents, "fixture did not restore initial authored contents");
-        std::cout << "Editor transform/entity history coordinator smoke passed (Undo/Redo, dirty baseline, Play/Stop and scene boundaries; no UI clicks)\n";
+        std::cout << "Editor transform/entity/hierarchy/component history coordinator smoke passed (Undo/Redo, dirty baseline, Play/Stop and scene boundaries; no UI clicks)\n";
     }
 };
 
