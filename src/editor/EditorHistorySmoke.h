@@ -5,6 +5,9 @@
 #include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
 #include "../core/ResourceManager.h"
+#include "../rendering/Texture.h"
+#include <array>
+#include <fstream>
 
 #include <chrono>
 #include <cstring>
@@ -308,6 +311,84 @@ public:
                 "script Undo truncated original text or replayed draft");
         editor.UndoLastAction(scene); // Add script
         require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "text history did not restore baseline");
+
+        editor.m_UndoHistory.Clear();
+        const auto materialRoot = ResourceManager::Get().GetProjectRoot();
+        const bool materialExplicit = ResourceManager::Get().HasExplicitContentRoot();
+        ResourceManager::Get().SetProjectRoot(temporary.path, true);
+        const auto writeTexture = [&](const char* name, unsigned char value) {
+            const auto path = temporary.path / "assets" / "textures" / name;
+            fs::create_directories(path.parent_path());
+            std::array<unsigned char, 70> bytes{};
+            bytes[0]='B'; bytes[1]='M'; bytes[2]=70; bytes[10]=54; bytes[14]=40;
+            bytes[18]=2; bytes[22]=2; bytes[26]=1; bytes[28]=24; bytes[34]=16;
+            for (size_t row = 0; row < 2; ++row)
+                for (size_t column = 0; column < 6; ++column) bytes[54 + row*8 + column] = value;
+            std::ofstream out(path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            require(static_cast<bool>(out), "cannot write material texture fixture");
+            return path;
+        };
+        const auto textureA = writeTexture("history-a.bmp", 64);
+        writeTexture("history-b.bmp", 192);
+        const std::string pathA = "assets/textures/history-a.bmp", pathB = "assets/textures/history-b.bmp";
+        std::string materialID;
+        require(editor.ExecuteCreation(scene, [&] {
+            auto* entity = scene->CreateEntity("MaterialHistoryProbe");
+            materialID = entity->GetPersistentID();
+            entity->AddComponent<MeshRenderer>()->SetMeshAsset(Mesh::CreateCubeShared());
+        }), "material fixture creation failed");
+        auto* materialEntity = scene->GetEntityByPersistentID(materialID);
+        auto* materialRenderer = materialEntity->GetComponent<MeshRenderer>();
+        require(editor.m_GameBuilderPanel.AssignTextureToEntity(materialEntity, "history-a.bmp") &&
+                materialRenderer->GetTexture()->IsLoaded() && materialRenderer->GetTexture()->GetPath() == pathA,
+                "Game Builder texture command did not upload/select file texture");
+        std::weak_ptr<Texture> originalTextureOwner = materialRenderer->textureAsset;
+        require(editor.SetMeshColorValue(scene, materialEntity->GetHandle(), {0.5f,0.6f,0.7f}, 11001) &&
+                editor.SetMeshColorValue(scene, materialEntity->GetHandle(), {0.2f,0.3f,0.4f}, 11001) &&
+                editor.m_UndoHistory.EndGesture(*scene, 11001), "mesh color gesture failed");
+        require(editor.SetTextureValue(scene, materialEntity->GetHandle(), pathB) && originalTextureOwner.expired(),
+                "texture command retained old GPU ownership");
+        const auto* protectedTexture = materialRenderer->GetTexture();
+        fs::remove(textureA);
+        editor.UndoLastAction(scene);
+        require(materialRenderer->GetTexture() == protectedTexture && materialRenderer->GetTexture()->GetPath() == pathB,
+                "missing texture Undo changed live renderer");
+        writeTexture("history-a.bmp", 64);
+        editor.UndoLastAction(scene);
+        require(materialRenderer->GetTexture()->IsLoaded() && materialRenderer->GetTexture()->GetPath() == pathA &&
+                editor.m_UndoHistory.CanRedo(*scene), "restored texture file did not allow Undo retry");
+        editor.RequestClose(scene);
+        require(editor.HasPendingDocumentAction() &&
+                !editor.SetTextureValue(scene, materialEntity->GetHandle(), {}) &&
+                !editor.SetMeshColorValue(scene, materialEntity->GetHandle(), {1,1,1}), "pending decision allowed material edit");
+        editor.m_Document.Cancel();
+        require(editor.SetMode(EditorMode::Play), "material fixture Play failed");
+        materialEntity = scene->GetEntityByPersistentID(materialID);
+        require(!editor.SetTextureValue(scene, materialEntity->GetHandle(), {}) &&
+                editor.ChangeTexture(scene, materialEntity->GetHandle(), {}, false), "runtime texture edit did not stay outside authored history");
+        require(editor.SetMode(EditorMode::Edit), "material fixture Stop failed");
+        materialEntity = scene->GetEntityByPersistentID(materialID);
+        materialRenderer = materialEntity->GetComponent<MeshRenderer>();
+        require(materialRenderer->GetTexture()->IsLoaded() && materialRenderer->GetTexture()->GetPath() == pathA && editor.m_UndoHistory.CanRedo(*scene),
+                "Stop did not restore authored texture and Redo");
+        editor.RedoLastAction(scene);
+        require(materialRenderer->GetTexture()->GetPath() == pathB && materialRenderer->color == glm::vec3(0.2f,0.3f,0.4f),
+                "texture Redo altered color or lost assignment");
+        require(editor.DeleteEntities(scene, {materialEntity->GetHandle()}), "material fixture delete failed");
+        editor.UndoLastAction(scene); // Delete, reconstructs a new renderer generation.
+        editor.UndoLastAction(scene); // Assign B
+        editor.UndoLastAction(scene); // Entire color gesture
+        materialEntity = scene->GetEntityByPersistentID(materialID);
+        materialRenderer = materialEntity->GetComponent<MeshRenderer>();
+        require(materialRenderer->color == glm::vec3(1) && materialRenderer->GetTexture()->GetPath() == pathA,
+                "mixed material Undo failed after entity reconstruction");
+        editor.UndoLastAction(scene); // Assign A
+        require(!materialRenderer->GetTexture(), "texture Undo did not clear original empty assignment");
+        editor.UndoLastAction(scene); // Create
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "material history did not restore clean baseline");
+        ResourceManager::Get().SetProjectRoot(materialRoot, materialExplicit);
+        probe = scene->GetEntityByPersistentID(persistentID);
 
         editor.m_UndoHistory.Clear();
         editor.PushUndoSnapshot(probe);

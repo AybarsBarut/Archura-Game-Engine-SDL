@@ -319,6 +319,10 @@ bool GameSaveManager::WriteEntitiesImpl(std::ostream& file, Scene* scene, bool o
             file << "      \"color\": [" << mr->color.r << "," << mr->color.g << "," << mr->color.b << "],\n";
             std::string texPath = mr->GetTexture() ? mr->GetTexture()->GetPath() : "";
             file << "      \"texture\": \"" << EscapeJson(texPath) << "\",\n";
+            if (const auto* texture = mr->GetTexture()) {
+                file << "      \"texture_mipmaps\": " << (texture->GeneratesMipmaps() ? "true" : "false") << ",\n";
+                file << "      \"texture_srgb\": " << (texture->IsSrgb() ? "true" : "false") << ",\n";
+            }
         }
 
         if (bc) {
@@ -446,6 +450,7 @@ bool GameSaveManager::LoadEntitiesImpl(const Serialization::Json& root, Scene* s
         std::string name;
         std::string meshType = "cube";
         std::string texturePath;
+        bool textureMipmaps = true, textureSrgb = false;
         std::string resolvedTexturePath;
         std::string authoredModelPath;
         glm::vec3 position{0.0f};
@@ -483,6 +488,8 @@ bool GameSaveManager::LoadEntitiesImpl(const Serialization::Json& root, Scene* s
             !Serialization::StringField(data, "mesh_type", current.meshType) ||
             !Serialization::StringField(data, "texture", current.texturePath) ||
             (current.texturePath.empty() && !Serialization::StringField(data, "texture_path", current.texturePath)) ||
+            !Serialization::BoolField(data, "texture_mipmaps", current.textureMipmaps) ||
+            !Serialization::BoolField(data, "texture_srgb", current.textureSrgb) ||
             !Serialization::BoolField(data, "has_mesh", current.hasMesh) ||
             !Serialization::BoolField(data, "has_mesh_renderer", current.hasMeshRenderer) ||
             !Serialization::BoolField(data, "collider_trigger", current.colliderTrigger) ||
@@ -691,15 +698,19 @@ bool GameSaveManager::LoadEntitiesImpl(const Serialization::Json& root, Scene* s
                     const std::string& loadTexPath = data.resolvedTexturePath.empty() ? data.texturePath : data.resolvedTexturePath;
                     const std::string assetKey = ResourceManager::Get().CanonicalAssetKey(loadTexPath, documentRoot);
                     std::shared_ptr<Texture> tex;
-                    if (batch) {
+                    if (batch || !data.textureMipmaps || data.textureSrgb) {
                         // Cached texture objects may belong to retained entities.
                         // Keep authored-path metadata private to this staging
                         // transaction, including when a later commit fails.
                         tex = std::make_shared<Texture>();
-                        if (!tex->LoadFromFile(loadTexPath)) throw std::runtime_error("Texture reconstruction failed");
+                        if (!tex->LoadFromFile(loadTexPath, data.textureMipmaps, data.textureSrgb)) throw std::runtime_error("Texture reconstruction failed");
                         tex->SetCanonicalPath(assetKey);
                     } else tex = TextureManager::Get().LoadShared(assetKey, loadTexPath);
                     if (!tex) throw std::runtime_error("Texture reconstruction failed");
+                    if (tex->GeneratesMipmaps() != data.textureMipmaps || tex->IsSrgb() != data.textureSrgb) {
+                        tex = std::make_shared<Texture>();
+                        if (!tex->LoadFromFile(loadTexPath, data.textureMipmaps, data.textureSrgb)) throw std::runtime_error("Texture reconstruction failed");
+                    }
                     tex->SetPath(data.texturePath);
                     const size_t texBytes =
                         static_cast<size_t>(std::max(1, tex->GetWidth())) *

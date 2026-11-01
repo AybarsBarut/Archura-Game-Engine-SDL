@@ -4,6 +4,8 @@
 #include "core/SerializationJson.h"
 #include "editor/GameBuilderPanel.h"
 #include "editor/EntityEditCommand.h"
+#include "editor/TextureEditCommand.h"
+#include "editor/MeshColorEditCommand.h"
 #include "editor/SceneDocumentSnapshot.h"
 #include "ecs/Entity.h"
 #include "rendering/Camera.h"
@@ -468,6 +470,131 @@ void TestEntityAssetRetry(const std::filesystem::path& work) {
     Check(history.Execute(scene, unsupported).status == ActionResult::Status::Blocked && scene.GetEntities().size() == 1 && history.CanRedo(scene),
           "unsupported creation rolls back and preserves redo");
 }
+void TestTextureHistory(const std::filesystem::path& work) {
+    using namespace Archura;
+    struct Restore {
+        std::filesystem::path root = ResourceManager::Get().GetProjectRoot();
+        bool explicitRoot = ResourceManager::Get().HasExplicitContentRoot();
+        SceneReconstructionBudget budget = GameSaveManager::GetReconstructionBudget();
+        ~Restore() { ResourceManager::Get().SwapProjectRoot(root, explicitRoot); GameSaveManager::SetReconstructionBudget(budget); }
+    } restore;
+    ResourceManager::Get().SetProjectRoot(work, true);
+    const auto first = work / "assets/textures/history-first.bmp", second = work / "assets/textures/history-second.bmp";
+    WriteGrayscaleBMP(first, 2, 2, {0,64,128,255});
+    WriteGrayscaleBMP(second, 2, 2, {255,128,64,0});
+    const std::string firstPath = "assets/textures/history-first.bmp", secondPath = "assets/textures/history-second.bmp";
+    Scene scene;
+    auto* retained = scene.CreateEntity("retained");
+    auto* entity = scene.CreateEntity("target");
+    auto* renderer = entity->AddComponent<MeshRenderer>();
+    auto cached = TextureManager::Get().LoadShared("history-retained", first.string());
+    retained->AddComponent<MeshRenderer>()->SetTextureAsset(cached);
+    const auto retainedAlias = cached->GetPath();
+    const auto retainedHandle = retained->GetHandle();
+    TransformUndoHistory history;
+    std::string error;
+    const auto make = [&](const std::string& path) { return TextureEditCommand::Create(scene, entity->GetHandle(), path, {}, error); };
+    auto firstCommand = make(firstPath);
+    const auto initialResult = history.Execute(scene, firstCommand);
+    if (!firstCommand || initialResult.status != ActionResult::Status::Applied) {
+        std::cerr << "Texture history setup: " << error << " / " << (firstCommand ? firstCommand->Error() : "no command")
+                  << " budget " << restore.budget.maxTotalTextureBytes << ' ' << restore.budget.maxSingleAssetFileBytes << '\n';
+        Check(false, "texture assignment command executes"); return;
+    }
+    Check(renderer->GetTexture() && renderer->GetTexture()->GetPath() == firstPath && cached->GetPath() == retainedAlias && renderer->GetTexture() != cached.get(), "texture commands isolate retained cache aliases");
+    std::weak_ptr<Texture> firstLifetime = renderer->textureAsset;
+    GameBuilderPanel builder;
+    builder.SetTextureHandler([&](Entity* target, const std::string& path) {
+        auto command = TextureEditCommand::Create(scene, target->GetHandle(), path, {}, error);
+        return history.Execute(scene, command).status == ActionResult::Status::Applied;
+    });
+    Check(builder.AssignTextureToEntity(entity, "history-second.bmp") && firstLifetime.expired(), "builder uses history and command retains no texture owner");
+    const auto* beforeFailure = renderer->GetTexture();
+    const auto bytes = history.RetainedBytes();
+    std::filesystem::remove(first);
+    Check(history.UndoAction(scene).status == ActionResult::Status::Blocked && renderer->GetTexture() == beforeFailure && history.RetainedBytes() == bytes, "missing source blocks texture undo without scene or history change");
+    WriteGrayscaleBMP(first, 2, 2, {0,64,128,255});
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied && renderer->GetTexture()->GetPath() == firstPath, "restored source allows texture undo retry");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied && renderer->GetTexture()->GetPath() == secondPath, "texture redo restores authored path");
+    Check(!make(secondPath) && error.empty(), "same texture assignment is a no-op");
+    auto remove = make({});
+    Check(history.Execute(scene, remove).status == ActionResult::Status::Applied && !renderer->GetTexture(), "texture remove executes");
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied && renderer->GetTexture()->GetPath() == secondPath, "texture removal undo reconstructs file source");
+    auto color = MeshColorEditCommand::Create(scene, entity->GetHandle(), {0.2f,0.3f,0.4f});
+    Check(history.Execute(scene, color).status == ActionResult::Status::Applied && renderer->GetTexture()->GetPath() == secondPath, "color history preserves texture assignment");
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied && renderer->color == glm::vec3(1), "mixed color undo executes");
+    Check(scene.GetEntity(retainedHandle) == retained && cached->GetPath() == retainedAlias, "material history preserves unrelated entities and aliases");
+    auto budget = restore.budget; budget.maxTotalTextureBytes = 1;
+    GameSaveManager::SetReconstructionBudget(budget);
+    auto overBudget = make(firstPath);
+    const auto* original = renderer->GetTexture();
+    Check(history.Execute(scene, overBudget).status == ActionResult::Status::Blocked && renderer->GetTexture() == original && history.CanRedo(scene), "decoded texture budget rejects transaction and preserves redo");
+    budget = restore.budget; budget.maxSingleAssetFileBytes = 1;
+    GameSaveManager::SetReconstructionBudget(budget);
+    Check(history.Execute(scene, overBudget).status == ActionResult::Status::Blocked && renderer->GetTexture() == original, "texture file budget rejects transaction");
+    GameSaveManager::SetReconstructionBudget(restore.budget);
+    Check(history.Execute(scene, overBudget).status == ActionResult::Status::Applied, "texture command retries after budget restoration");
+    auto corrupt = make(secondPath);
+    { std::ofstream out(second, std::ios::binary | std::ios::trunc); out << "not an image"; }
+    const auto* beforeCorrupt = renderer->GetTexture();
+    Check(history.Execute(scene, corrupt).status == ActionResult::Status::Blocked && renderer->GetTexture() == beforeCorrupt, "corrupt texture rejects staging without replacing renderer");
+    WriteGrayscaleBMP(second, 2, 2, {255,128,64,0});
+    Check(history.Execute(scene, corrupt).status == ActionResult::Status::Applied, "repaired texture permits retry");
+    // Non-default flags survive history, moves and entity codec reconstruction.
+    auto custom = std::make_shared<Texture>();
+    Check(custom->LoadFromFile(first.string(), false, true), "custom texture settings load");
+    custom->SetPath(firstPath);
+    Texture moved(std::move(*custom));
+    Check(!moved.GeneratesMipmaps() && moved.IsSrgb(), "texture moves preserve source settings");
+    *custom = std::move(moved);
+    renderer->SetTextureAsset(custom); custom.reset(); history.Clear();
+    auto removeCustom = make({});
+    Check(history.Execute(scene, removeCustom).status == ActionResult::Status::Applied && history.UndoAction(scene).status == ActionResult::Status::Applied, "custom texture round trip executes");
+    Check(!renderer->GetTexture()->GeneratesMipmaps() && renderer->GetTexture()->IsSrgb(), "texture undo preserves mipmap and srgb settings");
+    std::ostringstream serialized;
+    serialized << "{\"format_version\":2,\"entities\":[";
+    Check(GameSaveManager::WriteEntityBatch(serialized, &scene, {entity->GetHandle()}), "custom texture batch writes");
+    serialized << "]}";
+    Serialization::Json root;
+    Check(Serialization::JsonParser(serialized.str()).Parse(root), "custom texture batch parses");
+    const auto id = entity->GetPersistentID();
+    auto invalidText = serialized.str();
+    const auto flagAt = invalidText.find("\"texture_srgb\": true");
+    Check(flagAt != std::string::npos, "texture settings are explicit in codec");
+    invalidText.replace(flagAt, std::string("\"texture_srgb\": true").size(), "\"texture_srgb\": \"true\"");
+    Serialization::Json invalidFlags;
+    Check(Serialization::JsonParser(invalidText).Parse(invalidFlags) &&
+          !GameSaveManager::LoadEntityBatch(invalidFlags, &scene, {entity->GetHandle()}, {}, {retained->GetPersistentID(), id}) &&
+          scene.GetEntityByPersistentID(id) == entity, "ill-typed texture flag rejects before scene mutation");
+    auto legacyText = serialized.str();
+    for (const auto* field : {"texture_mipmaps", "texture_srgb"}) {
+        const auto position = legacyText.find(std::string("\"") + field + "\"");
+        const auto end = legacyText.find('\n', position);
+        legacyText.erase(position, end - position + 1);
+    }
+    Serialization::Json legacyRoot;
+    Scene legacyScene;
+    Check(Serialization::JsonParser(legacyText).Parse(legacyRoot) && GameSaveManager::LoadEntityBatch(legacyRoot, &legacyScene, {}, {}, {id}), "legacy textures without flags remain loadable");
+    const auto* legacyEntity = legacyScene.GetEntityByPersistentID(id);
+    Check(legacyEntity && legacyEntity->GetComponent<MeshRenderer>()->GetTexture()->GeneratesMipmaps() &&
+          !legacyEntity->GetComponent<MeshRenderer>()->GetTexture()->IsSrgb(), "legacy texture flags use original defaults");
+    Check(GameSaveManager::LoadEntityBatch(root, &scene, {entity->GetHandle()}, {}, {retained->GetPersistentID(), id}), "custom texture batch reconstructs");
+    entity = scene.GetEntityByPersistentID(id); renderer = entity->GetComponent<MeshRenderer>();
+    Check(!renderer->GetTexture()->GeneratesMipmaps() && renderer->GetTexture()->IsSrgb(), "codec preserves texture settings for entity undo");
+    Check(history.RedoAction(scene).status == ActionResult::Status::Applied && !renderer->GetTexture(), "texture history follows restored persistent entity");
+    ResourceManager::Get().SetProjectRoot(work / "other-root", true);
+    Check(!history.CanUndo(scene), "changed project root blocks texture reconstruction");
+    ResourceManager::Get().SetProjectRoot(work, true);
+    Check(history.UndoAction(scene).status == ActionResult::Status::Applied, "restored project root allows undo");
+    auto generated = std::make_shared<Texture>(); // No owned file recipe.
+    renderer->SetTextureAsset(generated);
+    Check(!make({}) && !error.empty(), "unreconstructable generated texture is retained");
+    renderer->SetTextureAsset({}); renderer->texture = cached.get();
+    Check(!make(secondPath) && !error.empty(), "borrowed raw texture is retained");
+    renderer->texture = nullptr;
+    Scene foreign;
+    Check(!firstCommand->CanApply(foreign, false), "foreign scene rejects texture command");
+}
 } // namespace
 
 int main() {
@@ -481,6 +608,7 @@ int main() {
                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(work);
     TestEntityAssetRetry(work);
+    TestTextureHistory(work);
     std::filesystem::current_path(work);
     auto& saves = Archura::GameSaveManager::Get();
     saves.ResetReconstructionBudget();

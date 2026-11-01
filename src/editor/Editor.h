@@ -96,6 +96,8 @@ public:
     bool ExecuteCreation(Scene* scene, const std::function<void()>& create);
     bool DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handles);
     void ApplyHistorySelection(Scene* scene, const ActionResult& result);
+    bool SetTextureValue(Scene* scene, EntityHandle handle, const std::string& path);
+    bool SetMeshColorValue(Scene* scene, EntityHandle handle, const glm::vec3& color, uint64_t gesture = 0);
     bool ReparentEntities(Scene* scene, const std::vector<EntityHandle>& children, EntityHandle parent = {});
     template<class T> bool SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired, uint64_t gesture = 0);
 
@@ -236,6 +238,10 @@ private:
     ImGuiTextFilter m_HierarchyFilter;
     InspectorTextState m_InspectorText;
     void CommitInspectorDrafts(Scene* scene);
+    bool ChangeTexture(Scene* scene, EntityHandle handle, const std::string& path, bool record);
+    // ImGui queues raw texture IDs; keep preview owners until that frame renders.
+    // These are frame resources, independent of the CPU-only command journal.
+    std::vector<std::shared_ptr<class Texture>> m_TexturePreviewOwners;
     uint64_t m_PropertyGestureSerial = 0, m_PropertyGesture = 0;
     unsigned int m_PropertyGestureWidget = 0;
     bool m_GizmoConsumedClick = false;

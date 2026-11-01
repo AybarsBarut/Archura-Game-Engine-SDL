@@ -27,6 +27,8 @@ Texture& Texture::operator=(Texture&& other) noexcept {
     m_Width = std::exchange(other.m_Width, 0);
     m_Height = std::exchange(other.m_Height, 0);
     m_Channels = std::exchange(other.m_Channels, 0);
+    m_GenerateMipmaps = other.m_GenerateMipmaps;
+    m_Srgb = other.m_Srgb;
     m_Path = std::move(other.m_Path);
     m_CanonicalPath = std::move(other.m_CanonicalPath);
     return *this;
@@ -88,6 +90,8 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
         m_Width = width;
         m_Height = height;
         m_Channels = channels;
+        m_GenerateMipmaps = generateMipmaps;
+        m_Srgb = srgb;
         m_Path = path;
         m_CanonicalPath = canonicalKey;
         return true;
@@ -146,6 +150,8 @@ bool Texture::LoadFromFile(const std::string& path, bool generateMipmaps,
     m_Width = width;
     m_Height = height;
     m_Channels = channels;
+    m_GenerateMipmaps = generateMipmaps;
+    m_Srgb = srgb;
     m_Path = path;
     m_CanonicalPath = canonicalKey;
     if (oldTexture) glDeleteTextures(1, &oldTexture);
@@ -178,6 +184,8 @@ bool Texture::CreateSolid(unsigned char r, unsigned char g, unsigned char b, uns
     m_Width = 1;
     m_Height = 1;
     m_Channels = 4;
+    m_GenerateMipmaps = false;
+    m_Srgb = false;
     m_Path.clear();
     m_CanonicalPath.clear();
     if (oldTexture) glDeleteTextures(1, &oldTexture);
