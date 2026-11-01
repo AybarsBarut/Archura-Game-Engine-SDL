@@ -13,6 +13,7 @@ public:
     char name[128] = {};
     char script[128] = {};
     char newScript[128] = {};
+    char skybox[6][256] = {};
 
     // Save/close may arrive before ImGui deactivates the field this frame.
     void CommitPending(Scene* scene) {
@@ -24,6 +25,14 @@ public:
     }
     template<class NameSink, class ScriptSink>
     void CommitPending(Scene* scene, NameSink&& nameSink, ScriptSink&& scriptSink) {
+        CommitPending(scene, std::forward<NameSink>(nameSink), std::forward<ScriptSink>(scriptSink),
+            [](Entity& entity, SkyboxComponent&& desired) {
+                auto* live = entity.GetComponent<SkyboxComponent>();
+                live->facePaths.swap(desired.facePaths); live->shouldReload = true;
+            });
+    }
+    template<class NameSink, class ScriptSink, class SkySink>
+    void CommitPending(Scene* scene, NameSink&& nameSink, ScriptSink&& scriptSink, SkySink&& skySink) {
         const auto owner = m_Lifetime.lock();
         if (!owner || *owner != scene || m_Scene != scene) return;
         auto* entity = scene->GetEntity(m_Handle);
@@ -39,6 +48,20 @@ public:
             std::string prepared(script);
             scriptSink(*entity, script);
             if (component->className == prepared) m_SourceScript.swap(prepared);
+        }
+        auto* sky = entity->GetComponent<SkyboxComponent>();
+        if (m_HasSkybox && sky && sky->facePaths.size() == 6) {
+            SkyboxComponent desired = *sky;
+            bool changed = false;
+            for (size_t index = 0; index < 6; ++index)
+                if (sky->facePaths[index] == m_SourceFaces[index] && !MatchesDisplayedSource(skybox[index], m_SourceFaces[index])) {
+                    desired.facePaths[index] = skybox[index]; changed = true;
+                }
+            if (changed) {
+                auto prepared = desired.facePaths;
+                skySink(*entity, std::move(desired));
+                if (sky->facePaths == prepared) m_SourceFaces.swap(prepared);
+            }
         }
     }
 
@@ -61,6 +84,17 @@ public:
         }
         if (selectionChanged || presenceChanged) newScript[0] = '\0';
 
+        const auto* sky = scene->GetEntity(handle)->GetComponent<SkyboxComponent>();
+        const bool hasSky = sky && sky->facePaths.size() == 6;
+        if (hasSky) {
+            for (size_t index = 0; index < 6; ++index)
+                if (selectionChanged || !m_HasSkybox || m_SourceFaces[index] != sky->facePaths[index]) Copy(skybox[index], sky->facePaths[index]);
+            m_SourceFaces = sky->facePaths;
+        } else {
+            for (auto& face : skybox) face[0] = '\0';
+            m_SourceFaces.clear();
+        }
+        m_HasSkybox = hasSky;
         m_Scene = scene;
         m_Handle = handle;
         m_Lifetime = lifetime;
@@ -90,14 +124,17 @@ private:
         m_Lifetime.reset();
         m_SourceName.clear();
         m_SourceScript.clear();
-        m_HasScript = false;
+        m_HasScript = m_HasSkybox = false;
+        m_SourceFaces.clear();
+        for (auto& face : skybox) face[0] = '\0';
     }
 
     const Scene* m_Scene = nullptr;
     EntityHandle m_Handle{};
     std::weak_ptr<Scene*> m_Lifetime;
     std::string m_SourceName, m_SourceScript;
-    bool m_HasScript = false;
+    bool m_HasScript = false, m_HasSkybox = false;
+    std::vector<std::string> m_SourceFaces;
 };
 
 } // namespace Archura

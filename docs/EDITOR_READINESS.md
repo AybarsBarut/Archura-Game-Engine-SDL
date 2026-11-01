@@ -325,3 +325,23 @@ Final Windows all-target Debug/Release builds passed. Full CTest passed **57/57*
 in Debug (38.44 s) and Release (35.15 s), including the final preview-lifetime fix.
 Evidence is under ignored `build/m1c-material-final-*` logs and JUnit outputs.
 Hosted/Linux and separate pointer/keyboard UI acceptance are not claimed.
+
+## Weapon/Skybox authoring history — M1c sixth slice, 2026-11-01
+
+Weapon type and exposed numeric stats now use CPU property commands. Active stats,
+inventory entries and recoil arrays are compared and restored together, with
+conservative dynamic-byte accounting and existing serializer validation. Firing
+and reload transients are excluded from recipes and preserved during in-place
+publication. Skybox commands store six face strings, excluding the reload flag;
+Undo/Redo invalidates the cubemap. Persistent face drafts protect long source
+paths, selection/lifetime changes and immediate Undo acknowledgement. RenderSystem
+consumes one reload request even on failure, keeping the previous cubemap and
+waiting for an explicit retry instead of repeatedly loading a broken path.
+
+Expanded pure tests cover inventory switching, recoil arrays, multi-frame stats,
+transient preservation, malformed recipes, allocation rollback, Skybox paths,
+long drafts and single-attempt reload requests. Native coordinator covers actual
+editor commands, pending/Play guards, runtime-only edits, Stop, entity deletion
+reconstruction and a full clean-baseline rewind. Cubemap pixel history and separate
+mouse/keyboard UI acceptance are not claimed. Projectile authoring serialization,
+other properties, shared mesh history and M1d recovery remain outside this slice.

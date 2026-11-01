@@ -118,6 +118,34 @@ void TestCommandSinksAndAcknowledgement() {
     state.CommitPending(&scene);
     CHECK(entity->GetName() == "rejected"); // Rejected command leaves a retryable draft.
 }
+void TestSkyboxDrafts() {
+    Archura::Scene scene;
+    auto* entity = scene.CreateEntity("sky");
+    auto* sky = entity->AddComponent<Archura::SkyboxComponent>();
+    sky->facePaths[0] = std::string(400, 'R');
+    Archura::InspectorTextState state;
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), nullptr);
+    state.CommitPending(&scene);
+    CHECK(sky->facePaths[0].size() == 400 && !sky->shouldReload); // Untouched truncation is not an edit.
+    std::strcpy(state.skybox[0], "new-right.bmp");
+    std::strcpy(state.skybox[1], "new-left.bmp");
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), nullptr);
+    CHECK(std::strcmp(state.skybox[0], "new-right.bmp") == 0);
+    state.CommitPending(&scene);
+    CHECK(sky->facePaths[0] == "new-right.bmp" && sky->facePaths[1] == "new-left.bmp" && sky->shouldReload);
+    sky->facePaths[0] = std::string(400, 'R'); sky->facePaths[1].clear(); // Undo before next Sync.
+    state.CommitPending(&scene);
+    CHECK(sky->facePaths[0].size() == 400 && sky->facePaths[1].empty());
+    state.Sync(&scene, entity->GetHandle(), entity->GetName(), nullptr);
+    std::strcpy(state.skybox[2], "draft.bmp");
+    sky->facePaths[2] = "external.bmp";
+    state.CommitPending(&scene);
+    CHECK(sky->facePaths[2] == "external.bmp");
+    const auto handle = entity->GetHandle(); scene.DestroyEntity(handle);
+    state.CommitPending(&scene); // No stale component access.
+    state.Sync(nullptr, {}, "", nullptr);
+    CHECK(state.skybox[0][0] == '\0');
+}
 void TestCommitPendingDrafts() {
     Archura::Scene scene;
     auto* entity = scene.CreateEntity("Authored");
@@ -201,6 +229,7 @@ int main() {
     TestSelectionAndEntityLifetime();
     TestSceneAddressReuseAndBounds();
     TestCommitPendingDrafts();
+    TestSkyboxDrafts();
     TestCommandSinksAndAcknowledgement();
     TestCommitPreservesUntouchedLongSources();
     if (failures) return 1;

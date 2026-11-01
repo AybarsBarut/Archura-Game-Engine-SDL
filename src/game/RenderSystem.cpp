@@ -1,3 +1,4 @@
+#include "../rendering/SkyboxReload.h"
 #include "RenderSystem.h"
 #include "PhysicsSystem.h"
 #include "SurfaceAttachment.h"
@@ -411,11 +412,7 @@ void RenderSystem::Update(float deltaTime) {
     for (const auto& entityPtr : m_Scene->GetEntities()) {
         auto* skyComp = entityPtr->GetComponent<SkyboxComponent>();
         if (skyComp) {
-            if (skyComp->shouldReload) {
-                if (m_Skybox->LoadCubemap(skyComp->facePaths)) {
-                    skyComp->shouldReload = false;
-                }
-            }
+            ConsumeSkyboxReloadRequest(*skyComp, [&](const auto& faces) { return m_Skybox->LoadCubemap(faces); });
              m_Skybox->Draw(view, projection);
              break; // Only one skybox
         }
