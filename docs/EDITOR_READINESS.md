@@ -261,3 +261,33 @@ Final all-target Windows builds passed in Debug and Release; full CTest passed
 **57/57** in Debug (38.46 s) and Release (36.59 s). Logs/JUnit are under ignored
 `build/m1c-structural-*`. Hosted CI and Linux execution were outside this local
 Windows gate.
+
+## Inspector property/text history — M1c fourth slice, 2026-11-01
+
+Collider, RigidBody and Light Inspector values now publish immutable CPU deltas
+through one pending gesture recipe. Each drag is one entry; no-op activation and
+return-to-origin preserve Redo. A new widget or command finalizes the old gesture.
+The journal reserves 1 MiB for a pending gesture + 1 KiB for a transform within the
+32 MiB total cap, retaining the 50 completed-entry bound. Failed merge/allocation
+or stale values preserve live scene and pending history for retry.
+
+Name and Script draft commits now use the shared journal at Enter/deactivation,
+selection change while drawing Inspector and forced document snapshots. Full prior
+text is retained, with successful draft acknowledgement preventing immediate Undo
+from replaying stale text. Existing standalone InspectorTextState fallback and
+Play-time runtime-only behavior remain. Script runtime instance IDs stay excluded.
+
+Pure regressions cover multi-frame/whole-value gestures, return-to-origin Redo,
+per-widget boundaries, transform/text chronology, blocked merges, Light values,
+allocation-failure retry and draft acknowledgement/rejected sinks. Native
+Startup.PlayStop adds actual editor property gestures, clean baseline restoration,
+forced name draft commit/Undo/Redo and a 400-character Script round trip. No
+mouse/keyboard gesture acceptance is claimed. Material/texture/mesh, Weapon,
+Projectile, Skybox and other properties, plus M1d recovery, remain later slices.
+
+Windows all-target Debug/Release builds passed; full CTest passed **57/57** in
+Debug (37.76 s) and Release (35.37 s). Additional cross-entity/type merge rejection
+tests were rebuilt and passed in both configurations afterward. Evidence: ignored
+`build/m1c-properties-*` build/test logs and JUnit. The previously pushed structural
+slice's hosted run 41291327614 never started jobs because of the account billing
+lock; no hosted acceptance is claimed.

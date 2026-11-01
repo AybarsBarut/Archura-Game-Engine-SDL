@@ -97,7 +97,7 @@ public:
     bool DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handles);
     void ApplyHistorySelection(Scene* scene, const ActionResult& result);
     bool ReparentEntities(Scene* scene, const std::vector<EntityHandle>& children, EntityHandle parent = {});
-    template<class T> bool SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired);
+    template<class T> bool SetComponentValue(Scene* scene, EntityHandle handle, std::optional<T> desired, uint64_t gesture = 0);
 
     // ── Visibility ──────────────────────────────────────────────────────────
     void SetEnabled(bool enabled) { m_Enabled = enabled; }
@@ -235,6 +235,9 @@ private:
     ImGuiTextFilter m_AssetFilter;
     ImGuiTextFilter m_HierarchyFilter;
     InspectorTextState m_InspectorText;
+    void CommitInspectorDrafts(Scene* scene);
+    uint64_t m_PropertyGestureSerial = 0, m_PropertyGesture = 0;
+    unsigned int m_PropertyGestureWidget = 0;
     bool m_GizmoConsumedClick = false;
     EditorModeState m_ModeState;
 

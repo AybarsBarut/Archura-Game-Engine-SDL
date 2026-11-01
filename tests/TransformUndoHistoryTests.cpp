@@ -414,7 +414,7 @@ void TestCommandMemoryAndCountBounds() {
     CHECK(transform->position.x == 60 && history.RedoAction(scene).status == ActionResult::Status::Empty);
 
     history.Clear();
-    auto nearlyFull = std::make_shared<ValueCommand>(*entity, 60.0f, 61.0f, TransformUndoHistory::MaxHistoryBytes - 4096);
+    auto nearlyFull = std::make_shared<ValueCommand>(*entity, 60.0f, 61.0f, TransformUndoHistory::MaxHistoryBytes - TransformUndoHistory::MaxGestureBytes - 4096);
     CHECK(history.Execute(scene, nearlyFull).status == ActionResult::Status::Applied);
     CHECK(history.UndoAction(scene).status == ActionResult::Status::Applied);
     CHECK(history.Capture(*entity));

@@ -75,7 +75,7 @@ void Editor::RefreshDocument(Scene* scene, bool force) {
     }
     const auto now = std::chrono::steady_clock::now();
     if (!force && now < m_NextDocumentCheck) return;
-    if (force) m_InspectorText.CommitPending(scene);
+    if (force) CommitInspectorDrafts(scene);
     m_Document.Observe(CaptureSceneDocument(scene));
     m_NextDocumentCheck = now + std::chrono::milliseconds(250);
 }
