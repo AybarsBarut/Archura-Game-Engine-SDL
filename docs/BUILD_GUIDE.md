@@ -662,3 +662,41 @@ Scene JSON now writes optional boolean `texture_mipmaps` and `texture_srgb` fiel
 Old saves load with the existing defaults (mipmaps on, sRGB off). Custom settings
 survive texture Undo, entity reconstruction and save/load; ill-typed fields are
 rejected before scene mutation. No format-version bump is required.
+
+## Local Windows validation without GitHub Actions
+
+Run from any directory using the script's absolute path, or from the repository:
+
+```powershell
+python tools/validate_local.py
+```
+
+The default desktop profile checks the provisioned runtime dependencies, configures
+`windows-validation`, builds all targets and runs the full CTest graph in Debug
+and Release. It does not download dependencies. The existing local Mono/runtime
+installation is required; a clean checkout can instead use the contracts profile.
+
+```powershell
+python tools/validate_local.py --profile contracts
+python tools/validate_local.py --profile loop
+python tools/validate_local.py --profile all
+python tools/validate_local.py --configuration Release
+```
+
+Contracts uses the tracked-dependency preflight and the same Windows contracts
+presets as hosted CI. Loop uses the SDK-free presets. All runs all three local
+profiles. Each command has a 30-minute timeout, adjustable with
+`--timeout-seconds`. Do not run other builds or edit source files during validation.
+
+Each invocation creates a unique ignored `build/local-validation/<UTC-id>/`
+folder with command logs, per-configuration JUnit and `report.json`. The report
+records the commit, working-tree changes and untracked source fingerprints before
+and after the run. PASS requires every selected command to succeed, nonempty JUnit
+with executed tests and no failures, and unchanged source during the run. A failed
+step stops later steps, which remain `not_run`; interruptions and timeouts fail.
+A lock prevents simultaneous invocations against these shared build trees. If a
+machine crash leaves a lock, inspect the owning process/logs before removing it.
+
+This is the local Windows development gate. It does not mark GitHub checks green,
+change required-check rules, or claim Linux/hosted-runner acceptance. Static
+analysis and the hosted tests-disabled matrix are not part of this script.

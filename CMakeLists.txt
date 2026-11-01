@@ -852,6 +852,8 @@ if(BUILD_TESTING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME Archura.Packaging.Contracts
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/PackageGameTests.py")
+        add_test(NAME Archura.Build.LocalValidation
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/LocalValidationTests.py")
         add_test(NAME Archura.Build.DependencyChecker
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/DependencyCheckTests.py")
     endif()
