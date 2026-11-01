@@ -93,6 +93,9 @@ public:
 
     /** Snapshot current transform – call before any destructive edit so Ctrl+Z can restore. */
     void PushUndoSnapshot(Entity* entity);
+    bool ExecuteCreation(Scene* scene, const std::function<void()>& create);
+    bool DeleteEntities(Scene* scene, const std::vector<EntityHandle>& handles);
+    void ApplyHistorySelection(Scene* scene, const ActionResult& result);
 
     // ── Visibility ──────────────────────────────────────────────────────────
     void SetEnabled(bool enabled) { m_Enabled = enabled; }

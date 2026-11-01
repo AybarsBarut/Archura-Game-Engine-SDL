@@ -157,6 +157,47 @@ public:
                 editor.m_UndoHistory.CanRedo(*scene), "cancelled document decision lost the preserved Redo operation");
 
         editor.m_UndoHistory.Clear();
+        editor.SetSelectedEntity(probe);
+        editor.SpawnEntity(scene, "Ball");
+        require(editor.m_SelectedEntity && editor.m_SelectedEntity->GetComponent<RigidBody>(), "Spawn did not select a dynamic ball");
+        const auto ballID = editor.m_SelectedEntity->GetPersistentID();
+        editor.CopySelected();
+        editor.PasteClipboard(scene);
+        const auto copyID = editor.m_SelectedEntity->GetPersistentID();
+        require(copyID != ballID && editor.IsDocumentDirty(), "Paste did not publish a distinct dirty entity");
+        editor.UndoLastAction(scene);
+        require(!scene->GetEntityByPersistentID(copyID) && editor.m_SelectedEntity == scene->GetEntityByPersistentID(ballID),
+                "Undo Paste did not restore previous selection");
+        editor.RedoLastAction(scene);
+        require(editor.m_SelectedEntity == scene->GetEntityByPersistentID(copyID), "Redo Paste lost selection");
+        const auto entityCount = scene->GetEntities().size();
+        editor.RequestClose(scene);
+        require(editor.HasPendingDocumentAction(), "command fixture did not acquire document decision");
+        require(!editor.ExecuteCreation(scene, [&] { scene->CreateEntity("must not run"); }) &&
+                !editor.DeleteEntities(scene, {scene->GetEntityByPersistentID(ballID)->GetHandle()}) &&
+                scene->GetEntities().size() == entityCount, "pending decision allowed entity command");
+        editor.m_Document.Cancel();
+        require(editor.DeleteEntities(scene, {scene->GetEntityByPersistentID(ballID)->GetHandle(), scene->GetEntityByPersistentID(copyID)->GetHandle()}),
+                "multi-delete failed");
+        require(!scene->GetEntityByPersistentID(ballID) && !scene->GetEntityByPersistentID(copyID) && !editor.m_SelectedEntity &&
+                CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "delete did not restore clean baseline");
+        editor.UndoLastAction(scene);
+        require(scene->GetEntityByPersistentID(ballID) && editor.m_SelectedEntity == scene->GetEntityByPersistentID(copyID),
+                "undo deletion failed to reconstruct entities/selection");
+        require(editor.SetMode(EditorMode::Play), "command Play failed");
+        require(!editor.ExecuteCreation(scene, [&] { scene->CreateEntity("runtime command"); }) &&
+                !editor.DeleteEntities(scene, {scene->GetEntityByPersistentID(ballID)->GetHandle()}), "Play accepted authored command");
+        require(editor.SetMode(EditorMode::Edit), "command Stop failed");
+        editor.RedoLastAction(scene);
+        require(!scene->GetEntityByPersistentID(ballID) && !scene->GetEntityByPersistentID(copyID), "redo deletion after Stop failed");
+        editor.UndoLastAction(scene);
+        editor.UndoLastAction(scene); // Paste
+        editor.UndoLastAction(scene); // Ball
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "mixed command history did not restore authored baseline");
+        probe = scene->GetEntityByPersistentID(persistentID);
+        require(probe && editor.m_SelectedEntity == probe, "creation undo did not restore the original selection after Stop");
+
+        editor.m_UndoHistory.Clear();
         editor.PushUndoSnapshot(probe);
         getTransform()->position = {11, 12, 13};
         require(editor.m_UndoHistory.CanUndo(*scene), "deleted-target fixture did not capture a change");
@@ -182,7 +223,7 @@ public:
         editor.m_Document = originalDocument;
         editor.m_UndoHistory.Clear();
         require(CaptureSceneDocument(scene) == originalContents, "fixture did not restore initial authored contents");
-        std::cout << "Editor transform history coordinator smoke passed (Undo/Redo, dirty baseline, Play/Stop and scene boundaries; no UI clicks)\n";
+        std::cout << "Editor transform/entity history coordinator smoke passed (Undo/Redo, dirty baseline, Play/Stop and scene boundaries; no UI clicks)\n";
     }
 };
 

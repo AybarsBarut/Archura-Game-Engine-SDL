@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <functional>
+#include <utility>
 
 namespace Archura {
 
@@ -31,6 +33,10 @@ public:
     void RefreshAudioList();
     void RefreshModelList();
     void InvalidateAssets();
+    // The action runs synchronously inside the editor's creation transaction.
+    void SetCreationHandler(std::function<void(Scene*, const std::function<void()>&)> handler) {
+        m_CreationHandler = std::move(handler);
+    }
 
     const std::vector<std::string>& GetTextureFiles() const noexcept { return m_TextureFiles; }
     const std::vector<std::string>& GetAudioFiles() const noexcept { return m_AudioFiles; }
@@ -42,11 +48,13 @@ public:
     bool AssignTextureToEntity(class Entity* selectedEntity, const std::string& textureFile);
 
 private:
+    void RunCreation(Scene* scene, const std::function<void()>& action);
     void DrawObjectsTab(Scene* scene);
     void DrawTexturesTab(Scene* scene, class Entity* selectedEntity);
     void DrawAudioTab();
 
     bool m_Open = false;
+    std::function<void(Scene*, const std::function<void()>&)> m_CreationHandler;
 
     // Cached asset lists
     std::vector<std::string> m_TextureFiles;

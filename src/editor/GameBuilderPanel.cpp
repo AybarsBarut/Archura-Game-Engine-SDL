@@ -85,6 +85,12 @@ void GameBuilderPanel::Draw(Scene* scene, Entity* selectedEntity) {
 // ---------------------------------------------------------------------------
 // Objects Tab
 // ---------------------------------------------------------------------------
+void GameBuilderPanel::RunCreation(Scene* scene, const std::function<void()>& action) {
+    if (!scene || !action) return;
+    if (m_CreationHandler) m_CreationHandler(scene, action);
+    else action();
+}
+
 void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
     ImGui::TextDisabled("Sahneye eklemek istediginiz nesneyi secin:");
     ImGui::Spacing();
@@ -96,7 +102,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
     float btnW = 220.0f, btnH = 38.0f;
 
     if (ImGui::Button("Kup (Cube)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Cube");
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateCubeShared());
@@ -105,11 +111,11 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 3, 0);
             std::cout << "[GameBuilder] Cube spawn edildi." << std::endl;
-        }
+        });
     }
     ImGui::SameLine();
     if (ImGui::Button("Kure (Sphere)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Sphere");
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateSphereShared(1.0f, 16));
@@ -121,11 +127,11 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 3, 0);
             std::cout << "[GameBuilder] Sphere spawn edildi." << std::endl;
-        }
+        });
     }
 
     if (ImGui::Button("Top (Dynamic Ball)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Ball");
             auto* mr = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateSphereShared(0.5f, 24));
@@ -141,12 +147,12 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             body->restitution = 0.6f;
             body->friction = 0.5f;
             if (auto* t = e->GetComponent<Transform>()) t->position = glm::vec3(0, 3, 0);
-        }
+        });
     }
     ImGui::TextDisabled("Ball: gravity, 1 kg, player pushing. Tune in Inspector > Physics.");
 
     if (ImGui::Button("Kapsul (Capsule)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Capsule");
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateCapsuleShared(0.5f, 2.0f));
@@ -154,11 +160,11 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             e->AddComponent<BoxCollider>()->size = glm::vec3(1.f, 2.f, 1.f);
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 3, 0);
-        }
+        });
     }
     ImGui::SameLine();
     if (ImGui::Button("Rampa (Ramp)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Ramp");
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateRampShared(4.0f, 2.0f, 4.0f));
@@ -169,11 +175,11 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             collider->shape = BoxCollider::Shape::Ramp;
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 0, 0);
-        }
+        });
     }
 
     if (ImGui::Button("Merdiven (Stairs)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Stairs");
             auto* mr  = e->AddComponent<MeshRenderer>();
             mr->SetMeshAsset(Mesh::CreateStairsShared(2.0f, 0.5f, 0.5f, 4));
@@ -181,11 +187,11 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             e->AddComponent<BoxCollider>();
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 0, 0);
-        }
+        });
     }
     ImGui::SameLine();
     if (ImGui::Button("Isik (Light)", ImVec2(btnW, btnH))) {
-        if (scene) {
+        RunCreation(scene, [&] {
             Entity* e = scene->CreateEntity("MyObject_Light");
             auto* lc  = e->AddComponent<LightComponent>();
             lc->type  = LightComponent::Type::Point;
@@ -195,7 +201,7 @@ void GameBuilderPanel::DrawObjectsTab(Scene* scene) {
             auto* t = e->GetComponent<Transform>();
             if (t) t->position = glm::vec3(0, 5, 0);
             std::cout << "[GameBuilder] Point Light spawn edildi." << std::endl;
-        }
+        });
     }
 
     ImGui::Spacing();
@@ -260,15 +266,21 @@ Entity* GameBuilderPanel::SpawnModelEntity(Scene* scene, const std::string& mode
         return nullptr;
     }
     const std::string stem = std::filesystem::path(modelFile).stem().string();
-    Entity* e = scene->CreateEntity("Model_" + stem);
-    auto* mr = e->AddComponent<MeshRenderer>();
-    mr->SetMeshAsset(std::move(mesh));
-    mr->color = glm::vec3(1.f);
-    e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
-    auto* t = e->GetComponent<Transform>();
-    if (t) t->position = glm::vec3(0, 2, 0);
-    std::cout << "[GameBuilder] Model yuklendi: " << fullPath << std::endl;
-    return e;
+    EntityHandle created;
+    RunCreation(scene, [&] {
+        Entity* e = scene->CreateEntity("Model_" + stem);
+        created = e->GetHandle();
+        auto* mr = e->AddComponent<MeshRenderer>();
+        mr->SetMeshAsset(std::move(mesh));
+        mr->color = glm::vec3(1.f);
+        e->AddComponent<BoxCollider>()->size = glm::vec3(1.f);
+        auto* t = e->GetComponent<Transform>();
+        if (t) t->position = glm::vec3(0, 2, 0);
+        std::cout << "[GameBuilder] Model yuklendi: " << fullPath << std::endl;
+    });
+    // A rejected or rolled-back editor transaction may already have destroyed
+    // the object. Resolve its generation rather than returning a stale pointer.
+    return scene->GetEntity(created);
 }
 
 bool GameBuilderPanel::AssignTextureToEntity(Entity* selectedEntity,

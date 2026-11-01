@@ -11,6 +11,8 @@
 namespace Archura {
 
 class Scene;
+struct EntityHandle;
+struct EntityParentLink;
 namespace Serialization { struct Json; }
 
 struct SceneReconstructionBudget {
@@ -77,6 +79,13 @@ public:
     static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem);
     // Read-only observers can suppress repeated diagnostics without changing the codec.
     static bool WriteEntities(std::ostream& stream, Scene* scene, bool omitSystem, bool diagnostics);
+    static bool WriteEntityBatch(std::ostream& stream, Scene* scene,
+                                 const std::vector<EntityHandle>& handles, bool diagnostics = true);
+    static bool LoadEntityBatch(const Serialization::Json& root, Scene* scene,
+                                const std::vector<EntityHandle>& replaced,
+                                const std::vector<EntityParentLink>& links,
+                                const std::vector<std::string>& entityOrder,
+                                const std::filesystem::path& documentRoot = {});
     static bool LoadEntities(const Serialization::Json& root,
                              Scene* scene,
                              bool keepSystem,
@@ -86,6 +95,14 @@ public:
     static std::string MakeSafeFileName(std::string_view name);
 
 private:
+    static bool WriteEntitiesImpl(std::ostream& stream, Scene* scene, bool omitSystem,
+                                  bool diagnostics, const std::vector<EntityHandle>* handles);
+    static bool LoadEntitiesImpl(const Serialization::Json& root, Scene* scene,
+                                 bool keepSystem, bool validateOnly,
+                                 const std::filesystem::path& documentRoot,
+                                 const std::vector<EntityHandle>* replaced,
+                                 const std::vector<EntityParentLink>* links,
+                                 const std::vector<std::string>* entityOrder);
     GameSaveManager();
     ~GameSaveManager() = default;
     GameSaveManager(const GameSaveManager&) = delete;

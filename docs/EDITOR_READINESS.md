@@ -196,3 +196,34 @@ scale/dirty marker, Undo -> original again, and unchanged Rotation reset preserv
 Redo availability. The test exited cleanly without changing its saved scene.
 Keyboard injection and all numeric/gizmo combinations are not claimed as UI
 acceptance. Logs/JUnit: ignored build/m1c-transform-*.
+
+## Entity create/delete history — M1c second slice, 2026-11-01
+
+Creation (including paste/duplicate and Game Builder) and deletion now share the
+transform Undo/Redo journal. Commands preserve persistent IDs, entity order,
+parent/child and sibling links, serialized component values and selection. Only
+affected entities are reconstructed; unrelated runtime handles remain stable.
+Play and pending document decisions block authored commands, and Play/Stop keeps
+the shared chronology. New/load boundaries clear it.
+
+The history has 50 completed entries / 32 MiB of accounted CPU payload, a 2048
+entity command limit, 4 MiB serialized batches and an 8 MiB command limit.
+Unsupported/oversized data, stale context and missing assets reject or block
+commands while preserving the scene/history. Restored assets allow retry. No
+entity/GPU resources are retained by completed commands. A creator callback is
+internal, synchronous and create-only; a failure removes all partial new entities.
+
+Regressions cover transactional identity/hierarchy/order commits with allocation
+fault injection, batch codec validation and retained texture metadata, mixed
+transform/entity chronology, fresh generations, component values, selection
+recipes, external changes, missing asset retry and failed creation rollback.
+The native Startup.PlayStop coordinator exercises actual Spawn, Copy/Paste,
+multi-delete, dirty baseline and selection restoration, Play/pending guards,
+and Redo after actual Stop. These are native coordinator tests; this slice has
+no separate mouse/keyboard UI acceptance claim. Parenting and standalone
+component/property commands and M1d autosave/recovery remain unimplemented.
+
+Final Windows all-target builds passed for Debug and Release. Full CTest passed
+**56/56** in Debug (40.49 s) and Release (35.92 s). Evidence is retained under
+ignored `build/m1c-entity-*` build/test logs and JUnit files. Hosted CI and Linux
+execution were outside this local Windows acceptance.
