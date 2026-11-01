@@ -2,6 +2,7 @@
 #include "editor/ComponentEditCommand.h"
 #include "editor/EntityNameEditCommand.h"
 #include "editor/MeshColorEditCommand.h"
+#include "rendering/SkyboxReload.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -249,6 +250,73 @@ void MeshColorHistory() {
     entity->RemoveComponent<MeshRenderer>();
     CHECK(!command->CanApply(scene, false));
 }
+void WeaponAndSkyboxHistory() {
+    Scene scene;
+    auto* entity = scene.CreateEntity("authoring");
+    auto* weapon = entity->AddComponent<Weapon>(); weapon->InitInventory();
+    weapon->stats.pattern.offsets = {{1,2},{3,4}};
+    weapon->inventory[Weapon::WeaponType::Pistol].pattern.offsets = {{5,6}};
+    weapon->isReloading = true; weapon->reloadTimer = 0.8f; weapon->shotsFired = 7;
+    const Weapon original = *weapon;
+    TransformUndoHistory history;
+    for (float damage : {45.0f, 60.0f, 75.0f}) {
+        Weapon desired = *weapon; desired.stats.damage = damage;
+        CHECK(Applied(history.ExecuteGesture(scene, ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), desired), 20)));
+    }
+    CHECK(weapon->isReloading && weapon->reloadTimer == 0.8f && weapon->shotsFired == 7);
+    weapon->timeSinceLastShot = 12; weapon->currentRecoil = 9; // Runtime changes are not a history conflict.
+    CHECK(Applied(history.UndoAction(scene)) && ComponentHistory::Equal(*weapon, original));
+    CHECK(weapon->timeSinceLastShot == 12 && weapon->currentRecoil == 9 && weapon->isReloading);
+    CHECK(Applied(history.RedoAction(scene)) && weapon->stats.damage == 75);
+    const Weapon edited = *weapon;
+    Weapon switched = *weapon; switched.SwitchWeapon(Weapon::WeaponType::Pistol);
+    CHECK(Applied(history.Execute(scene, ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), switched))));
+    CHECK(weapon->type == Weapon::WeaponType::Pistol && weapon->inventory[Weapon::WeaponType::Rifle].damage == 75);
+    CHECK(weapon->isReloading && weapon->reloadTimer == 0.8f);
+    CHECK(Applied(history.UndoAction(scene)) && ComponentHistory::Equal(*weapon, edited));
+    CHECK(weapon->stats.pattern.offsets == original.stats.pattern.offsets);
+    Weapon invalid = *weapon; invalid.stats.fireRate = 0;
+    CHECK(!ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), invalid));
+    invalid = *weapon; invalid.stats.pattern.offsets.resize(4097);
+    CHECK(!ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), invalid));
+    Weapon noChange = *weapon; noChange.reloadTimer = 999;
+    CHECK(!ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), noChange) && history.CanRedo(scene));
+    auto* sky = entity->AddComponent<SkyboxComponent>();
+    sky->facePaths[0] = std::string(400, 'F');
+    const auto originalFaces = sky->facePaths;
+    SkyboxComponent desired = *sky; desired.facePaths[0] = "assets/textures/right.bmp";
+    CHECK(Applied(history.Execute(scene, ComponentEditCommand<SkyboxComponent>::Create(scene, entity->GetHandle(), desired))) && sky->shouldReload);
+    int attempts = 0;
+    auto fail = [&](const auto&) { ++attempts; return false; };
+    CHECK(!ConsumeSkyboxReloadRequest(*sky, fail) && attempts == 1 && !sky->shouldReload);
+    CHECK(!ConsumeSkyboxReloadRequest(*sky, fail) && attempts == 1);
+    CHECK(Applied(history.UndoAction(scene)) && sky->facePaths == originalFaces && sky->shouldReload);
+    CHECK(ConsumeSkyboxReloadRequest(*sky, [](const auto&) { return true; }) && !sky->shouldReload);
+    CHECK(Applied(history.RedoAction(scene)) && sky->facePaths[0] == desired.facePaths[0] && sky->shouldReload);
+    desired = *sky; desired.shouldReload = false;
+    CHECK(!ComponentEditCommand<SkyboxComponent>::Create(scene, entity->GetHandle(), desired));
+    desired.facePaths.pop_back();
+    CHECK(!ComponentEditCommand<SkyboxComponent>::Create(scene, entity->GetHandle(), desired));
+}
+void WeaponAllocationFailures() {
+    int blocked = 0, applied = 0;
+    for (int allocation = 0; allocation < 180; ++allocation) {
+        Scene scene;
+        auto* entity = scene.CreateEntity("weapon");
+        auto* weapon = entity->AddComponent<Weapon>(); weapon->InitInventory();
+        weapon->stats.pattern.offsets = std::vector<glm::vec2>(20, {1,2});
+        const Weapon original = *weapon;
+        Weapon desired = original; desired.SwitchWeapon(Weapon::WeaponType::Pistol);
+        TransformUndoHistory history;
+        auto command = ComponentEditCommand<Weapon>::Create(scene, entity->GetHandle(), desired);
+        AllocationFailure::after = allocation;
+        const auto result = history.Execute(scene, command);
+        AllocationFailure::after = -1;
+        if (result.status == ActionResult::Status::Blocked) { ++blocked; CHECK(ComponentHistory::Equal(*weapon, original) && !history.CanUndo(scene)); }
+        else { ++applied; CHECK(Applied(result) && ComponentHistory::Equal(*weapon, desired)); }
+    }
+    CHECK(blocked > 0 && applied > 0);
+}
 void LifetimeAndBounds() {
     alignas(Scene) unsigned char storage[sizeof(Scene)];
     Scene* scene = new (storage) Scene;
@@ -301,6 +369,6 @@ int main() {
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
-    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); GestureHistory(); GestureAllocationFailures(); MeshColorHistory(); LifetimeAndBounds(); ComponentAllocationFailures();
+    HierarchyRoundTrip(); NestedUnparentAndMixedHistory(); ComponentsRoundTrip(); GestureHistory(); GestureAllocationFailures(); MeshColorHistory(); WeaponAndSkyboxHistory(); WeaponAllocationFailures(); LifetimeAndBounds(); ComponentAllocationFailures();
     return failures ? 1 : 0;
 }

@@ -1110,12 +1110,15 @@ void Editor::DrawInspector(Scene *scene) {
   if (weapon && ImGui::CollapsingHeader("Weapon")) {
     const char *wTypes[] = {"Rifle",   "Pistol",  "Knife",
                             "Grenade", "Shotgun", "Sniper"};
-    int wt = (int)weapon->type;
-    if (ImGui::Combo("Type", &wt, wTypes, 6))
-      weapon->SwitchWeapon((Weapon::WeaponType)wt);
-    ImGui::DragFloat("Damage", &weapon->stats.damage, 1.0f, 0.0f, 200.0f);
-    ImGui::DragFloat("Fire Rate", &weapon->stats.fireRate, 0.01f, 0.01f, 5.0f);
-    ImGui::DragFloat("Range", &weapon->stats.range, 1.0f, 10.0f, 500.0f);
+    EditProperty(*weapon, [&](Weapon& value) {
+      int type = static_cast<int>(value.type);
+      if (!ImGui::Combo("Type##Weapon", &type, wTypes, 6)) return false;
+      value.SwitchWeapon(static_cast<Weapon::WeaponType>(type));
+      return true;
+    });
+    EditProperty(*weapon, [&](Weapon& value) { return ImGui::DragFloat("Damage", &value.stats.damage, 1.0f, 0.0f, 200.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
+    EditProperty(*weapon, [&](Weapon& value) { return ImGui::DragFloat("Fire Rate", &value.stats.fireRate, 0.01f, 0.01f, 5.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
+    EditProperty(*weapon, [&](Weapon& value) { return ImGui::DragFloat("Range##Weapon", &value.stats.range, 1.0f, 10.0f, 500.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp); });
     ImGui::Separator();
     ImGui::Text("Ammo: %d/%d  Total: %d", weapon->stats.currentMag,
                 weapon->stats.magSize, weapon->stats.totalAmmo);
@@ -1147,15 +1150,13 @@ void Editor::DrawInspector(Scene *scene) {
 
   // ── Skybox ─────────────────────────────────────────────────────────────
   auto *sky = m_SelectedEntity->GetComponent<SkyboxComponent>();
-  if (sky && ImGui::CollapsingHeader("Skybox")) {
+  if (sky && sky->facePaths.size() == 6 && ImGui::CollapsingHeader("Skybox")) {
     const char *faceLabels[] = {"Right",  "Left",  "Top",
                                 "Bottom", "Front", "Back"};
     for (int i = 0; i < 6; ++i) {
-      char buf[256];
-      strncpy(buf, sky->facePaths[i].c_str(), sizeof(buf) - 1);
-      buf[sizeof(buf) - 1] = '\0';
-      if (ImGui::InputText(faceLabels[i], buf, sizeof(buf)))
-        sky->facePaths[i] = buf;
+      auto& buffer = m_InspectorText.skybox[i];
+      if (ImGui::InputText(faceLabels[i], buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue)) CommitInspectorDrafts(scene);
+      if (ImGui::IsItemDeactivatedAfterEdit()) CommitInspectorDrafts(scene);
     }
     if (ImGui::Button("Reload Skybox"))
       sky->shouldReload = true;
@@ -2376,7 +2377,13 @@ void Editor::CommitInspectorDrafts(Scene* scene) {
       [&](Entity& entity, const char* value) {
         ScriptComponent desired = *entity.GetComponent<ScriptComponent>();
         desired.className = value;
-        auto command = ComponentEditCommand<ScriptComponent>::Create(*scene, entity.GetHandle(), desired);
+        auto command = ComponentEditCommand<ScriptComponent>::Create(*scene, entity.GetHandle(), desired,
+            {entity.GetPersistentID()}, entity.GetPersistentID());
+        if (command) m_UndoHistory.Execute(*scene, command);
+      },
+      [&](Entity& entity, SkyboxComponent&& desired) {
+        auto command = ComponentEditCommand<SkyboxComponent>::Create(*scene, entity.GetHandle(), std::move(desired),
+            {entity.GetPersistentID()}, entity.GetPersistentID());
         if (command) m_UndoHistory.Execute(*scene, command);
       });
 }
@@ -2399,6 +2406,8 @@ template bool Editor::SetComponentValue<BoxCollider>(Scene*, EntityHandle, std::
 template bool Editor::SetComponentValue<RigidBody>(Scene*, EntityHandle, std::optional<RigidBody>, uint64_t);
 template bool Editor::SetComponentValue<ScriptComponent>(Scene*, EntityHandle, std::optional<ScriptComponent>, uint64_t);
 template bool Editor::SetComponentValue<LightComponent>(Scene*, EntityHandle, std::optional<LightComponent>, uint64_t);
+template bool Editor::SetComponentValue<Weapon>(Scene*, EntityHandle, std::optional<Weapon>, uint64_t);
+template bool Editor::SetComponentValue<SkyboxComponent>(Scene*, EntityHandle, std::optional<SkyboxComponent>, uint64_t);
 
 void Editor::UndoLastAction(Scene *scene) {
   if (!scene || IsGameRunning() || HasPendingDocumentAction()) return;

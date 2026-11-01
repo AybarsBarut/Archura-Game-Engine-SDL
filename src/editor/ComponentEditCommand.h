@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TransformUndoHistory.h"
+#include "../core/WeaponData.h"
 #include <type_traits>
 
 namespace Archura {
@@ -20,6 +21,47 @@ inline bool Equal(const ScriptComponent& a, const ScriptComponent& b) { return a
 inline bool Equal(const LightComponent& a, const LightComponent& b) {
     return a.type == b.type && a.color == b.color && a.intensity == b.intensity && a.range == b.range;
 }
+inline bool EqualStats(const Weapon::WeaponStats& a, const Weapon::WeaponStats& b) {
+    return a.damage == b.damage && a.fireRate == b.fireRate && a.range == b.range &&
+        a.magSize == b.magSize && a.currentMag == b.currentMag && a.totalAmmo == b.totalAmmo &&
+        a.reloadTime == b.reloadTime && a.recoilAmount == b.recoilAmount && a.isAutomatic == b.isAutomatic &&
+        a.pattern.offsets == b.pattern.offsets;
+}
+inline bool Equal(const Weapon& a, const Weapon& b) {
+    if (a.type != b.type || !EqualStats(a.stats, b.stats) || a.inventory.size() != b.inventory.size()) return false;
+    auto left = a.inventory.begin(), right = b.inventory.begin();
+    for (; left != a.inventory.end(); ++left, ++right)
+        if (left->first != right->first || !EqualStats(left->second, right->second)) return false;
+    return true;
+}
+inline bool Equal(const SkyboxComponent& a, const SkyboxComponent& b) { return a.facePaths == b.facePaths; }
+inline void Normalize(Weapon& value) {
+    value.timeSinceLastShot = value.reloadTimer = value.currentRecoil = 0;
+    value.isReloading = false; value.shotsFired = 0;
+}
+inline void Normalize(SkyboxComponent& value) { value.shouldReload = false; }
+template<class T> bool Valid(const T&) { return true; }
+inline bool Valid(const Weapon& value) { return Serialization::IsValidWeapon(value); }
+inline bool Valid(const SkyboxComponent& value) {
+    if (value.facePaths.size() != 6) return false;
+    for (const auto& face : value.facePaths) if (face.find('\0') != std::string::npos) return false;
+    return true;
+}
+template<class T> void Publish(T& live, T&& prepared) noexcept {
+    static_assert(std::is_nothrow_move_assignable_v<T>, "Value publication must not throw");
+    live = std::move(prepared);
+}
+inline void Publish(Weapon& live, Weapon&& prepared) noexcept {
+    static_assert(std::is_nothrow_move_assignable_v<Weapon::WeaponStats>);
+    static_assert(noexcept(live.inventory.swap(prepared.inventory)));
+    live.type = prepared.type;
+    live.stats = std::move(prepared.stats);
+    live.inventory.swap(prepared.inventory); // Preserve firing/reload transients.
+}
+inline void Publish(SkyboxComponent& live, SkyboxComponent&& prepared) noexcept {
+    live.facePaths.swap(prepared.facePaths);
+    live.shouldReload = true; // Both Undo and Redo invalidate the displayed cubemap.
+}
 inline void Normalize(LightComponent&) {}
 inline void Normalize(BoxCollider&) {}
 inline void Normalize(RigidBody&) {}
@@ -28,6 +70,19 @@ template<class T> size_t Bytes(const std::optional<T>&) noexcept { return 0; }
 template<> inline size_t Bytes(const std::optional<ScriptComponent>& value) noexcept {
     return value ? value->className.capacity() : 0;
 }
+template<> inline size_t Bytes(const std::optional<Weapon>& value) noexcept {
+    if (!value) return 0;
+    // Conservative allowance for map nodes and vendor container proxies.
+    size_t bytes = 512 + value->stats.pattern.offsets.capacity() * sizeof(glm::vec2);
+    for (const auto& entry : value->inventory) bytes += 512 + entry.second.pattern.offsets.capacity() * sizeof(glm::vec2);
+    return bytes;
+}
+template<> inline size_t Bytes(const std::optional<SkyboxComponent>& value) noexcept {
+    if (!value) return 0;
+    size_t bytes = 128 + value->facePaths.capacity() * sizeof(std::string);
+    for (const auto& face : value->facePaths) bytes += face.capacity();
+    return bytes;
+}
 }
 
 // Intentionally restricted to asset-free authoring values. Script runtime
@@ -35,7 +90,8 @@ template<> inline size_t Bytes(const std::optional<ScriptComponent>& value) noex
 template<class T>
 class ComponentEditCommand final : public EditorHistoryCommand {
     static_assert(std::is_same_v<T, BoxCollider> || std::is_same_v<T, RigidBody> ||
-                  std::is_same_v<T, ScriptComponent> || std::is_same_v<T, LightComponent>, "Unsupported component recipe");
+                  std::is_same_v<T, ScriptComponent> || std::is_same_v<T, LightComponent> ||
+                  std::is_same_v<T, Weapon> || std::is_same_v<T, SkyboxComponent>, "Unsupported component recipe");
 public:
     static std::shared_ptr<ComponentEditCommand> Create(Scene& scene, EntityHandle handle,
         std::optional<T> desired, std::vector<std::string> selection = {}, std::string primary = {}) {
@@ -45,7 +101,8 @@ public:
         if (const auto* value = entity->GetComponent<T>()) before = *value;
         if (before) ComponentHistory::Normalize(*before);
         if (desired) ComponentHistory::Normalize(*desired);
-        if (Same(before ? &*before : nullptr, desired)) return {};
+        if ((before && !ComponentHistory::Valid(*before)) || (desired && !ComponentHistory::Valid(*desired)) ||
+            Same(before ? &*before : nullptr, desired)) return {};
         auto command = std::shared_ptr<ComponentEditCommand>(new ComponentEditCommand);
         command->m_Scene = &scene;
         command->m_Lifetime = scene.GetLifetimeToken();
@@ -72,9 +129,11 @@ public:
             T prepared(*desired); // All string allocation precedes live mutation.
             ComponentHistory::Normalize(prepared);
             if (auto* live = entity->GetComponent<T>()) {
-                static_assert(std::is_nothrow_move_assignable_v<T>, "Value publication must not throw");
-                *live = std::move(prepared);
-            } else entity->AddComponent<T>(std::move(prepared));
+                ComponentHistory::Publish(*live, std::move(prepared));
+            } else {
+                auto* added = entity->AddComponent<T>(std::move(prepared));
+                if constexpr (std::is_same_v<T, SkyboxComponent>) added->shouldReload = true;
+            }
         } else entity->RemoveComponent<T>();
         return {ActionResult::Status::Applied, scene.GetEntityByPersistentID(m_Primary), m_Selection};
     }
@@ -102,6 +161,8 @@ public:
         else if constexpr (std::is_same_v<T, RigidBody>)
             return !m_Before ? "Add RigidBody" : !m_After ? "Remove RigidBody" : "Change RigidBody";
         else if constexpr (std::is_same_v<T, LightComponent>) return "Change Light";
+        else if constexpr (std::is_same_v<T, Weapon>) return "Change Weapon";
+        else if constexpr (std::is_same_v<T, SkyboxComponent>) return "Change Skybox Faces";
         else return !m_Before ? "Add Script" : !m_After ? "Remove Script" : "Change Script";
     }
 private:

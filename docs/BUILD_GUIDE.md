@@ -700,3 +700,24 @@ machine crash leaves a lock, inspect the owning process/logs before removing it.
 This is the local Windows development gate. It does not mark GitHub checks green,
 change required-check rules, or claim Linux/hosted-runner acceptance. Static
 analysis and the hosted tests-disabled matrix are not part of this script.
+
+## Weapon settings and Skybox face history (M1c)
+
+Inspector Weapon type, damage, fire rate and range use the shared property journal.
+Each drag is one operation. Type changes retain the original active stats,
+inventory and recoil arrays so Undo restores the complete authored configuration.
+Transient firing/reload timers and counters are preserved on the live component.
+Changes are validated using the existing persisted Weapon rules; no firing or
+reload state is replayed from history. Play-time Inspector edits remain runtime-only.
+
+Skybox face inputs use persistent drafts. Enter, deactivation, selection change
+while drawing Inspector and forced Save/close/Play snapshots commit the face paths
+through the same journal. Untouched long paths remain intact; Undo retains the
+complete previous strings. Both Undo and Redo request a cubemap reload. One request
+makes one load attempt; a failed load keeps the existing displayed cubemap, and a
+new edit or Reload Skybox requests another attempt. This history restores the
+face-path configuration; it does not store cubemap pixels or historical file bytes.
+
+Projectile gravity and other runtime-only projectile values remain outside the
+authored journal and scene codec. Other component fields, mesh history integration
+and autosave/recovery remain later work.

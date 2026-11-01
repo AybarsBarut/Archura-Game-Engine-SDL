@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Editor.h"
+#include "ComponentEditCommand.h"
 #include "SceneDocumentSnapshot.h"
 #include "../core/Application.h"
 #include "../core/ProjectSerializer.h"
 #include "../core/ResourceManager.h"
 #include "../rendering/Texture.h"
+#include "../game/Weapon.h"
 #include <array>
 #include <fstream>
 
@@ -307,7 +309,7 @@ public:
         editor.RefreshDocument(scene, true);
         require(textComponent->className == "ChangedScript", "script draft commit failed");
         editor.UndoLastAction(scene);
-        require(textComponent->className == textScript.className && textComponent->scriptInstanceID == -1,
+        require(textComponent->className == textScript.className && textComponent->scriptInstanceID == -1 && editor.m_SelectedEntity == probe,
                 "script Undo truncated original text or replayed draft");
         editor.UndoLastAction(scene); // Add script
         require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "text history did not restore baseline");
@@ -388,6 +390,67 @@ public:
         editor.UndoLastAction(scene); // Create
         require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "material history did not restore clean baseline");
         ResourceManager::Get().SetProjectRoot(materialRoot, materialExplicit);
+        probe = scene->GetEntityByPersistentID(persistentID);
+
+        editor.m_UndoHistory.Clear();
+        std::string authoringID;
+        const std::string originalFace(400, 'S');
+        require(editor.ExecuteCreation(scene, [&] {
+            auto* entity = scene->CreateEntity("WeaponSkyboxHistoryProbe");
+            authoringID = entity->GetPersistentID();
+            auto* value = entity->AddComponent<Weapon>(); value->InitInventory();
+            value->stats.pattern.offsets = {{1,2},{3,4}};
+            entity->AddComponent<SkyboxComponent>()->facePaths[0] = originalFace;
+        }), "authoring fixture creation failed");
+        auto* authoringEntity = scene->GetEntityByPersistentID(authoringID);
+        auto* authoringWeapon = authoringEntity->GetComponent<Weapon>();
+        authoringWeapon->isReloading = true; authoringWeapon->reloadTimer = 0.5f; authoringWeapon->shotsFired = 8;
+        const Weapon initialWeapon = *authoringWeapon;
+        for (float damage : {45.0f, 60.0f}) {
+            Weapon value = *authoringWeapon; value.stats.damage = damage;
+            require(editor.SetComponentValue<Weapon>(scene, authoringEntity->GetHandle(), value, 12001), "weapon property gesture failed");
+        }
+        require(editor.m_UndoHistory.EndGesture(*scene, 12001), "weapon gesture finalization failed");
+        Weapon switchedWeapon = *authoringWeapon; switchedWeapon.SwitchWeapon(Weapon::WeaponType::Pistol);
+        require(editor.SetComponentValue<Weapon>(scene, authoringEntity->GetHandle(), switchedWeapon) &&
+                authoringWeapon->isReloading && authoringWeapon->reloadTimer == 0.5f && authoringWeapon->shotsFired == 8,
+                "weapon authoring command changed runtime counters");
+        editor.m_InspectorText.Sync(scene, authoringEntity->GetHandle(), authoringEntity->GetName(), nullptr);
+        std::strcpy(editor.m_InspectorText.skybox[0], "assets/skybox/edited.bmp");
+        editor.RefreshDocument(scene, true);
+        auto* authoringSky = authoringEntity->GetComponent<SkyboxComponent>();
+        require(authoringSky->facePaths[0] == "assets/skybox/edited.bmp" && authoringSky->shouldReload,
+                "forced skybox draft did not enter history and request reload");
+        editor.RequestClose(scene);
+        require(editor.HasPendingDocumentAction() &&
+                !editor.SetComponentValue<Weapon>(scene, authoringEntity->GetHandle(), initialWeapon), "pending decision allowed weapon edit");
+        editor.m_Document.Cancel();
+        require(editor.SetMode(EditorMode::Play), "authoring fixture Play failed");
+        authoringEntity = scene->GetEntityByPersistentID(authoringID);
+        require(!editor.SetComponentValue<Weapon>(scene, authoringEntity->GetHandle(), initialWeapon), "Play accepted authored weapon command");
+        authoringEntity->GetComponent<Weapon>()->stats.damage = 900;
+        editor.m_InspectorText.Sync(scene, authoringEntity->GetHandle(), authoringEntity->GetName(), nullptr);
+        std::strcpy(editor.m_InspectorText.skybox[0], "runtime-only.bmp");
+        editor.CommitInspectorDrafts(scene);
+        require(authoringEntity->GetComponent<SkyboxComponent>()->facePaths[0] == "runtime-only.bmp", "Play skybox draft did not edit runtime state");
+        require(editor.SetMode(EditorMode::Edit), "authoring fixture Stop failed");
+        authoringEntity = scene->GetEntityByPersistentID(authoringID);
+        require(authoringEntity->GetComponent<Weapon>()->stats.damage == switchedWeapon.stats.damage &&
+                authoringEntity->GetComponent<SkyboxComponent>()->facePaths[0] == "assets/skybox/edited.bmp", "Stop lost authored weapon/skybox values");
+        require(editor.DeleteEntities(scene, {authoringEntity->GetHandle()}), "authoring fixture deletion failed");
+        editor.UndoLastAction(scene); // Delete
+        editor.UndoLastAction(scene); // Skybox text
+        authoringEntity = scene->GetEntityByPersistentID(authoringID);
+        require(authoringEntity->GetComponent<SkyboxComponent>()->facePaths[0] == originalFace &&
+                authoringEntity->GetComponent<SkyboxComponent>()->shouldReload && editor.m_SelectedEntity == authoringEntity, "skybox Undo lost long source or reload after reconstruction");
+        editor.UndoLastAction(scene); // Weapon type, inventory and active stats
+        authoringWeapon = authoringEntity->GetComponent<Weapon>();
+        require(authoringWeapon->type == Weapon::WeaponType::Rifle && authoringWeapon->stats.damage == 60,
+                "weapon switch Undo did not restore active stats");
+        editor.UndoLastAction(scene); // Whole damage gesture
+        require(ComponentHistory::Equal(*authoringWeapon, initialWeapon), "weapon gesture Undo lost inventory or recoil arrays");
+        editor.UndoLastAction(scene); // Create
+        require(CaptureSceneDocument(scene) == authoredBaseline && !editor.IsDocumentDirty(), "weapon/skybox history did not rewind to clean baseline");
         probe = scene->GetEntityByPersistentID(persistentID);
 
         editor.m_UndoHistory.Clear();
